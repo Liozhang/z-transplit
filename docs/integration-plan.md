@@ -643,3 +643,118 @@ Zotero 10 实例（默认 profile lel4974k.default）。过程与结论：
 
 测试边界声明：仅在用户库做了只读验证（菜单/面板/注册），未对用户条目
 执行会写入库的翻译操作。
+### 12.11 默认值即最佳状态 + 界面语言跟随 Zotero（2026-09-28）
+
+**默认值调整**：`translate.enabled` 默认 false → **true**。此前全新安装后
+阅读器面板 section 不注册（§12.8 实测），不符合"装完即最佳可用"；改为默认
+开启后所有入口即刻可达，希望静默的用户在设置面板取消勾选即可（面板 section
+注销，右键菜单保留以便重新启用）。其余默认复核为最佳：google 引擎（免密钥
++ Bing 兜底）、maxChars 10000、OpenDataLoader enabled、翻译缓存开、双语并发
+2、默认上下对照、目标语言跟随 Zotero locale。
+
+**界面语言跟随 Zotero**：getString/Fluent 本就按 Zotero locale 协商（zh-CN
+真机实装已证：菜单/面板输出中文）。本轮清掉最后 8 处硬编码中文（批量翻译
+进度 ×2、VLM 未配置/空结果、Java 不可用/过旧、JAR 加载失败、解析无页面），
+全部迁入 ztransplit-pane.ftl（en-US + zh-CN 双语键），运行时经 getString 输出。
+匹配器安全核查：isJavaMissingError / friendlyOdlError 依赖的稳定 token
+（java / jar / not configured）在英文文案中保留；功能性正则（译文标题识别
+`^(译文|Translated)\(`、字体路径表）按设计保留不动。
+
+门禁：tsc 清零、vitest 223/223、build OK、structure-check 9/9 零警告、
+check:jar OK（ODL jar 溯源不变属预期）、发布 bundle 无测试驱动。变更已
+同步用户实装目录（extensions/ztransplit@zotero.org，v0.1.0），随下次
+重启生效；用户 profile 无显式 enabled 偏好，自动获得新默认。
+## 12.12 AI 翻译引擎（prompt 模板 + 模板校验，2026-09-28）
+
+从 leadero 的最小 AI 适配方案移植，落在原有「自定义接口」之外的一个独立引擎
+`translate.engineType = "ai"`：自定义接口保持固定提示词、零配置面，AI 引擎把
+「发给模型什么」交给用户，插件只保留两件事——语言配置与模板校验。
+
+**prompt 模板契约**（src/core/translation/promptTemplate.ts）：
+
+- 占位符用**双花括号** `{{text}}` / `{{sourceLang}}` / `{{targetLang}}`。语言
+  对由插件按语言码解析成可读名称（`zh-CN` → Simplified Chinese，复用
+  src/core/tool/language.ts）后注入模板，不直接发语言码。
+- 选用双花括号是硬约束：PDF 流水线把公式替换成 `{v0}`、`{v1}` 单花括号标记，
+  `{text}` 这种单花括号占位符会和正文内容不可区分。
+- 模板留空 = 内置默认模板（formulaPreservingPrompt 的模板化版本，公式保护条款
+  一字不差）；设置面板「恢复默认模板」按钮写的就是空串，因此空值必须是合法值。
+- 校验规则七条，按"用户能直接改的那条优先"排序：超长 → 未知占位符 → 花括号
+  不成对 → 缺 `{{text}}` → `{{text}}` 重复 → 缺 `{{sourceLang}}` → 缺
+  `{{targetLang}}`。测试驱动删掉了一条不可达规则（最短长度）：含三个占位符的
+  模板天然 ≥36 字符，"太短"只会和"缺少占位符"同时成立并报出更不可操作的那条。
+- 每条规则各自一个 Fluent 键：`translation-error-ai-prompt-<reason>`（运行时报
+  错，ztransplit.ftl）与 `preferences-ztransplit-ai-prompt-error-<reason>`
+  （面板就地提示，ztransplit-preferences.ftl）两套措辞、同一份判定。
+
+**引擎接入**（translationEngines.ts）：
+
+- 走既有 openaiCompat 客户端（无新依赖），温度为 0.3、max_tokens
+  `min(len*2, 4000)`、**每请求 120s 超时**（leadero 的 MT helper 漏了超时，
+  这块没抄）；空结果错误键改报 `translation-error-ai-empty`（客户端新增
+  `emptyResultErrorKey`，不再冒充 custom 的文案）。
+- 渲染后的模板即完整 user message，不再另发 system message——否则要么绕过用户
+  模板，要么把原文发两遍。
+- 缓存身份含模板指纹（djb2）：改一个字的模板就让 F0 持久缓存与内存 LRU 同时
+  失效；无效模板 resolve 回默认，因此指纹与默认一致（不会误判成不同配置）。
+- 不走批量 JSON（supportsBatching 仍只认 custom）：AI 模板是单篇文本契约，批
+  量包装就得绕过用户模板。
+- featureReadiness 新增 ai 分支：缺 apiUrl 报 `readiness-reason-engine-url`，
+  模板非法报 `readiness-reason-ai-prompt`（把"首次翻译才失败"提前成设置面板
+  的指引）。密钥可留空（本地 Ollama / LM Studio 不需要）。
+
+**设置面板**（preferences.xhtml + preferences.js）：引擎下拉新增「AI 翻译
+（OpenAI 兼容）」；接口地址/密钥/模型三个输入框按其它引擎的做法挂 `preference`
+绑定，prompt 模板编辑区沿用 maxChars/ODL timeout 的 JS 托管套路（读 pref →
+校验 → 写 pref，半成品值不落盘，失焦仍非法则恢复当前 pref 值），七条非法原因的
+本地化文案走既有的隐藏字符串容器（JS 只搬文本、不写死字符串）。
+
+**测试**：promptTemplate 23 例（接受/拒绝/渲染/指纹）+ 引擎 24 例（默认模板
+线格式、语言名注入、模板被完整使用、URL 归一化、无 key 不发 Authorization 头、
+空结果键、非法模板零请求直接失败、缓存按模板/模型/端点失效、缓存身份）+ 就绪
+5 例 + 面板 22 例。其中「面板 JS 判定与 TS 权威实现同判」用一个 12 样例矩阵把
+两份镜像实现钉在一起，防止面板说合法而引擎报错的割裂。
+
+门禁：tsc ×2 清零、vitest **278/278**（22 文件）、build OK、structure-check
+9/9 零警告（S4 偏好键 28 个双向一致）、check:jar 无关变更未跑。README 引擎表
+与「AI 翻译的提示词模板」小节（中英双语）同步更新。
+
+**未完成（阻塞）**：README 五张模式截图仍是 §12.9 的真实截图，其中
+bilingual-interleave.png 的原文块在该 fixture 上渲染成乱码（Zotero 10 阅读
+模式字体回退失败）。重拍需要两端条件都不成立：本机无可用翻译端点（Google 被
+墙、免密钥 Bing 网页接口返回滥用防护 205、无任何引擎密钥），且隔离 profile 里
+的插件注册（extensions.json 条目 + staged XPI 两条路都试过）被 Zotero 的
+AddonManager 静默拒绝——连一个极简测试插件都进不去，而随 profile 副本带过来
+的 leadero/zsearch 能正常加载；隔离实例的数据目录也曾误连用户库（缺
+`-datadir profile`）导致数据库锁死、插件启动直接不执行。
+
+### 12.12.1 AI 引擎实景截图轮（2026-09-28/29，Zotero 10.0.1 + StepFun 真实翻译）
+
+用户指出可用 leadero 生态里已配置的 AI 服务来出真实翻译截图。实测三处可用
+端点（zoteroclaw/leadero 的 provider 配置 + 数据目录 ai-debug-request.json），
+选定 **StepFun `step-3.7-flash`**（`https://api.stepfun.com/step_plan/v1`，
+leadero 翻译功能同款模型）：reasoning 单独放 `reasoning` 字段、`content` 直接
+可用；BigModel GLM 端点也可用但 `content` 为空（全部 token 进了思考）。
+
+**装置**（全部 gitignored，仓库与发布产物不含）：`zotero-plugin serve` 的
+临时插件安装走 RDP addonsActor（`installTemporaryAddon`）——这就是此前隔离
+profile 手写 extensions.json 全部失败的原因，那不是受支持的安装路径；同 ID
+重复安装不重跑 bootstrap（升级路径 shutdown→uninstall→install 会重跑）；
+插件沙箱没有 `Components`（wantGlobalProperties+Object.assign 均无），文件
+标记要用 `IOUtils.write`/`Zotero.File`；`-datadir` 不收正斜杠；新版 RDP 的
+`listTabs` 不再暴露 consoleActor，DOM 结构靠一次性诊断 dump（翻译面板在
+shadow DOM 里，querySelector 不可见；pdf.js textLayer 在 reader 帧的嵌套
+viewer iframe 里）。最终出图链路：驱动设 `_selectionRanges` → 真实鼠标点
+「刷新选区」/「双语对照」（后者经 shadow 穿透点击）→ PrintWindow 抓窗。
+
+**产出**（docs/screenshots/）：`ai-engine.png`（AI 引擎设置面板，StepFun
+配置 + 提示词模板说明）、`selection-translate.png`（划词面板：源文本 +
+StepFun 真实 AI 译文）、`bilingual-interleave.png`（替换原乱码图：真实双语
+会话，SDT 重排 + 交错译文块 + 「已译 4/20 段」进度 + 失败块的重试入口）。
+
+**真实发现（记录，待改进）**：step-3.7-flash 为思考模型，逐段请求的
+`max_tokens = min(len*2, 4000)` 在短段落上会被 reasoning 吃光导致空 content
+被判失败（16/20 块失败、4 块因段落较长幸存）——AI 引擎对思考类模型需要
+更高的 max_tokens 下限或可配置输出预算；分屏/全文附件的菜单命令在本轮装置
+下未能触发（Zotero 10 的 Zotero_Tabs.jump 内部对 tab 定位报错），沿用
+§12.9 的既有实景图。

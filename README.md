@@ -47,8 +47,21 @@
 | Google | 可留空 | 免费端点，失败自动切 Bing 网页接口兜底 |
 | Bing | 必填 | Azure 翻译器 REST API |
 | DeepL | 必填 | free / pro 端点可选 |
+| AI 翻译 | 接口地址必填，密钥可留空 | OpenAI 兼容 chat/completions，提示词模板可自定义 |
 | 自定义接口 | 必填 | OpenAI 兼容 chat/completions |
 | zotero-pdf-translate | — | 检测到该插件时可直接转交 |
+
+### AI 翻译的提示词模板
+
+AI 引擎把「发给模型什么」交给用户：翻译提示词是一个可编辑模板，插件负责语言配置与模板校验。
+
+![AI 翻译引擎设置](docs/screenshots/ai-engine.png)
+
+- 模板必须包含三个占位符：`{{text}}`（待翻译原文）、`{{sourceLang}}`（源语言名称）、`{{targetLang}}`（目标语言名称）。占位符用双花括号，因为 `{v0}`、`{v1}` 这种单花括号标记在流水线里代表公式位置，默认模板会要求模型原样保留它们。
+- 语言名称由插件按语言码解析成可读名称（`zh-CN` → Simplified Chinese），不直接发送语言码。
+- 模板在设置面板里即时校验：占位符拼错、缺失、重复、花括号不成对、超长都会就地提示具体原因，非法值不会写入设置；已存的非法模板会被就绪检查拦下并指回设置面板。留空即恢复内置默认模板。
+- 缓存按模板指纹失效：改一个字的模板就会重新翻译，不会读到旧提示词的结果。
+- 按段请求（不走批量 JSON），与其它模型后端（自建 Ollama、vLLM、网关等）的行为一致。
 
 ## 朗读
 
@@ -144,8 +157,21 @@ Switchable in the preferences pane; all share a content-addressed cross-session 
 | Google | optional | Free endpoint, automatic Bing-web fallback |
 | Bing | required | Azure Translator REST API |
 | DeepL | required | free / pro endpoint toggle |
+| AI | endpoint required, key optional | OpenAI-compatible chat/completions with a user-owned prompt template |
 | Custom | required | OpenAI-compatible chat/completions |
 | zotero-pdf-translate | — | Delegates to the plugin when detected |
+
+### The AI engine's prompt template
+
+The AI engine hands "what gets sent to the model" to the user, and keeps two things for itself: the language configuration and the template validation.
+
+![AI engine settings](docs/screenshots/ai-engine.png)
+
+- A template must contain three placeholders — `{{text}}` (the text to translate), `{{sourceLang}}` and `{{targetLang}}`. They use double braces on purpose: `{v0}` / `{v1}` single-brace markers are formula positions in the pipeline, and the default template asks the model to keep them verbatim.
+- The plugin resolves the language codes to readable names (`zh-CN` → Simplified Chinese) instead of sending raw codes.
+- The template is validated as you type in the settings pane: misspelled, missing, duplicated or unbalanced placeholders and over-long templates each get their own inline message, an invalid value is never written to the settings, and a stored invalid template is blocked by the readiness check, which points back at the pane. An empty field restores the built-in default template.
+- The cache invalidates by template fingerprint — editing one character forces a re-translation instead of serving results from the old prompt.
+- Requests go out per paragraph (no batch JSON), same as any other model backend (self-hosted Ollama, vLLM, a gateway, …).
 
 ## Read-aloud
 
