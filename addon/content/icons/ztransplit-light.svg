@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 96 96">
   <title>Z-Transplit</title>
   <!--
-    浅色宿主专用：墨圆版（与 ztransplit-any 同构）。浅底上墨圆对比最强，
-    故浅色场景直接用主标原色。品牌资产，当前无 chrome:// 引用。
+    浅色宿主专用：墨圆版（与 ztransplit-any 同构，2026-09-28 同步比例重排）。
+    浅底上墨圆对比最强，故浅色场景直接用主标原色。品牌资产，当前无
+    chrome:// 引用，配色不受 QA S7 约束。
   -->
   <circle cx="48" cy="48" r="34" fill="#1a1a1a"/>
-  <path d="M48 34 V64" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none"/>
-  <path d="M28 34 H68" stroke="#b5343a" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <path d="M48 35 V65" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <path d="M30 35 H66" stroke="#b5343a" stroke-width="9" stroke-linecap="round" fill="none"/>
 </svg>

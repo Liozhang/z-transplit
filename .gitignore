@@ -27,3 +27,6 @@ Desktop.ini
 # Local agent scratch data
 .zcode/
 .verify/
+
+# Scratch dirs (render previews, QA staging, etc.)
+.tmp*/

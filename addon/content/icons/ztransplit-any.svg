@@ -3,9 +3,10 @@
   <!--
     manifest 声明的插件图标（manifest.json 48/96）。
     QA S7：manifest 图标必须显式配色、不随宿主主题变量着色，故为墨圆实色版。
-    图形与 logo.svg 同构：墨圆=原文版面，白竖=分屏线，绯红横=双语对照，整体为 T。
+    图形与 logo.svg 同构（2026-09-28 同步比例重排）：墨圆=原文版面，白竖=分屏线，
+    绯红横=双语对照，整体为 T；圆 r=34、双划 9 粗，几何与注释见 logo.svg。
   -->
   <circle cx="48" cy="48" r="34" fill="#1a1a1a"/>
-  <path d="M48 34 V64" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none"/>
-  <path d="M28 34 H68" stroke="#b5343a" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <path d="M48 35 V65" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <path d="M30 35 H66" stroke="#b5343a" stroke-width="9" stroke-linecap="round" fill="none"/>
 </svg>
