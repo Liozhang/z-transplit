@@ -8,8 +8,9 @@
 ## 缺失的文件会回落到 en-US。
 
 ## 引擎错误与提示（src/core/translation/translationEngines.ts）
-## 键名沿用 leadero 的 translation-error-* 命名；ai 引擎及其专属键已随
-## 「ai 引擎移除、custom 引擎承接」一起消失。
+## 键名沿用 leadero 的 translation-error-* 命名。ai-prompt-* 同时是
+## src/core/translation/promptTemplate.ts 的模板拒绝原因：每条规则一个文案，
+## 运行时报错与设置面板的即时提示共用同一套措辞。
 translation-error-google-empty = Google 翻译返回了空结果
 translation-error-bing-empty = Bing 翻译返回了空结果
 translation-error-deepl-empty = DeepL 返回了空结果
@@ -27,11 +28,24 @@ translation-error-unknown = 未知错误
 translation-error-bing-token-unavailable = 无法获取 Bing 翻译令牌（页面结构可能已变化）
 translation-error-bing-rejected = Bing 拒绝了请求（{ $status }）
 translation-error-pdf-translate-missing = 未安装或未启用 zotero-pdf-translate 插件。请在 Zotero 的插件管理器中安装并启用。
+translation-error-ai-empty = AI 翻译返回了空结果
+translation-error-ai-failed = AI 翻译失败
+translation-error-ai-url-missing = AI 翻译接口地址未配置
+
+## AI 引擎提示词模板的拒绝原因（src/core/translation/promptTemplate.ts）
+translation-error-ai-prompt-too-long = AI 提示词模板过长（最多 4000 个字符）。
+translation-error-ai-prompt-unknown-placeholder = AI 提示词模板包含未知占位符：只支持 {"{{"}text{"}}"}、{"{{"}sourceLang{"}}"}、{"{{"}targetLang{"}}"}（双花括号）。
+translation-error-ai-prompt-missing-text = AI 提示词模板缺少 {"{{"}text{"}}"}：它是待翻译原文所在的位置。
+translation-error-ai-prompt-duplicate-text = AI 提示词模板里 {"{{"}text{"}}"} 出现了多次：待翻译原文只能发送一次。
+translation-error-ai-prompt-missing-source-lang = AI 提示词模板缺少 {"{{"}sourceLang{"}}"}：它是源语言名称所在的位置。
+translation-error-ai-prompt-missing-target-lang = AI 提示词模板缺少 {"{{"}targetLang{"}}"}：它是目标语言名称所在的位置。
+translation-error-ai-prompt-unbalanced-braces = AI 提示词模板的花括号不成对：占位符用双花括号（{"{{"}text{"}}"}），公式标记用单花括号（{"{"}v0{"}"}）。
 
 ## 翻译功能就绪判定（src/core/translation/featureReadiness.ts）
 readiness-reason-engine-key = 缺少翻译引擎 API 密钥
 readiness-reason-engine-url = 缺少自定义翻译接口地址
 readiness-reason-engine-plugin = 未安装或未启用 zotero-pdf-translate 插件
+readiness-reason-ai-prompt = AI 引擎的提示词模板不合法，请在设置面板中修正
 readiness-reason-unknown = 未知原因
 
 ## 分屏菜单（src/core/pdf/splitview/splitViewFactory.ts）

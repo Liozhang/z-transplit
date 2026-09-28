@@ -12,6 +12,9 @@
  *   - bing / deepl         → need translate.<engine>.apiKey
  *   - custom               → needs translate.custom.apiUrl AND
  *                            translate.custom.apiKey
+ *   - ai                   → needs translate.ai.apiUrl, plus a prompt template
+ *                            that passes validatePromptTemplate (an empty
+ *                            template is valid — it means "use the default")
  *   - zotero-pdf-translate → needs the external plugin to be present
  *                            (Zotero.PDFTranslate); a host without the Zotero
  *                            global reports "not ready" instead of throwing
@@ -20,6 +23,7 @@
  */
 
 import { getPrefDynamic, type PrefValue } from "../../utils/prefs";
+import { validatePromptTemplate } from "./promptTemplate";
 
 export interface TranslationReadinessStep {
   prefKey: string;
@@ -91,6 +95,28 @@ export function checkTranslationReadiness(
         missing.push({
           prefKey: "translate.custom.apiKey",
           reasonKey: "readiness-reason-engine-key",
+        });
+      }
+      return { ready: missing.length === 0, missing };
+    }
+    case "ai": {
+      // The endpoint is required; the key is not — local gateways (Ollama,
+      // LM Studio) usually need none, and openaiCompat sends the Authorization
+      // header only when a key is actually configured.
+      if (!prefValue(getPref, "translate.ai.apiUrl")) {
+        missing.push({
+          prefKey: "translate.ai.apiUrl",
+          reasonKey: "readiness-reason-engine-url",
+        });
+      }
+      // An invalid template is a configuration gap the user must close: the
+      // engine refuses to translate otherwise, so reporting it here turns a
+      // silent failure at first use into a pointer to the settings pane.
+      const prompt = getPref("translate.ai.prompt");
+      if (!validatePromptTemplate(prompt === undefined ? undefined : String(prompt)).ok) {
+        missing.push({
+          prefKey: "translate.ai.prompt",
+          reasonKey: "readiness-reason-ai-prompt",
         });
       }
       return { ready: missing.length === 0, missing };

@@ -1,14 +1,19 @@
 /**
  * translationEngines — Unified translation engine dispatcher.
  *
- * Supports five engine types:
+ * Supports six engine types:
+ *   - "ai"      → OpenAI-compatible chat-completions endpoint driven by a
+ *                 user-owned, validated prompt template (translate.ai.*) via
+ *                 src/core/translation/promptTemplate.ts. This is the port of
+ *                 leadero's "ai" engine: unlike "custom" below it substitutes
+ *                 the source/target language into the prompt and refuses to
+ *                 translate while the template is invalid.
  *   - "google"  → Google Translate HTTP API (default; free endpoint or Cloud
  *                 Translation; falls back to keyless Bing web on failure)
- *   - "custom"  → OpenAI-compatible chat-completions endpoint
- *                 (translate.custom.apiUrl/apiKey/model) via
- *                 src/core/ai/openaiCompat.ts. This is the only engine that
- *                 carries a formula-preserving prompt and batch JSON ability —
- *                 it absorbs the duties of leadero's removed "ai" engine.
+ *   - "custom"  → OpenAI-compatible chat-completions endpoint with a fixed
+ *                 formula-preserving prompt (translate.custom.apiUrl/apiKey/
+ *                 model) via src/core/ai/openaiCompat.ts. Also the only engine
+ *                 with batch JSON ability — see supportsBatching().
  *   - "bing"    → Azure Cognitive Services Translator
  *   - "deepl"   → DeepL API
  *   - "zotero-pdf-translate" → external plugin bridge
@@ -16,16 +21,16 @@
  * All engines return the same signature:
  *   { success: true, translatedText: string } or { success: false, error: string }
  *
- * Formula placeholder preservation ({v0}, {v1}, …) is guaranteed ONLY for the
- * "custom" engine, because it receives an explicit system prompt. Traditional
- * MT APIs have no prompt mechanism, so callers that need formula safety must
- * stay on "custom".
+ * Formula placeholder preservation ({v0}, {v1}, …) is guaranteed only for the
+ * model-backed engines ("ai" and "custom"), because they receive an explicit
+ * prompt. Traditional MT APIs have no prompt mechanism, so callers that need
+ * formula safety must stay on one of those two.
  *
- * Ported from leadero's src/core/translation/translationEngines.ts with the
- * "ai" engine removed: leadero's ModelRouter/AIProviderRegistry coupling is
- * replaced by the local OpenAI-compatible client, and every leadero-specific
- * dependency (utils/defaults, react locale wrapper) is swapped for z-transplit's
- * own src/utils/* helpers.
+ * Ported from leadero's src/core/translation/translationEngines.ts: leadero's
+ * ModelRouter/AIProviderRegistry coupling is replaced by the local
+ * OpenAI-compatible client (twice over — once per model-backed engine), and
+ * every leadero-specific dependency (utils/defaults, react locale wrapper) is
+ * swapped for z-transplit's own src/utils/* helpers.
  */
 
 import { z } from "zod";
@@ -43,8 +48,15 @@ import { getString } from "../../utils/locale";
 import { abortSignalTimeout } from "../../utils/abort";
 import { getLanguageName } from "../tool/language";
 import { batchJsonPrompt, formulaPreservingPrompt, sanitizeTranslations } from "./prompts";
+import {
+  promptFingerprint,
+  renderPrompt,
+  resolvePromptTemplate,
+  validatePromptTemplate,
+} from "./promptTemplate";
 
 export type TranslationEngineType =
+  | "ai"
   | "google"
   | "bing"
   | "deepl"
@@ -76,6 +88,15 @@ export interface CustomTranslateOptions {
   apiUrl: string;
   apiKey?: string;
   model?: string;
+}
+
+export interface AITranslateOptions {
+  apiUrl: string;
+  /** Optional: local gateways (Ollama, LM Studio) usually need no key. */
+  apiKey?: string;
+  model?: string;
+  /** Raw prompt template from prefs; "" = built-in default template. */
+  prompt?: string;
 }
 
 /**
@@ -113,6 +134,16 @@ function toDeepLTargetLang(code: string): string {
  * timeout (~60-120s per paragraph).
  */
 const KEYLESS_ENDPOINT_TIMEOUT_MS = 10000;
+
+/**
+ * Per-request timeout for the model-backed engines ("ai"). Generous compared to
+ * the MT endpoints above because a chat completion of a long paragraph takes
+ * far longer than a translate call, and the failure mode without it is a
+ * request hanging on the OS network timeout (~60-120s) per paragraph.
+ * leadero's MT helper omitted the timeout entirely (a latent bug); the port
+ * passes one.
+ */
+const AI_ENDPOINT_TIMEOUT_MS = 120000;
 
 async function httpPost(
   url: string,
@@ -499,6 +530,71 @@ async function translateWithDeepL(
 }
 
 /**
+ * Model-backed translation ("ai" engine) — the port of leadero's "ai" engine
+ * onto z-transplit's own OpenAI-compatible client.
+ *
+ * The prompt is not hard-coded: it comes from the user's template
+ * (translate.ai.prompt, "" = built-in default) with the language pair and the
+ * text substituted into it. The template is validated first and a rejected
+ * template fails the request with the exact reason instead of sending a
+ * half-broken prompt to the model.
+ *
+ * The rendered template is the whole user message — the template owns where
+ * the text goes, so a separate system message would either bypass it or send
+ * the text twice.
+ */
+async function translateWithAI(
+  text: string,
+  targetLanguage: string,
+  sourceLanguage: string | undefined,
+  opts: AITranslateOptions,
+): Promise<{ success: boolean; translatedText?: string; error?: string }> {
+  // Language descriptors are resolved here (not in the template) so the user
+  // writes "{{sourceLang}}" and the plugin decides it means "Simplified Chinese".
+  const targetDesc = getLanguageName(targetLanguage);
+  const sourceDesc = sourceLanguage
+    ? getLanguageName(sourceLanguage)
+    : "auto-detect";
+
+  const check = validatePromptTemplate(opts.prompt);
+  if (!check.ok) {
+    return {
+      success: false,
+      error: getString(`translation-error-ai-prompt-${check.reason}`),
+    };
+  }
+
+  try {
+    const client = createOpenAICompatClient({
+      apiUrl: opts.apiUrl,
+      apiKey: opts.apiKey,
+      defaultModel: opts.model,
+      emptyResultErrorKey: "translation-error-ai-empty",
+    });
+
+    const result = await client.chat({
+      messages: [
+        {
+          role: "user",
+          content: renderPrompt(check.template, {
+            text,
+            sourceLang: sourceDesc,
+            targetLang: targetDesc,
+          }),
+        },
+      ],
+      maxTokens: Math.min(text.length * 2, 4000),
+      temperature: 0.3,
+      timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
+    });
+
+    return { success: true, translatedText: result.content };
+  } catch (e: any) {
+    return { success: false, error: toErrorMessage(e) };
+  }
+}
+
+/**
  * Custom OpenAI-compatible endpoint.
  *
  * Sends a chat completion with the formula-preserving system prompt (see
@@ -596,12 +692,18 @@ export interface EngineConfig {
   customApiUrl?: string;
   customApiKey?: string;
   customModel?: string;
+  aiApiUrl?: string;
+  aiApiKey?: string;
+  aiModel?: string;
+  /** Raw prompt template ("" = built-in default). */
+  aiPrompt?: string;
 }
 
 /**
  * Read the current engine config from dynamic prefs.
  */
-export function getEngineConfig(): EngineConfig {  const get = (key: string, fallback?: string) => {
+export function getEngineConfig(): EngineConfig {
+  const get = (key: string, fallback?: string) => {
     const v = getPrefDynamic(key);
     return v !== undefined && v !== null ? String(v) : fallback;
   };
@@ -620,6 +722,11 @@ export function getEngineConfig(): EngineConfig {  const get = (key: string, fal
     // Empty string = no model override: openaiCompat omits the wire `model`
     // field so the server picks its default, as the preferences pane promises.
     customModel: get("translate.custom.model") || "",
+    aiApiUrl: get("translate.ai.apiUrl") || undefined,
+    aiApiKey: get("translate.ai.apiKey") || undefined,
+    // Same "empty = server default" contract as customModel above.
+    aiModel: get("translate.ai.model") || "",
+    aiPrompt: get("translate.ai.prompt") || "",
   };
 }
 
@@ -628,11 +735,23 @@ export function getEngineConfig(): EngineConfig {  const get = (key: string, fal
  * cache (translationCache.ts). Two runs with the same identity are assumed to
  * produce interchangeable translations, so cached paragraphs are reused.
  * Credentials only enter as a short fingerprint (never the full secret).
+ *
+ * The "ai" engine additionally fingerprints its prompt template: the template
+ * *is* the engine's behaviour, so editing it must invalidate cached paragraphs
+ * (a cached Google paragraph is interchangeable with another Google paragraph;
+ * a cached paragraph from prompt A is not one from prompt B).
  */
 export function engineCacheIdentity(): string {
   const cfg = getEngineConfig();
   const parts: string[] = [cfg.engineType];
-  if (cfg.engineType === "custom") {
+  if (cfg.engineType === "ai") {
+    parts.push(
+      cfg.aiModel || "",
+      cfg.aiApiUrl || "",
+      (cfg.aiApiKey || "").slice(-6),
+      promptFingerprint(resolvePromptTemplate(cfg.aiPrompt)),
+    );
+  } else if (cfg.engineType === "custom") {
     parts.push(cfg.customModel || "", cfg.customApiUrl || "", (cfg.customApiKey || "").slice(-6));
   } else if (cfg.engineType === "google") {
     parts.push(cfg.googleApiKey ? "keyed" : "keyless");
@@ -681,13 +800,29 @@ export function createTranslator(
           ? cfg.bingApiKey
           : cfg.engineType === "deepl"
             ? cfg.deeplApiKey
-            : cfg.engineType === "custom"
-              ? cfg.customApiKey
-              : "";
-    // The custom engine's endpoint is part of its configuration identity —
+            : cfg.engineType === "ai"
+              ? cfg.aiApiKey
+              : cfg.engineType === "custom"
+                ? cfg.customApiKey
+                : "";
+    // The endpoint is part of a model-backed engine's configuration identity —
     // the same key/model against a different apiUrl serves a different service.
-    const apiUrlKey = cfg.engineType === "custom" ? cfg.customApiUrl || "" : "";
-    const key = `${cfg.engineType}:${cfg.customModel || ""}:${(credKey || "").slice(-6)}:${apiUrlKey}:${tgt || targetLanguage}:${src || sourceLanguage || "auto"}:${text}`;
+    const apiUrlKey =
+      cfg.engineType === "custom"
+        ? cfg.customApiUrl || ""
+        : cfg.engineType === "ai"
+          ? cfg.aiApiUrl || ""
+          : "";
+    // …and so is the prompt: same endpoint, different template, different
+    // translations. Resolving first keeps the key stable for the default
+    // template (empty pref), so switching from edited to default re-hits it.
+    const promptKey =
+      cfg.engineType === "ai"
+        ? promptFingerprint(resolvePromptTemplate(cfg.aiPrompt))
+        : "";
+    const modelKey =
+      cfg.engineType === "ai" ? cfg.aiModel || "" : cfg.customModel || "";
+    const key = `${cfg.engineType}:${modelKey}:${(credKey || "").slice(-6)}:${apiUrlKey}:${promptKey}:${tgt || targetLanguage}:${src || sourceLanguage || "auto"}:${text}`;
     const cached = TRANSLATION_CACHE.get(key);
     if (cached !== undefined) {
       // LRU refresh: delete + re-insert moves entry to end (most recently used).
@@ -716,6 +851,27 @@ function createTranslatorUncached(
   const cfg = getEngineConfig();
 
   switch (cfg.engineType) {
+    case "ai":
+      return async (text: string) => {
+        if (!cfg.aiApiUrl)
+          throw new Error(getString("translation-error-ai-url-missing"));
+        const result = await translateWithAI(
+          text,
+          targetLanguage,
+          sourceLanguage,
+          {
+            apiUrl: cfg.aiApiUrl,
+            apiKey: cfg.aiApiKey,
+            model: cfg.aiModel,
+            prompt: cfg.aiPrompt,
+          },
+        );
+        if (!result.success)
+          throw new Error(
+            result.error || getString("translation-error-ai-failed"),
+          );
+        return result.translatedText || "";
+      };
     case "google": {
       const googleOnly = async (text: string) => {
         const result = await translateWithGoogle(
@@ -814,8 +970,8 @@ function createTranslatorUncached(
         return result.translatedText || "";
       };
     case "custom":
-    // Unknown engine id falls through to the custom engine (the leadero port's
-    // "ai" default): it is the only engine that can honour a system prompt, and
+    // Unknown engine id falls through to the custom engine: it is the only
+    // engine that can honour a system prompt without a user-owned template, and
     // it fails with an actionable configuration error when unconfigured.
     default:
       return async (text: string) => {
@@ -862,6 +1018,8 @@ const BatchTranslationSchema = z.object({
  * Only the custom engine does — it packs paragraphs into one model call with
  * structured JSON output. Traditional MT APIs (Google/Bing/DeepL) are stateless
  * and accept single text, so per-paragraph dispatch stays appropriate for them.
+ * The "ai" engine is per-paragraph too: its prompt is a single-text template,
+ * so a batch envelope would have to bypass the user's template.
  */
 export function supportsBatching(): boolean {
   return getEngineConfig().engineType === "custom";

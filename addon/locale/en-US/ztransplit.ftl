@@ -10,8 +10,10 @@
 ## Zotero picks a plugin locale per file and falls back to en-US.
 
 ## Engine errors and hints (src/core/translation/translationEngines.ts)
-## Key names follow leadero's translation-error-* naming; the AI-engine
-## variants are gone with the "ai" engine (the custom engine absorbed it).
+## Key names follow leadero's translation-error-* naming. The `ai-prompt-*`
+## keys double as the template rejection reasons reported by
+## src/core/translation/promptTemplate.ts (each rule has its own message, both
+## for the runtime error and for the settings pane's inline hint).
 translation-error-google-empty = Google Translate returned an empty result
 translation-error-bing-empty = Bing Translator returned an empty result
 translation-error-deepl-empty = DeepL returned an empty result
@@ -29,11 +31,24 @@ translation-error-unknown = Unknown error
 translation-error-bing-token-unavailable = Could not obtain the Bing translation token (the page structure may have changed)
 translation-error-bing-rejected = Bing rejected the request ({ $status })
 translation-error-pdf-translate-missing = The zotero-pdf-translate plugin is not installed or not enabled. Install and enable it in Zotero's plugin manager.
+translation-error-ai-empty = AI translation returned an empty result
+translation-error-ai-failed = AI translation failed
+translation-error-ai-url-missing = AI translation API URL is not configured
+
+## AI engine prompt template rejections (src/core/translation/promptTemplate.ts)
+translation-error-ai-prompt-too-long = The AI prompt template is too long (at most 4000 characters).
+translation-error-ai-prompt-unknown-placeholder = The AI prompt template contains an unknown placeholder — only {"{{"}text{"}}"}, {"{{"}sourceLang{"}}"} and {"{{"}targetLang{"}}"} (double braces) are supported.
+translation-error-ai-prompt-missing-text = The AI prompt template is missing {"{{"}text{"}}"} — that is where the text to translate goes.
+translation-error-ai-prompt-duplicate-text = The AI prompt template contains {"{{"}text{"}}"} more than once — the source text may only be sent once.
+translation-error-ai-prompt-missing-source-lang = The AI prompt template is missing {"{{"}sourceLang{"}}"} — that is where the source language name goes.
+translation-error-ai-prompt-missing-target-lang = The AI prompt template is missing {"{{"}targetLang{"}}"} — that is where the target language name goes.
+translation-error-ai-prompt-unbalanced-braces = The AI prompt template has unbalanced braces — placeholders use double braces ({"{{"}text{"}}"}) while formula markers use single braces ({"{"}v0{"}"}).
 
 ## Translation feature readiness (src/core/translation/featureReadiness.ts)
 readiness-reason-engine-key = Translation engine API key is missing
 readiness-reason-engine-url = Custom translation endpoint URL is missing
 readiness-reason-engine-plugin = The zotero-pdf-translate plugin is not installed or not enabled
+readiness-reason-ai-prompt = The AI engine's prompt template is invalid — fix it in the settings pane
 readiness-reason-unknown = Unknown reason
 
 ## Split view menus (src/core/pdf/splitview/splitViewFactory.ts)

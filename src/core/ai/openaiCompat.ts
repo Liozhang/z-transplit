@@ -63,6 +63,13 @@ export interface OpenAICompatClientConfig {
   apiKey?: string;
   /** Model used when a request does not override it; "" = server default. */
   defaultModel?: string;
+  /**
+   * Fluent message id (no `ztransplit-` prefix) reported when the endpoint
+   * returns an empty completion. Defaults to the custom engine's message;
+   * callers that are not the custom engine pass their own key so the error
+   * names the engine the user actually selected.
+   */
+  emptyResultErrorKey?: string;
 }
 
 export interface OpenAICompatClient {
@@ -118,6 +125,7 @@ export function createOpenAICompatClient(
 ): OpenAICompatClient {
   const url = normalizeChatCompletionsUrl(config.apiUrl);
   const model = config.defaultModel || "";
+  const emptyErrorKey = config.emptyResultErrorKey ?? "translation-error-custom-empty";
 
   async function chat(
     request: OpenAICompatChatRequest,
@@ -156,7 +164,7 @@ export function createOpenAICompatClient(
     const data = (await resp.json()) as any;
     const content = data?.choices?.[0]?.message?.content;
     if (!content || typeof content !== "string") {
-      throw new Error(getString("translation-error-custom-empty"));
+      throw new Error(getString(emptyErrorKey));
     }
     return { content: content.trim(), usage: toUsage(data?.usage) };
   }

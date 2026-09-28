@@ -41,6 +41,15 @@ pref("extensions.zotero.ztransplit.translate.custom.apiUrl", "");
 pref("extensions.zotero.ztransplit.translate.custom.apiKey", "");
 pref("extensions.zotero.ztransplit.translate.custom.model", "");
 
+// AI 引擎（OpenAI 兼容 chat/completions + 用户自建 prompt 模板）。
+// prompt 留空 = 使用内置默认模板（src/core/translation/promptTemplate.ts 的
+// DEFAULT_AI_PROMPT，即 formulaPreservingPrompt 的模板化版本）：设置面板里的
+// 「恢复默认模板」按钮写的就是空串，所以空值必须是合法值而不是错误。
+pref("extensions.zotero.ztransplit.translate.ai.apiUrl", "");
+pref("extensions.zotero.ztransplit.translate.ai.apiKey", "");
+pref("extensions.zotero.ztransplit.translate.ai.model", "");
+pref("extensions.zotero.ztransplit.translate.ai.prompt", "");
+
 // Target language for PDF split-view translation ("" = follow Zotero locale).
 // The reader translate pane overrides this per request; the PDF pipeline, the
 // Zotero 10 bilingual interleave view (src/ui/bilingualControl.ts) and

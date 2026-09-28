@@ -36,7 +36,9 @@ import {
   createTranslator,
   createAIBatchTranslator,
   supportsBatching,
+  engineCacheIdentity,
 } from "../../../../src/core/translation/translationEngines";
+import { DEFAULT_AI_PROMPT } from "../../../../src/core/translation/promptTemplate";
 
 // z-transplit has no shared vitest setup file (see vitest.config.ts), so the
 // Zotero global the pref layer expects is installed here.
@@ -593,6 +595,203 @@ describe("custom engine (OpenAI-compatible)", () => {
     await expect(createAIBatchTranslator("zh-CN")).rejects.toThrow(
       "translation-error-custom-url-missing",
     );
+  });
+});
+
+describe("ai engine (OpenAI-compatible + prompt template)", () => {
+  function aiPrefs(overrides: Record<string, unknown> = {}) {
+    setPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.apiKey": "ak-1",
+      "translate.ai.model": "qwen-max",
+      ...overrides,
+    });
+  }
+
+  function aiRoute(content = "译文") {
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content } }] }),
+    );
+  }
+
+  it("getEngineConfig exposes the ai engine settings", () => {
+    aiPrefs({ "translate.ai.prompt": "custom template" });
+    const cfg = getEngineConfig();
+    expect(cfg).toMatchObject({
+      engineType: "ai",
+      aiApiUrl: "https://gw.example/v1",
+      aiApiKey: "ak-1",
+      aiModel: "qwen-max",
+      aiPrompt: "custom template",
+    });
+  });
+
+  it("default template: one user message with the text and both language names substituted", async () => {
+    aiPrefs();
+    aiRoute();
+    const t = createTranslator("zh-CN", "en-US");
+    expect(await t("hello", "zh-CN", "en-US")).toBe("译文");
+    const body = JSON.parse(h.fetchCalls[0].body);
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe("user");
+    const prompt = body.messages[0].content as string;
+    expect(prompt).toContain("from English to Simplified Chinese");
+    expect(prompt).toContain("hello");
+    // The built-in template keeps the {vn} formula contract.
+    expect(prompt).toContain("{v0}");
+    // And the raw placeholders never reach the model.
+    expect(prompt).not.toContain("{{text}}");
+    expect(prompt).not.toContain("{{sourceLang}}");
+    expect(prompt).not.toContain("{{targetLang}}");
+  });
+
+  it("unknown source language is sent as the auto-detect sentinel", async () => {
+    aiPrefs();
+    aiRoute();
+    const t = createTranslator("zh-CN");
+    await t("hello", "zh-CN");
+    const prompt = JSON.parse(h.fetchCalls[0].body).messages[0].content;
+    expect(prompt).toContain("from auto-detect to Simplified Chinese");
+  });
+
+  it("user template: the stored prompt is used verbatim around the substitutions", async () => {
+    aiPrefs({
+      "translate.ai.prompt":
+        "TASK: {{sourceLang}} -> {{targetLang}} | {{text}} | reply terse",
+    });
+    aiRoute();
+    const t = createTranslator("ja-JP", "fr-FR");
+    await t("bonjour", "ja-JP", "fr-FR");
+    expect(JSON.parse(h.fetchCalls[0].body).messages[0].content).toBe(
+      "TASK: French -> Japanese | bonjour | reply terse",
+    );
+  });
+
+  it("wire contract: URL normalized, model, bounded max_tokens, temperature, timeout", async () => {
+    aiPrefs({ "translate.ai.apiUrl": "http://localhost:11434/v1/" });
+    aiRoute();
+    const t = createTranslator("zh-CN");
+    await t("hello", "zh-CN");
+    const call = h.fetchCalls[0];
+    expect(call.url).toBe("http://localhost:11434/v1/chat/completions");
+    expect(call.headers.Authorization).toBe("Bearer ak-1");
+    const body = JSON.parse(call.body);
+    expect(body.model).toBe("qwen-max");
+    expect(body.max_tokens).toBe(10); // min(len*2, 4000)
+    expect(body.temperature).toBe(0.3);
+    expect(call.signal).toBeDefined();
+  });
+
+  it("no key configured: no Authorization header is sent", async () => {
+    aiPrefs({ "translate.ai.apiKey": "" });
+    aiRoute();
+    const t = createTranslator("zh-CN");
+    await t("hello", "zh-CN");
+    expect(h.fetchCalls[0].headers.Authorization).toBeUndefined();
+  });
+
+  it("empty completion is reported with the ai engine's own message", async () => {
+    aiPrefs();
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "" } }] }),
+    );
+    const t = createTranslator("zh-CN");
+    await expect(t("hello", "zh-CN")).rejects.toThrow(
+      "translation-error-ai-empty",
+    );
+  });
+
+  it("an invalid stored template fails before any request, with the exact reason", async () => {
+    aiPrefs({ "translate.ai.prompt": "translate this: {{txt}}" });
+    const t = createTranslator("zh-CN");
+    await expect(t("hello", "zh-CN")).rejects.toThrow(
+      "translation-error-ai-prompt-unknown-placeholder",
+    );
+    expect(h.fetchCalls).toHaveLength(0);
+  });
+
+  it("missing API URL fails fast with an actionable error", async () => {
+    aiPrefs({ "translate.ai.apiUrl": "" });
+    const t = createTranslator("zh-CN");
+    await expect(t("hello", "zh-CN")).rejects.toThrow(
+      "translation-error-ai-url-missing",
+    );
+    expect(h.fetchCalls).toHaveLength(0);
+  });
+
+  it("supportsBatching stays false — the ai engine translates per paragraph", () => {
+    aiPrefs();
+    expect(supportsBatching()).toBe(false);
+  });
+
+  it("HTTP failures surface with status and body", async () => {
+    aiPrefs();
+    route("chat/completions", () =>
+      jsonResponse({ error: "quota" }, false, 429, "Too Many Requests"),
+    );
+    const t = createTranslator("zh-CN");
+    await expect(t("hello", "zh-CN")).rejects.toThrow("HTTP 429");
+  });
+
+  it("cache: repeat translations of the same text hit the endpoint once", async () => {
+    aiPrefs();
+    aiRoute();
+    const t = createTranslator("zh-CN");
+    await t("same text", "zh-CN");
+    await t("same text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1);
+  });
+
+  it("cache: editing the prompt invalidates cached translations", async () => {
+    aiPrefs();
+    aiRoute();
+    const t1 = createTranslator("zh-CN");
+    await t1("text", "zh-CN");
+    await t1("text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1);
+
+    aiPrefs({
+      "translate.ai.prompt": "other template {{text}} {{sourceLang}} {{targetLang}}",
+    });
+    const t2 = createTranslator("zh-CN");
+    await t2("text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(2);
+  });
+
+  it("cache: switching the model or endpoint invalidates cached translations", async () => {
+    aiPrefs();
+    aiRoute();
+    const t1 = createTranslator("zh-CN");
+    await t1("text", "zh-CN");
+    aiPrefs({ "translate.ai.model": "other-model" });
+    const t2 = createTranslator("zh-CN");
+    await t2("text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(2);
+
+    aiPrefs({ "translate.ai.apiUrl": "https://other.example/v1" });
+    const t3 = createTranslator("zh-CN");
+    await t3("text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(3);
+  });
+
+  it("engineCacheIdentity folds in the effective prompt template", () => {
+    aiPrefs();
+    const base = engineCacheIdentity();
+    expect(base.startsWith("ai|")).toBe(true);
+    // The default template is reachable as "" and as its literal text — both
+    // must produce the same identity, or the persistent cache would miss.
+    expect(engineCacheIdentity()).toBe(base);
+    aiPrefs({ "translate.ai.prompt": DEFAULT_AI_PROMPT });
+    expect(engineCacheIdentity()).toBe(base);
+    // An invalid template is never sent (the engine refuses), and it resolves
+    // to the default — so it must not look like a different configuration.
+    aiPrefs({ "translate.ai.prompt": "broken {{txt}}" });
+    expect(engineCacheIdentity()).toBe(base);
+    aiPrefs({
+      "translate.ai.prompt": "changed {{text}} {{sourceLang}} {{targetLang}}",
+    });
+    expect(engineCacheIdentity()).not.toBe(base);
   });
 });
 
