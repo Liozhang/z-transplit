@@ -1,0 +1,126 @@
+/*
+ * Z-Transplit 设置面板样式（编辑 → 设置 → Z-Transplit）。
+ *
+ * 由 Zotero.PreferencePanes.register({ stylesheets: [...] }) 注入：Zotero 会把
+ * 这个 CSS 以 <?xml-stylesheet?> 处理指令插到「整个偏好设置文档」的根部
+ * （见 Zotero_Preferences._loadPane），所以这里的每一条规则都必须限定在
+ * #zotero-prefpane-ztransplit 之下，绝不能让选择器漏到 Zotero 自己的面板上。
+ *
+ * 主题适配：Zotero 7 的偏好窗口用 Gecko 系统颜色（Zotero 自己的
+ * chrome/content/zotero-platform/*/preferences.css 就是 -moz-Dialog /
+ * -moz-DialogText / font: message-box），它们在暗/亮主题下由平台自动切换，
+ * 比写死十六进制色值可靠。下面的变量层优先取 Zotero/Firefox 已定义的语义变量，
+ * 取不到就退回系统颜色，两者都不会出现"暗色主题下发白"的问题。
+ */
+
+#zotero-prefpane-ztransplit {
+  /* 语义色板：先问 Zotero/Firefox，再退回 Gecko 系统颜色 */
+  --ztransplit-text: var(--zotero-text-color, -moz-DialogText);
+  --ztransplit-text-secondary: var(--zotero-text-color-secondary, GrayText);
+
+  /* 内容宽度有上限，窄窗口下靠下面的弹性尺寸收缩，不会横向溢出 */
+  max-width: 100%;
+  min-width: 0;
+}
+
+/*
+ * 分区标题直接用原生 groupbox > label > h2（字号/间距由
+ * chrome/skin/default/zotero/zotero.css 定义），这里不覆盖，保持和 Zotero
+ * 其它面板完全一致。
+ */
+
+/* 一行「标签 + 控件」：标签不抢宽度，控件吃掉剩余空间但设有上限 */
+#zotero-prefpane-ztransplit .ztransplit-row {
+  margin-block: 2px 3px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#zotero-prefpane-ztransplit .ztransplit-row > label {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-inline-end: 6px;
+}
+
+/* 文本输入（接口地址、密钥、区域、模型） */
+#zotero-prefpane-ztransplit .ztransplit-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 32em;
+}
+
+/* 数字输入：固定窄宽度，避免 spinner 把行撑开 */
+#zotero-prefpane-ztransplit .ztransplit-number {
+  flex: 0 0 auto;
+  width: 6em;
+  min-width: 0;
+  max-width: 40%;
+}
+
+/* 短文本（如 Bing region） */
+#zotero-prefpane-ztransplit .ztransplit-short {
+  flex: 0 1 auto;
+  width: 12em;
+  min-width: 0;
+  max-width: 50%;
+}
+
+/* 「显示密钥」复选框：贴着输入框右侧，不参与换行竞争 */
+#zotero-prefpane-ztransplit .ztransplit-key-toggle {
+  flex: 0 0 auto;
+  margin-inline-start: 6px;
+}
+
+/* 面板简介（Zotero 自动加的 h1 标题之下、第一个分区之上） */
+#zotero-prefpane-ztransplit .ztransplit-intro {
+  margin-block-end: 4px;
+}
+
+/*
+ * 说明文字：比控件标签弱一级的颜色（原生 in-content 面板对 description 也是
+ * 用弱化色），行高略放大便于阅读长文案；换行与断词都放开，长句子和长路径
+ * 在窄窗口里只会折行，不会把窗口撑宽。
+ */
+#zotero-prefpane-ztransplit .ztransplit-desc {
+  color: var(--ztransplit-text-secondary);
+  max-width: 60em;
+  margin-block: 0 6px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 越界提示：与 Zotero 的 .zotero-message-error 同样只加粗不改色（保证暗色可读） */
+#zotero-prefpane-ztransplit .ztransplit-error {
+  font-weight: 600;
+  margin-block-start: 2px;
+}
+
+/* 引擎字段组：切换引擎时只切 hidden，不留空档也不跳动 */
+#zotero-prefpane-ztransplit .ztransplit-engine {
+  margin-block-start: 6px;
+}
+
+#zotero-prefpane-ztransplit .ztransplit-engine[hidden] {
+  display: none;
+}
+
+/* PDF 分屏翻译里的小标题（Java 运行库 / 字体覆盖目录 / 译文语言） */
+#zotero-prefpane-ztransplit .ztransplit-subhead {
+  font-weight: 600;
+  color: var(--ztransplit-text);
+  margin-block: 8px 2px;
+}
+
+/* 字体目录路径：等宽 + 可选中 + 任意断行，长路径不会撑破布局 */
+#zotero-prefpane-ztransplit .ztransplit-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 40em;
+  font-family: monospace;
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -moz-user-select: text;
+  user-select: text;
+}

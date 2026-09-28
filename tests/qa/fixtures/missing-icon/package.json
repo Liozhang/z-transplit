@@ -1,0 +1,11 @@
+{
+  "name": "z-transplit",
+  "version": "0.1.0",
+  "config": {
+    "addonName": "Z-Transplit",
+    "addonID": "ztransplit@zotero.org",
+    "addonRef": "ztransplit",
+    "addonInstance": "ZTransplit",
+    "prefsPrefix": "extensions.zotero.ztransplit"
+  }
+}

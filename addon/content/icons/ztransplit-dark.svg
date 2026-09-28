@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 96 96">
+  <title>Z-Transplit</title>
+  <!--
+    深色宿主专用（对应 z-search icon-dark 的思路）：浅圆反色，避免墨圆
+    没入深色菜单底。浅圆 #fafafa / 墨竖 #1a1a1a / 绯红横 #b5343a。
+    品牌资产，当前无 chrome:// 引用，配色不受 QA S7 约束。
+  -->
+  <circle cx="48" cy="48" r="34" fill="#fafafa"/>
+  <path d="M48 34 V64" stroke="#1a1a1a" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <path d="M28 34 H68" stroke="#b5343a" stroke-width="9" stroke-linecap="round" fill="none"/>
+</svg>

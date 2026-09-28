@@ -1,0 +1,29 @@
+# Build artifacts
+node_modules/
+
+# Scaffold output / release packages
+.scaffold/
+build/
+dist/
+*.xpi
+
+# Local env (scaffold's serve/build warns about it)
+.env
+
+# TypeScript
+*.tsbuildinfo
+
+# Tests & logs
+coverage/
+*.log
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Local agent scratch data
+.zcode/
+.verify/

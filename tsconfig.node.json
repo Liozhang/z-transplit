@@ -1,0 +1,24 @@
+{
+  "//": "Node-side project: vitest specs + the build config files. Needs @types/node (tests use node:fs etc.) while still keeping zotero-types' ambient sandbox declarations, because the specs import src/ modules that talk to the Zotero globals.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "zotero-types/entries/sandbox"
+    ]
+  },
+  "include": [
+    "tests",
+    "typings",
+    "vitest.config.ts",
+    "zotero-plugin.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "addon",
+    "build",
+    "dist",
+    ".scaffold",
+    "tests/qa/fixtures"
+  ]
+}

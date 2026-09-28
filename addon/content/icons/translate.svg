@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Z-Transplit 翻译</title>
+  <!--
+    UI 图标（registerTranslateUI 菜单入口），QA S7 规定 chrome:// 引用
+    图标必须 currentColor 单层绘制，故不采用 leadero/z-search 的
+    DUALLAYER(context-fill) 双层法。图形沿用两家的「双栏 + 互换箭头」
+    母题：左右两栏即分屏对照，上下反向箭头即译文互换。
+  -->
+  <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="4.5" width="6" height="15" rx="2"/>
+    <rect x="16" y="4.5" width="6" height="15" rx="2"/>
+    <path d="M9 8.5 H13.5 M11.5 6.5 L13.5 8.5 L11.5 10.5"/>
+    <path d="M15 15.5 H10.5 M12.5 13.5 L10.5 15.5 L12.5 17.5"/>
+  </g>
+</svg>

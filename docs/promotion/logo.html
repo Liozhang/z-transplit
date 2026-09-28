@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Z-Transplit 品牌标预览</title>
+<!--
+  品牌标速览页（沿用 leadero docs/promotion 惯例）。
+  本地起服务或直接双击打开即可；图片相对路径指向 addon/content/icons。
+  2026-09-25 重设计：墨圆=原文版面，白竖=分屏线，青横=双语对照，整体为 T。
+  设计谱系与几何推导见 logo.svg 头部注释。
+-->
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; background: #fff; color: #26262d; margin: 24px; }
+  h2 { margin: 24px 0 8px; font-size: 15px; }
+  .row { display: flex; align-items: flex-end; gap: 20px; }
+  .cell { text-align: center; }
+  .cell div { font-size: 12px; color: #888; margin-top: 4px; }
+  .dark { background: #1e1e22; display: inline-block; padding: 8px; border-radius: 8px; }
+  img { display: block; image-rendering: auto; }
+</style>
+</head>
+<body>
+<h1>Z-Transplit 品牌标</h1>
+
+<h2>主标（logo.svg）多尺寸</h2>
+<div class="row">
+  <div class="cell"><img src="../../addon/content/icons/logo.svg" width="128"><div>128</div></div>
+  <div class="cell"><img src="../../addon/content/icons/logo.svg" width="48"><div>48</div></div>
+  <div class="cell"><img src="../../addon/content/icons/logo.svg" width="24"><div>24</div></div>
+  <div class="cell"><img src="../../addon/content/icons/logo.svg" width="16"><div>16</div></div>
+</div>
+
+<h2>主题变体（48px）</h2>
+<div class="row">
+  <div class="cell"><img src="../../addon/content/icons/ztransplit-any.svg" width="48"><div>any / manifest</div></div>
+  <div class="cell"><img src="../../addon/content/icons/ztransplit-light.svg" width="48"><div>light 底</div></div>
+  <div class="cell"><span class="dark"><img src="../../addon/content/icons/ztransplit-dark.svg" width="48"></span><div>dark 底</div></div>
+</div>
+
+<h2>UI 图标（currentColor，随主题着色）</h2>
+<div class="row">
+  <div class="cell"><img src="../../addon/content/icons/translate.svg" width="24"><div>translate 24</div></div>
+  <div class="cell"><img src="../../addon/content/icons/translate-20.svg" width="20"><div>translate 20</div></div>
+</div>
+</body>
+</html>

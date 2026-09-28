@@ -1,0 +1,12 @@
+import { getString } from "../utils/locale";
+import { getPref, getPrefDynamic } from "../utils/prefs";
+export const LABEL = getString("pane-translate-action");
+export const ON = getPref("translate.enabled");
+export const AUTO = getPref("translate.auto");
+export const MAX = getPrefDynamic("translate.maxChars");
+export const ENGINE = getPrefDynamic("translate.engineType");
+export const GKEY = getPrefDynamic("translate.google.apiKey");
+export const ICON = "chrome://ztransplit/content/icons/translate.svg";
+function logMiss(key: string) {
+  safeDebug(`getPref('${key}') missing`);
+}

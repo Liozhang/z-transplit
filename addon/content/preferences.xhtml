@@ -1,0 +1,619 @@
+<!--
+  Z-Transplit 设置面板（编辑 → 设置 → Z-Transplit）。
+
+  由 Zotero.PreferencePanes.register() 以「片段」方式载入：插件面板走
+  Zotero_Preferences._loadPane 的 XHTML 分支（无 defaultXUL），片段被包进
+  <div xmlns="XHTML" xmlns:xul="XUL"> 后按 XML 解析 —— 因此本文件必须是
+  格式良好的 XML：单一根元素、不能出现 <?xml?> 声明、html: 前缀必须由根
+  元素自行声明（内置面板的 defaultXUL 路径才由 Mozilla 预声明该前缀）。
+
+  文案全部来自 addon/locale/en-US/ztransplit-preferences.ftl（data-l10n-id）。
+  每个可交互控件都带 data-l10n-id；同时保留了一份静态中文文案作为兜底 ——
+  万一插件 FTL 没能注册进设置窗口的 Fluent 上下文（旧版本 Zotero、构建产物
+  缺文件等），面板依然可读可用，不会出现一片空白。两份文案必须同步修改。
+
+  行为逻辑在 content/preferences.js：引擎字段组的显隐、密钥显示/隐藏、
+  maxChars 校验、zotero-pdf-translate 安装状态探测。
+-->
+<vbox
+  id="zotero-prefpane-ztransplit"
+  class="ztransplit-prefpane"
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  onload="if (window.ZTransplitPrefs) ZTransplitPrefs.onLoad(event)"
+>
+  <linkset>
+    <html:link rel="localization" href="ztransplit-preferences.ftl" />
+  </linkset>
+  <vbox class="main-section">
+    <vbox class="ztransplit-intro">
+      <description
+        class="ztransplit-desc"
+        data-l10n-id="preferences-ztransplit-intro"
+      >文本翻译引擎与 PDF 分屏翻译所需的运行环境都在这里配置。</description>
+    </vbox>
+
+    <!-- ── (a) 常规 ─────────────────────────────────────────────────────── -->
+    <groupbox
+      id="ztransplit-pref-group-general"
+      aria-labelledby="ztransplit-pref-general-title"
+    >
+      <label>
+        <html:h2
+          id="ztransplit-pref-general-title"
+          data-l10n-id="preferences-ztransplit-general"
+        >常规</html:h2>
+      </label>
+
+      <checkbox
+        id="ztransplit-pref-enabled"
+        native="true"
+        preference="extensions.zotero.ztransplit.translate.enabled"
+        data-l10n-id="preferences-ztransplit-translate-enabled"
+        label="启用文本翻译"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-translate-enabled-desc"
+        >开启后，条目面板和阅读器中才会出现翻译入口。关闭时翻译按钮和自动翻译都会停用，但已经填写的引擎密钥等设置会保留，随时可以重新开启。</description>
+      </vbox>
+
+      <checkbox
+        id="ztransplit-pref-auto"
+        native="true"
+        preference="extensions.zotero.ztransplit.translate.auto"
+        data-l10n-id="preferences-ztransplit-translate-auto"
+        label="打开条目时自动翻译"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-translate-auto-desc"
+        >打开阅读器条目或选中文本时立即翻译，不需要再点「翻译」按钮。需要先开启上面的「启用文本翻译」。自动翻译会按下面的字符上限分段请求，打开长文档时会产生较多网络请求。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          id="ztransplit-pref-maxchars-label"
+          value="单次请求最大字符数"
+          control="ztransplit-pref-maxchars"
+          data-l10n-id="preferences-ztransplit-translate-max-chars"
+        />
+        <html:input
+          id="ztransplit-pref-maxchars"
+          class="ztransplit-number"
+          type="number"
+          min="100"
+          max="50000"
+          step="100"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-maxchars-label"
+          aria-describedby="ztransplit-pref-maxchars-desc"
+        />
+      </hbox>
+      <vbox>
+        <description
+          id="ztransplit-pref-maxchars-desc"
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-translate-max-chars-desc"
+        >每次提交给翻译引擎的字符上限，可填 100–50000，默认 10000。超出上限的文本会自动分段，所以调大只是减少分段次数、增大单次请求体积；调小更保守，但分段更多，更容易在分段处产生语义断裂。填错或留空时会继续使用上一次的合法值，不会改写设置。</description>
+        <description
+          id="ztransplit-pref-maxchars-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+          data-l10n-id="preferences-ztransplit-translate-max-chars-range"
+        >请输入 100 到 50000 之间的整数。</description>
+      </vbox>
+    </groupbox>
+
+    <!-- ── (b) 翻译引擎 ─────────────────────────────────────────────────── -->
+    <groupbox
+      id="ztransplit-pref-group-engine"
+      aria-labelledby="ztransplit-pref-engine-title"
+    >
+      <label>
+        <html:h2
+          id="ztransplit-pref-engine-title"
+          data-l10n-id="preferences-ztransplit-engine"
+        >翻译引擎</html:h2>
+      </label>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          id="ztransplit-pref-engine-type-label"
+          value="引擎"
+          control="ztransplit-pref-engine-type"
+          data-l10n-id="preferences-ztransplit-engine-type"
+        />
+        <menulist
+          id="ztransplit-pref-engine-type"
+          native="true"
+          preference="extensions.zotero.ztransplit.translate.engineType"
+        >
+          <menupopup>
+            <menuitem
+              value="google"
+              label="Google 翻译"
+              data-l10n-id="preferences-ztransplit-engine-google"
+            />
+            <menuitem
+              value="bing"
+              label="Bing 翻译"
+              data-l10n-id="preferences-ztransplit-engine-bing"
+            />
+            <menuitem
+              value="deepl"
+              label="DeepL"
+              data-l10n-id="preferences-ztransplit-engine-deepl"
+            />
+            <menuitem
+              value="custom"
+              label="自定义接口（OpenAI 兼容）"
+              data-l10n-id="preferences-ztransplit-engine-custom"
+            />
+            <menuitem
+              id="ztransplit-pref-engine-item-pdftranslate"
+              value="zotero-pdf-translate"
+              label="zotero-pdf-translate 插件"
+              data-l10n-id="preferences-ztransplit-engine-zotero-pdf-translate"
+            />
+          </menupopup>
+        </menulist>
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-engine-type-desc"
+        >选择文本翻译使用的引擎。切换引擎不会清除其它引擎已经填写的密钥，随时可以切回；只有当前选中的引擎会被使用。</description>
+      </vbox>
+
+      <!-- google：apiKey 可空，留空走免费端点 + Bing 兜底 -->
+      <vbox id="ztransplit-pref-engine-google" class="ztransplit-engine">
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="Google API 密钥"
+            control="ztransplit-pref-google-key"
+            data-l10n-id="preferences-ztransplit-google-api-key"
+          />
+          <html:input
+            id="ztransplit-pref-google-key"
+            class="ztransplit-text"
+            type="password"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.google.apiKey"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <checkbox
+            class="ztransplit-key-toggle"
+            native="true"
+            label="显示密钥"
+            data-l10n-id="preferences-ztransplit-show-key"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.toggleKeyVisibility(event)"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-google-api-key-desc"
+          >可以留空。留空时使用免密钥的免费端点，失败后会自动改用免密钥的 Bing 网页接口兜底；填写密钥后改走官方接口，配额和稳定性更好。密钥无效不会弹出提示，只会表现为翻译失败，因此留空通常是更省心的选择。</description>
+        </vbox>
+      </vbox>
+
+      <!-- bing：apiKey + region -->
+      <vbox id="ztransplit-pref-engine-bing" class="ztransplit-engine">
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="Bing API 密钥"
+            control="ztransplit-pref-bing-key"
+            data-l10n-id="preferences-ztransplit-bing-api-key"
+          />
+          <html:input
+            id="ztransplit-pref-bing-key"
+            class="ztransplit-text"
+            type="password"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.bing.apiKey"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <checkbox
+            class="ztransplit-key-toggle"
+            native="true"
+            label="显示密钥"
+            data-l10n-id="preferences-ztransplit-show-key"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.toggleKeyVisibility(event)"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-bing-api-key-desc"
+          >必填。Microsoft 翻译器 REST API 的密钥，可在 Azure 门户的「翻译器」资源中申请。未填写时 Bing 翻译会直接失败。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="区域"
+            control="ztransplit-pref-bing-region"
+            data-l10n-id="preferences-ztransplit-bing-region"
+          />
+          <html:input
+            id="ztransplit-pref-bing-region"
+            class="ztransplit-text ztransplit-short"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.bing.region"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-bing-region-desc"
+          >可留空。多区域资源（如 chinaeast2）要与申请时保持一致，全球资源填 global 即可。填错会返回鉴权错误。</description>
+        </vbox>
+      </vbox>
+
+      <!-- deepl：apiKey + 免费端点开关 -->
+      <vbox id="ztransplit-pref-engine-deepl" class="ztransplit-engine">
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="DeepL API 密钥"
+            control="ztransplit-pref-deepl-key"
+            data-l10n-id="preferences-ztransplit-deepl-api-key"
+          />
+          <html:input
+            id="ztransplit-pref-deepl-key"
+            class="ztransplit-text"
+            type="password"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.deepl.apiKey"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <checkbox
+            class="ztransplit-key-toggle"
+            native="true"
+            label="显示密钥"
+            data-l10n-id="preferences-ztransplit-show-key"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.toggleKeyVisibility(event)"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-deepl-api-key-desc"
+          >必填。DeepL API 的认证密钥，未填写时 DeepL 翻译会直接失败。</description>
+        </vbox>
+        <checkbox
+          id="ztransplit-pref-deepl-free"
+          native="true"
+          preference="extensions.zotero.ztransplit.translate.deepl.useFree"
+          data-l10n-id="preferences-ztransplit-deepl-use-free"
+          label="使用 DeepL 免费接口"
+        />
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-deepl-use-free-desc"
+          >免费密钥（密钥以 :fx 结尾）必须开启；Pro 密钥请关闭。选错会返回 401/403 鉴权错误。</description>
+        </vbox>
+      </vbox>
+
+      <!-- custom：OpenAI 兼容三件套 -->
+      <vbox id="ztransplit-pref-engine-custom" class="ztransplit-engine">
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="接口地址"
+            control="ztransplit-pref-custom-url"
+            data-l10n-id="preferences-ztransplit-custom-api-url"
+          />
+          <html:input
+            id="ztransplit-pref-custom-url"
+            class="ztransplit-text"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.custom.apiUrl"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-custom-api-url-desc"
+          >必填。OpenAI 兼容的 chat/completions 地址，例如 https://api.example.com/v1/chat/completions。留空时翻译会失败。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="API 密钥"
+            control="ztransplit-pref-custom-key"
+            data-l10n-id="preferences-ztransplit-custom-api-key"
+          />
+          <html:input
+            id="ztransplit-pref-custom-key"
+            class="ztransplit-text"
+            type="password"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.custom.apiKey"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <checkbox
+            class="ztransplit-key-toggle"
+            native="true"
+            label="显示密钥"
+            data-l10n-id="preferences-ztransplit-show-key"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.toggleKeyVisibility(event)"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-custom-api-key-desc"
+          >必填。该服务的密钥，通常作为 Authorization: Bearer &lt;密钥&gt; 发送。留空时翻译会失败。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="模型"
+            control="ztransplit-pref-custom-model"
+            data-l10n-id="preferences-ztransplit-custom-model"
+          />
+          <html:input
+            id="ztransplit-pref-custom-model"
+            class="ztransplit-text"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.custom.model"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-custom-model-desc"
+          >可留空。要调用的模型名，例如 gpt-4o-mini。留空时由服务端使用默认模型，翻译质量不受保证。</description>
+        </vbox>
+      </vbox>
+
+      <!-- zotero-pdf-translate：pane 内直接探测插件是否存在。
+           两段状态文案都由 data-l10n-id 本地化，脚本只切 hidden，
+           不在 JS 里写死任何字符串（构建时只会重写 xhtml 里的
+           data-l10n-id，JS 中的 id 不会加命名空间前缀）。 -->
+      <vbox id="ztransplit-pref-engine-pdftranslate" class="ztransplit-engine">
+        <vbox
+          id="ztransplit-pref-pdftranslate-installed"
+          hidden="true"
+        >
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-pdftranslate-installed"
+          >已检测到 zotero-pdf-translate 插件，文本翻译请求会转交给它处理。</description>
+        </vbox>
+        <vbox
+          id="ztransplit-pref-pdftranslate-missing"
+        >
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-pdftranslate-missing"
+          >未检测到 zotero-pdf-translate 插件。请在 Zotero 的「工具 → 插件」中安装并启用它，否则选择该引擎时翻译会失败。</description>
+        </vbox>
+      </vbox>
+    </groupbox>
+
+    <!-- ── (c) PDF 分屏翻译 ─────────────────────────────────────────────── -->
+    <groupbox
+      id="ztransplit-pref-group-pdf"
+      aria-labelledby="ztransplit-pref-pdf-title"
+    >
+      <label>
+        <html:h2
+          id="ztransplit-pref-pdf-title"
+          data-l10n-id="preferences-ztransplit-pdf"
+        >PDF 分屏翻译</html:h2>
+      </label>
+
+      <label
+        id="ztransplit-pref-pdf-java-title"
+        class="ztransplit-subhead"
+        value="Java 运行库"
+        data-l10n-id="preferences-ztransplit-pdf-java-title"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-java-desc"
+        >保留排版的 PDF 翻译需要 Java 11 或更高版本来解析 PDF 内容。没有安装 Java 时该功能不可用：在阅读器中右键点击 PDF，选择「翻译并分屏」时会自动检测，未检测到会弹窗引导下载安装便携版 Java（约 40MB，解压到数据目录，无需管理员权限），安装完成后再次点击该菜单即可。</description>
+      </vbox>
+
+      <label
+        id="ztransplit-pref-pdf-fonts-title"
+        class="ztransplit-subhead"
+        value="字体覆盖目录"
+        data-l10n-id="preferences-ztransplit-pdf-fonts-title"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-fonts-desc"
+        >把自定义字体文件（.ttf / .otf / .ttc）放进下面的目录，即可覆盖 PDF 翻译使用的默认字体，用来改善中文等非拉丁文字的显示效果。目录不存在时会自动创建，放入的字体在下次翻译时生效。</description>
+      </vbox>
+      <hbox class="ztransplit-row" align="center">
+        <label
+          value="字体目录"
+          control="ztransplit-pref-pdf-fonts-path"
+          data-l10n-id="preferences-ztransplit-pdf-fonts-path"
+        />
+        <html:code
+          id="ztransplit-pref-pdf-fonts-path"
+          class="ztransplit-path"
+        >{数据目录}/ztransplit/translation-assets</html:code>
+      </hbox>
+
+      <label
+        id="ztransplit-pref-pdf-lang-title"
+        class="ztransplit-subhead"
+        value="译文语言"
+        data-l10n-id="preferences-ztransplit-pdf-lang-title"
+      />
+      <hbox class="ztransplit-row" align="center">
+        <label
+          value="目标语言"
+          control="ztransplit-pref-pdf-lang"
+          data-l10n-id="preferences-ztransplit-pdf-lang"
+        />
+        <html:input
+          id="ztransplit-pref-pdf-lang"
+          class="ztransplit-text ztransplit-short"
+          type="text"
+          tabindex="0"
+          preference="extensions.zotero.ztransplit.translate.targetLanguage"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-lang-desc"
+        >PDF 分屏翻译的目标语言；Zotero 10 双语对照视图与朗读译文也使用它作为默认目标语言。填写 BCP-47 语言码，如 zh-CN、en-US、ja-JP。留空时跟随 Zotero 的界面语言（默认行为）。阅读器条目面板的文本翻译使用自己的目标语言框，与此处互不影响。</description>
+      </vbox>
+
+      <label
+        id="ztransplit-pref-pdf-odl-title"
+        class="ztransplit-subhead"
+        value="OpenDataLoader 解析选项"
+        data-l10n-id="preferences-ztransplit-pdf-odl-title"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-odl-desc"
+        >以下选项控制本地 Java 解析组件的行为，影响「翻译并分屏」的版面解析质量与耗时。除超时外，改动都在下次翻译时生效。</description>
+      </vbox>
+
+      <checkbox
+        id="ztransplit-pref-odl-enabled"
+        native="true"
+        preference="extensions.zotero.ztransplit.pdfParser.opendataloader.enabled"
+        data-l10n-id="preferences-ztransplit-pdf-odl-enabled"
+        label="启用 OpenDataLoader 解析"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-odl-enabled-desc"
+        >OpenDataLoader 是「翻译并分屏」唯一使用的版面解析后端。关闭后翻译并分屏会直接失败并提示回到这里开启；除非它在你的系统上确实无法运行，否则应保持开启。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          value="表格识别"
+          control="ztransplit-pref-odl-table"
+          data-l10n-id="preferences-ztransplit-pdf-odl-table"
+        />
+        <menulist
+          id="ztransplit-pref-odl-table"
+          native="true"
+          preference="extensions.zotero.ztransplit.pdfParser.opendataloader.tableEnable"
+        >
+          <menupopup>
+            <menuitem
+              value="default"
+              label="默认（按边框识别）"
+              data-l10n-id="preferences-ztransplit-pdf-odl-table-default"
+            />
+            <menuitem
+              value="cluster"
+              label="聚类（无边框表格）"
+              data-l10n-id="preferences-ztransplit-pdf-odl-table-cluster"
+            />
+          </menupopup>
+        </menulist>
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-odl-table-desc"
+        >表格识别方法。「默认」按表格线切分，适合有线框的表格；「聚类」按文本块聚类，适合无边框表格，但耗时更长、误判率略高。</description>
+      </vbox>
+
+      <checkbox
+        id="ztransplit-pref-odl-structtree"
+        native="true"
+        preference="extensions.zotero.ztransplit.pdfParser.opendataloader.useStructTree"
+        data-l10n-id="preferences-ztransplit-pdf-odl-structtree"
+        label="使用结构树判定阅读顺序"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-odl-structtree-desc"
+        >PDF 自带结构树（StructTree）时按它判定阅读顺序，多栏排版更准确；没有结构树的 PDF 不受影响，但解析会稍慢。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          id="ztransplit-pref-odl-timeout-label"
+          value="解析超时（秒）"
+          control="ztransplit-pref-odl-timeout"
+          data-l10n-id="preferences-ztransplit-pdf-odl-timeout"
+        />
+        <html:input
+          id="ztransplit-pref-odl-timeout"
+          class="ztransplit-number"
+          type="number"
+          min="30"
+          max="3600"
+          step="30"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-odl-timeout-label"
+          aria-describedby="ztransplit-pref-odl-timeout-desc"
+        />
+      </hbox>
+      <vbox>
+        <description
+          id="ztransplit-pref-odl-timeout-desc"
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-odl-timeout-desc"
+        >单次版面解析的最长等待时间，可填 30–3600 秒，默认 300。大文档或慢磁盘上解析超时会表现为翻译失败，调大之前请先确认不是 Java 未安装。填错或留空时会继续使用上一次的合法值，不会改写设置。</description>
+        <description
+          id="ztransplit-pref-odl-timeout-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+          data-l10n-id="preferences-ztransplit-pdf-odl-timeout-range"
+        >请输入 30 到 3600 之间的整数。</description>
+      </vbox>
+
+      <checkbox
+        id="ztransplit-pref-odl-images"
+        native="true"
+        preference="extensions.zotero.ztransplit.pdfParser.opendataloader.returnImages"
+        data-l10n-id="preferences-ztransplit-pdf-odl-images"
+        label="返回嵌入图像"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-odl-images-desc"
+        >让解析器输出页面内嵌图像，翻译后随译文贴回原位置，图表更完整；关闭后只翻译文字，图像区域留白，解析更快、生成的文件更小。</description>
+      </vbox>
+    </groupbox>
+  </vbox>
+
+  <!--
+    仅供脚本读取的本地化字符串容器。构建时只会给 xhtml 里的 data-l10n-id 加
+    命名空间前缀，JS 里的字符串 id 不会，所以需要动态切换的文案在这里准备一份
+    静态节点，由 Fluent 翻译后供 content/preferences.js 读取（取不到时退回这里
+    的静态中文，面板依旧可用）。
+  -->
+  <vbox id="ztransplit-pref-hidden-strings" hidden="true">
+    <label
+      id="ztransplit-pref-string-pdftranslate-missing"
+      data-l10n-id="preferences-ztransplit-engine-zotero-pdf-translate-missing"
+    >zotero-pdf-translate 插件（未安装）</label>
+  </vbox>
+</vbox>

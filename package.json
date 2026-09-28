@@ -1,0 +1,42 @@
+{
+  "name": "z-transplit",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Zotero 7 plugin: text translation and layout-preserving PDF translation with split-screen reading.",
+  "config": {
+    "addonName": "Z-Transplit",
+    "addonID": "ztransplit@zotero.org",
+    "addonRef": "ztransplit",
+    "addonInstance": "ZTransplit",
+    "prefsPrefix": "extensions.zotero.ztransplit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/z-transplit.git"
+  },
+  "author": "z-transplit contributors",
+  "homepage": "https://github.com/example/z-transplit#readme",
+  "license": "MIT",
+  "scripts": {
+    "dev": "zotero-plugin serve",
+    "build": "tsc --noEmit && zotero-plugin build",
+    "test:unit": "vitest run --passWithNoTests",
+    "check:structure": "node scripts/structure-check.mjs",
+    "check:jar": "node scripts/check-jar-provenance.cjs",
+    "test:qa": "node --experimental-strip-types tests/qa/harness-smoke.mjs && node tests/qa/structure-check-selftest.mjs"
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pdf-lib": "^1.17.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^24.0.13",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.8",
+    "vitest": "^4",
+    "zotero-plugin-scaffold": "^0.8.8",
+    "zotero-types": "^4.1.2"
+  }
+}

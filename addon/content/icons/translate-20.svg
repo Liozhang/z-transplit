@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <title>Z-Transplit 翻译</title>
+  <!-- translate.svg 的 20px 版（×5/6），currentColor 单层，见该文件注释 -->
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.7" y="3.75" width="5" height="12.5" rx="1.7"/>
+    <rect x="13.3" y="3.75" width="5" height="12.5" rx="1.7"/>
+    <path d="M7.5 7.1 H11.25 M9.6 5.4 L11.25 7.1 L9.6 8.8"/>
+    <path d="M12.5 12.9 H8.75 M10.4 11.2 L8.75 12.9 L10.4 14.6"/>
+  </g>
+</svg>

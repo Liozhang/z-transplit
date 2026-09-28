@@ -1,0 +1,17 @@
+{
+  "manifest_version": 2,
+  "name": "Z-Transplit",
+  "version": "0.1.0",
+  "description": "translate + split",
+  "author": "qa",
+  "applications": {
+    "zotero": {
+      "strict_min_version": "7.0",
+      "strict_max_version": "7.*"
+    }
+  },
+  "icons": {
+    "48": "chrome://ztransplit/content/icons/ztransplit-light.svg",
+    "48_dark": "chrome://ztransplit/content/icons/ztransplit-dark.svg"
+  }
+}
