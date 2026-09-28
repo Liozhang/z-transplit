@@ -73,6 +73,8 @@ preferences-ztransplit-engine-bing =
     .label = Bing Translator
 preferences-ztransplit-engine-deepl =
     .label = DeepL
+preferences-ztransplit-engine-ai =
+    .label = AI translation (OpenAI-compatible)
 preferences-ztransplit-engine-custom =
     .label = Custom (OpenAI-compatible)
 preferences-ztransplit-engine-zotero-pdf-translate =
@@ -120,6 +122,58 @@ preferences-ztransplit-deepl-use-free =
 preferences-ztransplit-deepl-use-free-desc =
     Free keys (ending in ":fx") must enable this; Pro keys must disable it.
     The wrong choice returns a 401/403 authentication error.
+
+## AI translation (OpenAI-compatible + user-owned prompt template)
+preferences-ztransplit-ai-api-url =
+    .value = Endpoint URL
+preferences-ztransplit-ai-api-url-desc =
+    Required. An OpenAI-compatible chat/completions URL, e.g.
+    https://api.example.com/v1/chat/completions, or a local model service such
+    as http://127.0.0.1:11434/v1. Translation fails when empty.
+preferences-ztransplit-ai-api-key =
+    .value = API key
+preferences-ztransplit-ai-api-key-desc =
+    Optional. Usually required for hosted services; local model services
+    (Ollama, LM Studio, …) generally need no key, and leaving it empty means no
+    Authorization header is sent at all.
+preferences-ztransplit-ai-model =
+    .value = Model
+preferences-ztransplit-ai-model-desc =
+    Optional. The model name to call, e.g. gpt-4o-mini, qwen-max, glm-4.7.
+    When empty, the server picks its default model, with no guarantee on
+    translation quality.
+preferences-ztransplit-ai-prompt =
+    .value = Translation prompt template
+preferences-ztransplit-ai-prompt-desc =
+    What gets sent to the model. Empty means "use the built-in default
+    template". The template must contain three placeholders — {"{{"}text{"}}"}
+    (the text to translate), {"{{"}sourceLang{"}}"} (the source language name)
+    and {"{{"}targetLang{"}}"} (the target language name) — and the plugin
+    fills in the language names as readable names such as "Simplified Chinese".
+    Formulas are replaced by markers like {"{"}v0{"}"} and {"{"}v1{"}"} before
+    translation; the default template asks the model to keep them verbatim. An
+    invalid template is never written to the settings, and selecting this
+    engine while one is stored is blocked by the readiness check, which points
+    back here.
+preferences-ztransplit-ai-prompt-restore =
+    .label = Restore the default template
+
+## AI prompt template rejection reasons (mirrors the engine's runtime errors,
+## shown inline while editing; the JS only copies the localized text)
+preferences-ztransplit-ai-prompt-error-too-long =
+    The template is too long (at most 4000 characters).
+preferences-ztransplit-ai-prompt-error-unknown-placeholder =
+    The template contains an unknown placeholder — only {"{{"}text{"}}"}, {"{{"}sourceLang{"}}"} and {"{{"}targetLang{"}}"} (double braces) are supported.
+preferences-ztransplit-ai-prompt-error-missing-text =
+    The template is missing {"{{"}text{"}}"} — that is where the text to translate goes.
+preferences-ztransplit-ai-prompt-error-duplicate-text =
+    The template contains {"{{"}text{"}}"} more than once — the source text may only be sent once.
+preferences-ztransplit-ai-prompt-error-missing-source-lang =
+    The template is missing {"{{"}sourceLang{"}}"} — that is where the source language name goes.
+preferences-ztransplit-ai-prompt-error-missing-target-lang =
+    The template is missing {"{{"}targetLang{"}}"} — that is where the target language name goes.
+preferences-ztransplit-ai-prompt-error-unbalanced-braces =
+    The template has unbalanced braces — placeholders use double braces ({"{{"}text{"}}"}), formula markers use single braces ({"{"}v0{"}"}).
 
 ## Custom (OpenAI-compatible)
 preferences-ztransplit-custom-api-url =

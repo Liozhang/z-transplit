@@ -39,6 +39,7 @@
     ["google", "ztransplit-pref-engine-google"],
     ["bing", "ztransplit-pref-engine-bing"],
     ["deepl", "ztransplit-pref-engine-deepl"],
+    ["ai", "ztransplit-pref-engine-ai"],
     ["custom", "ztransplit-pref-engine-custom"],
     ["zotero-pdf-translate", "ztransplit-pref-engine-pdftranslate"],
   ];
@@ -144,6 +145,151 @@
     // 不会改写设置”），越界值也不得被夹紧后覆盖设置。
     els.maxCharsInput.value = String(readMaxChars());
     setMaxCharsError(false);
+  }
+
+  // ── AI prompt 模板 ────────────────────────────────────────────────────────
+  // 规则与 src/core/translation/promptTemplate.ts#validatePromptTemplate 一字
+  // 不差（那里是权威实现，这里是设置面板里的即时反馈；tests/unit/ui/
+  // preferencesPane.dom.test.ts 用一个样例矩阵把两份实现的判定钉在一起）。
+  // 与 maxChars / ODL timeout 同一套路：不挂 preference 属性，读 pref → 校验 →
+  // 写 pref，半成品值不落盘；失焦仍非法则恢复当前 pref 值。
+
+  var AI_PROMPT_MAX = 4000;
+  var AI_PLACEHOLDERS = ["text", "sourceLang", "targetLang"];
+
+  /** 与 TS 版同序的七种非法原因 → 隐藏本地化节点 id 后缀。 */
+  var AI_PROMPT_STRING_IDS = {
+    "too-long": "ztransplit-pref-string-ai-prompt-too-long",
+    "unknown-placeholder": "ztransplit-pref-string-ai-prompt-unknown-placeholder",
+    "missing-text": "ztransplit-pref-string-ai-prompt-missing-text",
+    "duplicate-text": "ztransplit-pref-string-ai-prompt-duplicate-text",
+    "missing-source-lang": "ztransplit-pref-string-ai-prompt-missing-source-lang",
+    "missing-target-lang": "ztransplit-pref-string-ai-prompt-missing-target-lang",
+    "unbalanced-braces": "ztransplit-pref-string-ai-prompt-unbalanced-braces",
+  };
+
+  /** @returns {{ok: boolean, reason: string}} reason 为空表示合法。 */
+  function checkAIPrompt(raw) {
+    var template =
+      raw === null || raw === undefined ? "" : String(raw).replace(/^\s+|\s+$/g, "");
+    if (template === "") return { ok: true, reason: "" };
+    if (template.length > AI_PROMPT_MAX) return { ok: false, reason: "too-long" };
+
+    var names = [];
+    var scan = /\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g;
+    var m;
+    while ((m = scan.exec(template)) !== null) names.push(m[1]);
+    for (var i = 0; i < names.length; i++) {
+      // 拼错的占位符要先报「未知占位符」：{{txt}} 同时触犯两条规则，而这条才
+      // 是用户能直接改的那条（与 TS 版同序）。
+      if (AI_PLACEHOLDERS.indexOf(names[i]) < 0) {
+        return { ok: false, reason: "unknown-placeholder" };
+      }
+    }
+    var residual = template.replace(/\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}/g, "");
+    // 不成对的花括号排在「缺失占位符」之前：半成品的 {{text} 同时也丢了
+    // {{text}}，而「花括号落单」才是用户能直接改的那个说法（与 TS 版同序）。
+    if (residual.indexOf("{{") >= 0 || residual.indexOf("}}") >= 0) {
+      return { ok: false, reason: "unbalanced-braces" };
+    }
+    function count(name) {
+      var c = 0;
+      for (var i = 0; i < names.length; i++) if (names[i] === name) c++;
+      return c;
+    }
+    if (count("text") === 0) return { ok: false, reason: "missing-text" };
+    if (count("text") > 1) return { ok: false, reason: "duplicate-text" };
+    if (count("sourceLang") === 0) {
+      return { ok: false, reason: "missing-source-lang" };
+    }
+    if (count("targetLang") === 0) {
+      return { ok: false, reason: "missing-target-lang" };
+    }
+    return { ok: true, reason: "" };
+  }
+
+  function setAIPromptError(reason) {
+    var errorEl = els.aiPromptError;
+    if (!errorEl) return;
+    if (!reason) {
+      show(errorEl, false);
+      if (els.aiPromptInput) {
+        try {
+          els.aiPromptInput.removeAttribute("aria-invalid");
+        } catch (e) {
+          /* 忽略 */
+        }
+      }
+      return;
+    }
+    // 文案从隐藏的本地化节点取，JS 不写死任何字符串（与 pdftranslate 标签同款）。
+    var source = AI_PROMPT_STRING_IDS[reason]
+      ? $(AI_PROMPT_STRING_IDS[reason])
+      : null;
+    if (source && source.textContent) errorEl.textContent = source.textContent;
+    show(errorEl, true);
+    if (els.aiPromptInput) {
+      try {
+        els.aiPromptInput.setAttribute("aria-invalid", "true");
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  function readPromptInput() {
+    if (!els.aiPromptInput) return "";
+    var v;
+    try {
+      v = els.aiPromptInput.value;
+    } catch (e) {
+      v = undefined;
+    }
+    // XUL textbox 有 value；非 XUL 渲染（测试台）退回 textContent。
+    if (v === undefined || v === null) v = els.aiPromptInput.textContent;
+    return v === undefined || v === null ? "" : String(v);
+  }
+
+  function writePromptInput(text) {
+    if (!els.aiPromptInput) return;
+    try {
+      els.aiPromptInput.value = text;
+    } catch (e) {
+      /* 忽略 */
+    }
+    if (els.aiPromptInput.value !== text) els.aiPromptInput.textContent = text;
+  }
+
+  function onAIPromptInput() {
+    if (!els.aiPromptInput) return;
+    var check = checkAIPrompt(readPromptInput());
+    if (check.ok) {
+      setAIPromptError("");
+      setPref("translate.ai.prompt", readPromptInput());
+      return;
+    }
+    // 半成品值只提示，不写 pref（与 maxChars 同一策略）。
+    setAIPromptError(check.reason);
+  }
+
+  function onAIPromptChange() {
+    if (!els.aiPromptInput) return;
+    var check = checkAIPrompt(readPromptInput());
+    if (check.ok) {
+      setAIPromptError("");
+      setPref("translate.ai.prompt", readPromptInput());
+      return;
+    }
+    // 失焦仍非法：恢复为当前 pref 值且不写 pref。
+    writePromptInput(String(getPref("translate.ai.prompt") || ""));
+    setAIPromptError("");
+  }
+
+  /** 「恢复默认模板」按钮：写空串即内置默认模板。 */
+  function restoreDefaultPrompt() {
+    setPref("translate.ai.prompt", "");
+    writePromptInput("");
+    setAIPromptError("");
   }
 
   // ── pdfParser.opendataloader.timeout ─────────────────────────────────────
@@ -305,6 +451,8 @@
     els.timeoutError = $("ztransplit-pref-odl-timeout-error");
     els.engineList = $("ztransplit-pref-engine-type");
     els.pdfTranslateItem = $("ztransplit-pref-engine-item-pdftranslate");
+    els.aiPromptInput = $("ztransplit-pref-ai-prompt");
+    els.aiPromptError = $("ztransplit-pref-ai-prompt-error");
 
     // Zotero 在派发 load 之前已经跑完 document.l10n.translateFragment()，
     // 所以这里读到的 label / textContent 已经是本地化后的文案。
@@ -330,6 +478,10 @@
     if (els.timeoutInput) {
       els.timeoutInput.addEventListener("input", onTimeoutInput);
       els.timeoutInput.addEventListener("change", onTimeoutChange);
+    }
+    if (els.aiPromptInput) {
+      els.aiPromptInput.addEventListener("input", onAIPromptInput);
+      els.aiPromptInput.addEventListener("change", onAIPromptChange);
     }
     if (els.engineList) {
       // XUL menulist 选中项变化主要抛 select；command 在某些平台上也会抛，
@@ -360,6 +512,12 @@
       }
       setTimeoutError(false);
 
+      // prompt 模板：空值 = 内置默认模板，所以输入框留空是合法初始态。
+      if (els.aiPromptInput) {
+        writePromptInput(String(getPref("translate.ai.prompt") || ""));
+      }
+      setAIPromptError("");
+
       syncEngineFields();
       syncPDFTranslateStatus();
 
@@ -374,5 +532,6 @@
   window.ZTransplitPrefs = {
     onLoad: onLoad,
     toggleKeyVisibility: toggleKeyVisibility,
+    restoreDefaultPrompt: restoreDefaultPrompt,
   };
 })();

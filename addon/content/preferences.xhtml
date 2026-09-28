@@ -148,6 +148,11 @@
               data-l10n-id="preferences-ztransplit-engine-deepl"
             />
             <menuitem
+              value="ai"
+              label="AI 翻译（OpenAI 兼容）"
+              data-l10n-id="preferences-ztransplit-engine-ai"
+            />
+            <menuitem
               value="custom"
               label="自定义接口（OpenAI 兼容）"
               data-l10n-id="preferences-ztransplit-engine-custom"
@@ -300,6 +305,120 @@
             data-l10n-id="preferences-ztransplit-deepl-use-free-desc"
           >免费密钥（密钥以 :fx 结尾）必须开启；Pro 密钥请关闭。选错会返回 401/403 鉴权错误。</description>
         </vbox>
+      </vbox>
+
+      <!-- ai：OpenAI 兼容三件套 + 用户自建 prompt 模板（带校验） -->
+      <vbox id="ztransplit-pref-engine-ai" class="ztransplit-engine">
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="接口地址"
+            control="ztransplit-pref-ai-url"
+            data-l10n-id="preferences-ztransplit-ai-api-url"
+          />
+          <html:input
+            id="ztransplit-pref-ai-url"
+            class="ztransplit-text"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.ai.apiUrl"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-ai-api-url-desc"
+          >必填。OpenAI 兼容的 chat/completions 地址，例如 https://api.example.com/v1/chat/completions，也可以是本地模型服务（如 http://127.0.0.1:11434/v1）。留空时 AI 翻译会直接失败。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="API 密钥"
+            control="ztransplit-pref-ai-key"
+            data-l10n-id="preferences-ztransplit-ai-api-key"
+          />
+          <html:input
+            id="ztransplit-pref-ai-key"
+            class="ztransplit-text"
+            type="password"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.ai.apiKey"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <checkbox
+            class="ztransplit-key-toggle"
+            native="true"
+            label="显示密钥"
+            data-l10n-id="preferences-ztransplit-show-key"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.toggleKeyVisibility(event)"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-ai-api-key-desc"
+          >可留空。云端服务通常必填；本地模型服务（Ollama / LM Studio 等）一般不需要密钥，留空即可，此时不会发送 Authorization 头。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="模型"
+            control="ztransplit-pref-ai-model"
+            data-l10n-id="preferences-ztransplit-ai-model"
+          />
+          <html:input
+            id="ztransplit-pref-ai-model"
+            class="ztransplit-text"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.ai.model"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-ai-model-desc"
+          >可留空。要调用的模型名，例如 gpt-4o-mini、qwen-max、glm-4.7。留空时由服务端使用默认模型，翻译质量不受保证。</description>
+        </vbox>
+
+        <label
+          id="ztransplit-pref-ai-prompt-label"
+          class="ztransplit-subhead"
+          value="翻译提示词模板"
+          control="ztransplit-pref-ai-prompt"
+          data-l10n-id="preferences-ztransplit-ai-prompt"
+        />
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-ai-prompt-desc"
+          >发送给模型的内容，留空表示使用内置默认模板。模板必须包含三个占位符：{{text}}（待翻译原文的位置）、{{sourceLang}}（源语言名称）、{{targetLang}}（目标语言名称）；语言名称由插件按界面语言自动填入，例如「Simplified Chinese」。数学公式在翻译前会被替换成 {v0}、{v1} 这样的标记，默认模板会要求模型原样保留它们。非法模板不会写入设置，选择该引擎时会被就绪检查拦下并提示回到这里修改。</description>
+        </vbox>
+        <textbox
+          id="ztransplit-pref-ai-prompt"
+          class="ztransplit-prompt"
+          multiline="true"
+          rows="8"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-ai-prompt-label"
+          aria-describedby="ztransplit-pref-ai-prompt-desc"
+        />
+        <hbox class="ztransplit-row" align="center">
+          <button
+            id="ztransplit-pref-ai-prompt-restore"
+            class="ztransplit-button"
+            label="恢复默认模板"
+            data-l10n-id="preferences-ztransplit-ai-prompt-restore"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.restoreDefaultPrompt(event)"
+          />
+        </hbox>
+        <description
+          id="ztransplit-pref-ai-prompt-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+        >模板不合法。</description>
       </vbox>
 
       <!-- custom：OpenAI 兼容三件套 -->
@@ -615,5 +734,36 @@
       id="ztransplit-pref-string-pdftranslate-missing"
       data-l10n-id="preferences-ztransplit-engine-zotero-pdf-translate-missing"
     >zotero-pdf-translate 插件（未安装）</label>
+    <!-- AI prompt 模板的七种非法原因。正文里只放一个错误节点，由脚本按校验
+         结果把对应本地化文案搬过去（与 pdftranslate 标签同一套路：JS 不写死
+         任何字符串，只搬文本）。 -->
+    <label
+      id="ztransplit-pref-string-ai-prompt-too-long"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-too-long"
+    >模板过长：不得超过 4000 个字符。</label>
+    <label
+      id="ztransplit-pref-string-ai-prompt-unknown-placeholder"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-unknown-placeholder"
+    >模板包含未知占位符：只支持 {{text}}、{{sourceLang}}、{{targetLang}} 三种（双花括号）。</label>
+    <label
+      id="ztransplit-pref-string-ai-prompt-missing-text"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-missing-text"
+    >模板缺少 {{text}}：它是待翻译原文所在的位置。</label>
+    <label
+      id="ztransplit-pref-string-ai-prompt-duplicate-text"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-duplicate-text"
+    >模板里 {{text}} 出现了多次：待翻译原文只能发送一次。</label>
+    <label
+      id="ztransplit-pref-string-ai-prompt-missing-source-lang"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-missing-source-lang"
+    >模板缺少 {{sourceLang}}：它是源语言名称所在的位置。</label>
+    <label
+      id="ztransplit-pref-string-ai-prompt-missing-target-lang"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-missing-target-lang"
+    >模板缺少 {{targetLang}}：它是目标语言名称所在的位置。</label>
+    <label
+      id="ztransplit-pref-string-ai-prompt-unbalanced-braces"
+      data-l10n-id="preferences-ztransplit-ai-prompt-error-unbalanced-braces"
+    >模板的花括号不成对：占位符写成双花括号（{{text}}），公式标记写成单花括号（{v0}）。</label>
   </vbox>
 </vbox>

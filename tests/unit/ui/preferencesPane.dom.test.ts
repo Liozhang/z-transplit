@@ -7,6 +7,7 @@
  *   - 引擎下拉切换时字段组的显隐（只切 hidden 属性，不重建 DOM）
  *   - zotero-pdf-translate 安装状态探测（装了/没装两条路径）
  *   - maxChars / ODL timeout 输入校验（越界报错、失焦恢复旧值、合法写回 pref）
+ *   - AI prompt 模板校验（非法不写 pref、失焦恢复、恢复默认、与 TS 权威实现同判）
  *   - 字体覆盖目录路径回显
  *   - FTL 消息形式与 xhtml 控件匹配（带 value 的 label→.value，
  *     menuitem/checkbox→.label，双语键集合一致）
@@ -18,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { validatePromptTemplate } from "../../../src/core/translation/promptTemplate";
 
 const ROOT = join(__dirname, "..", "..", "..");
 const XHTML_FRAGMENT = readFileSync(join(ROOT, "addon/content/preferences.xhtml"), "utf8");
@@ -172,6 +174,142 @@ describe("B17 设置 pane：引擎字段条件显隐", () => {
     expect(isVisible(h.doc, "ztransplit-pref-engine-custom")).toBe(true);
     expect(isVisible(h.doc, "ztransplit-pref-engine-google")).toBe(false);
   });
+
+  it("切换到 ai：显示 AI 字段组（含 prompt 模板编辑区）", () => {
+    h = setupHarness({ prefs: { [`${PREFIX}translate.engineType`]: "google" } });
+    h.selectEngine("ai");
+    expect(isVisible(h.doc, "ztransplit-pref-engine-ai")).toBe(true);
+    expect(isVisible(h.doc, "ztransplit-pref-engine-google")).toBe(false);
+    expect(h.doc.getElementById("ztransplit-pref-ai-prompt")).toBeTruthy();
+    expect(h.doc.getElementById("ztransplit-pref-ai-prompt-restore")).toBeTruthy();
+  });
+});
+
+describe("B17 设置 pane：AI prompt 模板校验（prefs-AI1..AI4）", () => {
+  let h: Harness;
+  afterEach(() => {
+    h?.dom.window.close();
+  });
+
+  const AI_PROMPT_KEY = `${PREFIX}translate.ai.prompt`;
+  const VALID = "from {{sourceLang}} to {{targetLang}}: {{text}}";
+
+  it("初始值来自偏好写入模板编辑区", () => {
+    h = setupHarness({ prefs: { [AI_PROMPT_KEY]: VALID } });
+    expect(String(h.doc.getElementById("ztransplit-pref-ai-prompt").value)).toBe(
+      VALID,
+    );
+  });
+
+  it("留空（内置默认模板）是合法初始态：无错误提示", () => {
+    h = setupHarness({ prefs: {} });
+    expect(String(h.doc.getElementById("ztransplit-pref-ai-prompt").value)).toBe("");
+    expect(isVisible(h.doc, "ztransplit-pref-ai-prompt-error")).toBe(false);
+  });
+
+  it("合法模板：错误提示隐藏，值写回偏好", () => {
+    h = setupHarness({ prefs: { [AI_PROMPT_KEY]: "" } });
+    const input = h.doc.getElementById("ztransplit-pref-ai-prompt");
+    input.value = VALID;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-ai-prompt-error")).toBe(false);
+    expect(h.prefs.get(AI_PROMPT_KEY)).toBe(VALID);
+  });
+
+  it("非法模板：显示对应原因的不落地提示，且不写坏值", () => {
+    h = setupHarness({ prefs: { [AI_PROMPT_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-ai-prompt");
+    input.value = "从 {{sourceLang}} 译到 {{targetLang}}：{{txt}}";
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-ai-prompt-error")).toBe(true);
+    // 半成品值不得落进 pref（与 maxChars 同一策略）
+    expect(h.prefs.get(AI_PROMPT_KEY)).toBe(VALID);
+    // 提示文案来自隐藏的本地化节点，不是 JS 写死的字符串
+    const expected = h.doc
+      .getElementById("ztransplit-pref-string-ai-prompt-unknown-placeholder")
+      .textContent.trim();
+    expect(
+      h.doc.getElementById("ztransplit-pref-ai-prompt-error").textContent.trim(),
+    ).toBe(expected);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(
+      h.doc.getElementById("ztransplit-pref-ai-prompt").getAttribute("aria-invalid"),
+    ).toBe("true");
+  });
+
+  it.each([
+    ["缺 {{text}}", "从 {{sourceLang}} 译到 {{targetLang}}", "missing-text"],
+    ["{{text}} 重复", "{{text}} 从 {{sourceLang}} 到 {{targetLang}}: {{text}}", "duplicate-text"],
+    ["缺 {{sourceLang}}", "译到 {{targetLang}}：{{text}}", "missing-source-lang"],
+    ["缺 {{targetLang}}", "从 {{sourceLang}} 译：{{text}}", "missing-target-lang"],
+    ["花括号不成对", "从 {{sourceLang}} 译到 {{targetLang}}：{{text}", "unbalanced-braces"],
+  ])("非法模板 %s：提示 %s 原因且不写坏值", (_label, raw, reason) => {
+    h = setupHarness({ prefs: { [AI_PROMPT_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-ai-prompt");
+    input.value = raw;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-ai-prompt-error")).toBe(true);
+    expect(h.prefs.get(AI_PROMPT_KEY)).toBe(VALID);
+    const expected = h.doc
+      .getElementById(`ztransplit-pref-string-ai-prompt-${reason}`)
+      .textContent.trim();
+    expect(
+      h.doc.getElementById("ztransplit-pref-ai-prompt-error").textContent.trim(),
+    ).toBe(expected);
+  });
+
+  it("非法模板失焦：恢复当前 pref 值且不改写设置（与文案承诺一致）", () => {
+    h = setupHarness({ prefs: { [AI_PROMPT_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-ai-prompt");
+    input.value = "broken {{txt}}";
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new h.window.Event("change", { bubbles: true }));
+    expect(String(input.value)).toBe(VALID);
+    expect(h.prefs.get(AI_PROMPT_KEY)).toBe(VALID);
+    expect(isVisible(h.doc, "ztransplit-pref-ai-prompt-error")).toBe(false);
+    expect(
+      h.doc.getElementById("ztransplit-pref-ai-prompt").getAttribute("aria-invalid"),
+    ).toBeNull();
+  });
+
+  it("「恢复默认模板」按钮：写空串（= 内置默认模板）并清空编辑区", () => {
+    h = setupHarness({ prefs: { [AI_PROMPT_KEY]: VALID } });
+    (h.window as any).ZTransplitPrefs.restoreDefaultPrompt();
+    expect(h.prefs.get(AI_PROMPT_KEY)).toBe("");
+    expect(String(h.doc.getElementById("ztransplit-pref-ai-prompt").value)).toBe("");
+    expect(isVisible(h.doc, "ztransplit-pref-ai-prompt-error")).toBe(false);
+  });
+
+  it("面板 JS 的校验与 TS 权威实现同判（样例矩阵，含每种拒绝原因）", () => {
+    // preferences.js 里的规则是 promptTemplate.ts 的镜像实现；两份必须对同一
+    // 输入给出一致判定，否则面板说「合法」而引擎报错的割裂体验会漏到用户面前。
+    const samples: Array<[string, string]> = [
+      ["空串（默认模板）", ""],
+      ["纯空白", "   \n "],
+      ["合法模板", VALID],
+      ["占位符带空格", "from {{ sourceLang }} to {{targetLang }}: {{ text }}"],
+      ["含公式标记仍是合法内容", "译到 {{targetLang}} 从 {{sourceLang}}: {{text}} 保留 {v0}、{v1}"],
+      ["拼错占位符", "从 {{sourceLang}} 到 {{targetLang}}: {{txt}}"],
+      ["缺 {{text}}", "从 {{sourceLang}} 到 {{targetLang}}"],
+      ["{{text}} 重复", "{{text}} 从 {{sourceLang}} 到 {{targetLang}}: {{text}}"],
+      ["缺 {{sourceLang}}", "到 {{targetLang}}: {{text}}"],
+      ["缺 {{targetLang}}", "从 {{sourceLang}}: {{text}}"],
+      ["花括号不成对", "从 {{sourceLang}} 到 {{targetLang}}: {{text}"],
+      ["超长", `x{{text}}${"y".repeat(4000)}`],
+    ];
+    h = setupHarness({ prefs: {} });
+    const input = h.doc.getElementById("ztransplit-pref-ai-prompt");
+    for (const [label, raw] of samples) {
+      const before = h.prefs.get(AI_PROMPT_KEY);
+      input.value = raw;
+      input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+      const paneSaysValid = !isVisible(h.doc, "ztransplit-pref-ai-prompt-error");
+      const tsSaysValid = validatePromptTemplate(raw).ok;
+      expect(paneSaysValid, `样例「${label}」两边判定不一致`).toBe(tsSaysValid);
+      // 合法才写回，非法则保持原值（半成品值不落盘）
+      expect(h.prefs.get(AI_PROMPT_KEY)).toBe(tsSaysValid ? raw : before);
+    }
+  });
 });
 
 describe("B17 设置 pane：zotero-pdf-translate 探测", () => {
@@ -314,16 +452,16 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    expect(labels.length).toBe(17);
+    expect(labels.length).toBe(21);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
     }
   });
 
-  it("7 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
+  it("8 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
     const items = l10nBindings().filter((r) => r.tag === "menuitem");
-    expect(items.length).toBe(7);
+    expect(items.length).toBe(8);
     for (const row of items) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);
@@ -332,7 +470,7 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("checkbox 两语言都写 .label", () => {
     const boxes = l10nBindings().filter((r) => r.tag === "checkbox");
-    expect(boxes.length).toBe(10);
+    expect(boxes.length).toBe(11);
     for (const row of boxes) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);

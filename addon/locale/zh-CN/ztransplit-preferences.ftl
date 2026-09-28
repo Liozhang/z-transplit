@@ -65,6 +65,8 @@ preferences-ztransplit-engine-bing =
     .label = Bing 翻译
 preferences-ztransplit-engine-deepl =
     .label = DeepL
+preferences-ztransplit-engine-ai =
+    .label = AI 翻译（OpenAI 兼容）
 preferences-ztransplit-engine-custom =
     .label = 自定义接口（OpenAI 兼容）
 preferences-ztransplit-engine-zotero-pdf-translate =
@@ -106,6 +108,52 @@ preferences-ztransplit-deepl-use-free =
 preferences-ztransplit-deepl-use-free-desc =
     免费密钥（密钥以 :fx 结尾）必须开启；Pro 密钥请关闭。选错会返回 401/403
     鉴权错误。
+
+## AI 翻译（OpenAI 兼容 + 用户自建提示词模板）
+preferences-ztransplit-ai-api-url =
+    .value = 接口地址
+preferences-ztransplit-ai-api-url-desc =
+    必填。OpenAI 兼容的 chat/completions 地址，例如
+    https://api.example.com/v1/chat/completions，也可以是本地模型服务
+    （如 http://127.0.0.1:11434/v1）。留空时翻译会失败。
+preferences-ztransplit-ai-api-key =
+    .value = API 密钥
+preferences-ztransplit-ai-api-key-desc =
+    可留空。云端服务通常必填；本地模型服务（Ollama、LM Studio 等）一般不
+    需要密钥，留空时不会发送 Authorization 头。
+preferences-ztransplit-ai-model =
+    .value = 模型
+preferences-ztransplit-ai-model-desc =
+    可留空。要调用的模型名，例如 gpt-4o-mini、qwen-max、glm-4.7。留空时由
+    服务端使用默认模型，翻译质量不受保证。
+preferences-ztransplit-ai-prompt =
+    .value = 翻译提示词模板
+preferences-ztransplit-ai-prompt-desc =
+    发送给模型的内容，留空表示使用内置默认模板。模板必须包含三个占位符：
+    {"{{"}text{"}}"}（待翻译原文的位置）、{"{{"}sourceLang{"}}"}（源语言名称）、
+    {"{{"}targetLang{"}}"}（目标语言名称）；语言名称由插件自动填成可读名称，
+    例如「Simplified Chinese」。公式在翻译前会被替换成 {"{"}v0{"}"}、{"{"}v1{"}"}
+    这样的标记，默认模板会要求模型原样保留。非法模板不会写入设置；若已存有
+    非法模板，选择该引擎时会被就绪检查拦下并提示回到这里修改。
+preferences-ztransplit-ai-prompt-restore =
+    .label = 恢复默认模板
+
+## AI 提示词模板的非法原因（与引擎运行时报错同一套措辞，编辑时就地提示；
+## 面板脚本只负责把本地化文案搬到错误节点，不写死任何字符串）
+preferences-ztransplit-ai-prompt-error-too-long =
+    模板过长：最多 4000 个字符。
+preferences-ztransplit-ai-prompt-error-unknown-placeholder =
+    模板包含未知占位符：只支持 {"{{"}text{"}}"}、{"{{"}sourceLang{"}}"}、{"{{"}targetLang{"}}"}（双花括号）。
+preferences-ztransplit-ai-prompt-error-missing-text =
+    模板缺少 {"{{"}text{"}}"}：它是待翻译原文所在的位置。
+preferences-ztransplit-ai-prompt-error-duplicate-text =
+    模板里 {"{{"}text{"}}"} 出现了多次：待翻译原文只能发送一次。
+preferences-ztransplit-ai-prompt-error-missing-source-lang =
+    模板缺少 {"{{"}sourceLang{"}}"}：它是源语言名称所在的位置。
+preferences-ztransplit-ai-prompt-error-missing-target-lang =
+    模板缺少 {"{{"}targetLang{"}}"}：它是目标语言名称所在的位置。
+preferences-ztransplit-ai-prompt-error-unbalanced-braces =
+    模板的花括号不成对：占位符写成双花括号（{"{{"}text{"}}"}），公式标记写成单花括号（{"{"}v0{"}"}）。
 
 ## 自定义（OpenAI 兼容）
 preferences-ztransplit-custom-api-url =
