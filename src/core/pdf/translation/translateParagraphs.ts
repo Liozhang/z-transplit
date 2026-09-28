@@ -33,6 +33,7 @@
 
 import { Semaphore } from "../../../utils/Semaphore";
 import { safeDebug } from "../../../utils/logger";
+import { getString } from "../../../utils/locale";
 import type {
   BatchTranslateResult,
   BatchTranslator,
@@ -365,7 +366,13 @@ export async function translateAllPagesBatched(
     );
 
   onProgress(
-    `正在批量翻译（${translatable.length} 段${tasks.length !== translatable.length ? `，缓存命中 ${tasks.length - translatable.length} 段` : ""}，分 ${chunks.length} 块）…`,
+    getString("pdf-progress-batch-start", {
+      count: translatable.length,
+      chunks: chunks.length,
+      cache: tasks.length !== translatable.length
+        ? getString("pdf-progress-batch-cache", { hit: tasks.length - translatable.length })
+        : "",
+    }),
   );
 
   const translated = new Map<string, string>(); // `${pageIdx}:${paraIdx}` → text
@@ -419,7 +426,7 @@ export async function translateAllPagesBatched(
       } finally {
         release();
         completed++;
-        onProgress(`批量翻译进度：${completed}/${chunks.length} 块`);
+        onProgress(getString("pdf-progress-batch-progress", { done: completed, total: chunks.length }));
       }
     }),
   );

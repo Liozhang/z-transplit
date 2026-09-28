@@ -18,7 +18,11 @@
 // pane lives and who registers it.
 
 // Master switch for text translation in the reader / item pane.
-pref("extensions.zotero.ztransplit.translate.enabled", false);
+// ON by default so a fresh install runs at full capability: the reader pane
+// section registers immediately and every entry point is reachable. Users who
+// want the plugin dormant can uncheck it in the preferences pane (the pane
+// section then unregisters; the item-menu stays for re-enabling).
+pref("extensions.zotero.ztransplit.translate.enabled", true);
 // Translate automatically when a reader item/selection opens (needs
 // translate.enabled).
 pref("extensions.zotero.ztransplit.translate.auto", false);

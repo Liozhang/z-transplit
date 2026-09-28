@@ -29,6 +29,7 @@ import { normalizeChatCompletionsUrl } from "../../ai/openaiCompat";
 import { getPrefDynamic } from "../../../utils/prefs";
 import { safeDebug } from "../../../utils/logger";
 import { abortSignalTimeout } from "../../../utils/abort";
+import { getString } from "../../../utils/locale";
 
 const FORMULA_TO_LATEX_PROMPT = `You are an OCR engine specialized in mathematical formulas. Look at the formula in the image and convert it to LaTeX.
 
@@ -82,9 +83,7 @@ export async function extractFormulaLatex(
 ): Promise<string> {
   const cfg = visionConfig();
   if (!cfg) {
-    throw new Error(
-      "公式视觉提取不可用：未配置 OpenAI 兼容端点（translate.custom.apiUrl）。",
-    );
+    throw new Error(getString("pdf-warn-vlm-unconfigured"));
   }
 
   const url = normalizeChatCompletionsUrl(cfg.apiUrl);
@@ -124,7 +123,7 @@ export async function extractFormulaLatex(
   const data = (await resp.json()) as any;
   const latex = String(data?.choices?.[0]?.message?.content || "").trim();
   if (!latex) {
-    throw new Error("视觉模型返回空结果");
+    throw new Error(getString("err-vlm-empty"));
   }
   // The model occasionally wraps output in markdown fences despite the rule;
   // strip them so downstream rendering draws clean LaTeX.

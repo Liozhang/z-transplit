@@ -78,3 +78,14 @@ readaloud-stop = Stop
 readaloud-unsupported = Read aloud is unavailable in this environment (no speech interface). Install a system voice package and retry.
 readaloud-no-content = There is no readable text.
 readaloud-start-failed = Read aloud failed to start: { $error }
+
+# Full-text pipeline progress / errors (batch translate + ODL client).
+pdf-progress-batch-start = Batch translating {count} paragraphs ({chunks} chunk groups){cache}…
+pdf-progress-batch-cache = , {hit} from cache
+pdf-progress-batch-progress = Batch translation: {done}/{total} chunk groups
+pdf-warn-vlm-unconfigured = Formula vision extraction unavailable: no OpenAI-compatible endpoint configured (translate.custom.apiUrl).
+err-vlm-empty = Vision model returned an empty result
+err-java-unavailable = Java unavailable: {detail}
+err-parse-no-pages = Parsing finished but produced no pages
+err-java-too-old = Detected Java {version}, but OpenDataLoader requires Java 11+. Install a newer version from https://adoptium.net.
+err-jar-load = Failed to load JAR file ({path}): {message}

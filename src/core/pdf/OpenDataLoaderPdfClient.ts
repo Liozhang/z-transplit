@@ -28,6 +28,7 @@ import { Semaphore } from "../../utils/Semaphore";
 // should stay off the always-on error console in production builds.
 import { debug as log, safeDebug } from "../../utils/logger";
 import { toErrorMessage } from "../../utils/error";
+import { getString } from "../../utils/locale";
 
 /** Limits concurrent JVM processes to prevent OOM under parallel PDF parsing.
  *  Each JVM consumes ~200-400MB RSS; 2 is a safe ceiling for typical machines. */
@@ -167,7 +168,7 @@ export async function checkHealth(): Promise<HealthResult> {
     if (major !== undefined && !Number.isNaN(major) && major < 11) {
       return {
         healthy: false,
-        error: `检测到 Java ${version},但 OpenDataLoader 需要 Java 11+。请从 https://adoptium.net 安装较新版本。`,
+        error: getString("err-java-too-old", { version }),
       };
     }
   }
@@ -993,7 +994,7 @@ async function runOpenDataLoader(
   } catch (e: any) {
     return {
       success: false,
-      error: `无法加载 JAR 文件 (${jarPath}): ${e.message}`,
+      error: getString("err-jar-load", { path: jarPath, message: e.message }),
     };
   }
   const exists = jarFile.exists();

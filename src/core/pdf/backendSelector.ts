@@ -30,6 +30,7 @@ import { parsePdfToJson, checkHealth } from "./OpenDataLoaderPdfClient";
 import { PdfParseError } from "./PdfParseError";
 
 import { safeDebug } from "../../utils/logger";
+import { getString } from "../../utils/locale";
 
 /**
  * The only parsing backend. Kept as a type (not a bare string) so call sites
@@ -118,7 +119,7 @@ async function tryOpenDataLoader(
   if (!health.healthy) {
     throw new PdfParseError(
       "java-missing",
-      `Java 不可用：${health.error ?? ""}`,
+      getString("err-java-unavailable", { detail: health.error ?? "" }),
     );
   }
 
@@ -138,7 +139,7 @@ async function tryOpenDataLoader(
 
   const analysis = adaptOpenDataLoaderJson(jsonResult.data);
   if (!analysis.pages || analysis.pages.length === 0) {
-    throw new PdfParseError("no-text", "解析完成但无页面");
+    throw new PdfParseError("no-text", getString("err-parse-no-pages"));
   }
   return analysis;
 }
