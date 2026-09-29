@@ -470,7 +470,7 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("checkbox 两语言都写 .label", () => {
     const boxes = l10nBindings().filter((r) => r.tag === "checkbox");
-    expect(boxes.length).toBe(11);
+    expect(boxes.length).toBe(12);
     for (const row of boxes) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);
