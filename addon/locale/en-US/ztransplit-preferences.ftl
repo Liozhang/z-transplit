@@ -292,6 +292,14 @@ preferences-ztransplit-pdf-odl-images-desc =
     the translation, keeping figures complete; when off, only text is
     translated and image areas are left blank — parsing is faster and the
     output file smaller.
+preferences-ztransplit-pdf-removal-enabled =
+    .label = Delete the original text of translated paragraphs
+preferences-ztransplit-pdf-removal-enabled-desc =
+    Before overlaying the translation, actually delete the original text of
+    translated paragraphs from the PDF, so the result is searchable and
+    copyable without surfacing masked-out originals. If deletion fails, the
+    pipeline falls back to white masks automatically; when off, masks are
+    always used.
 
 ## ── Word cards ─────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =

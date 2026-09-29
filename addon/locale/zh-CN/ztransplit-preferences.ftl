@@ -256,6 +256,12 @@ preferences-ztransplit-pdf-odl-images =
 preferences-ztransplit-pdf-odl-images-desc =
     让解析器输出页面内嵌图像，翻译后随译文贴回原位置，图表更完整；关闭后只
     翻译文字，图像区域留白，解析更快、生成的文件更小。
+preferences-ztransplit-pdf-removal-enabled =
+    .label = 删除已翻译段落的原文
+preferences-ztransplit-pdf-removal-enabled-desc =
+    翻译并分屏时先从 PDF 中真正删除已翻译段落的原文，再叠加译文；删后的译
+    文可正常搜索与复制，不再翻出被遮住的原文。删除失败会自动回退为白色遮
+    罩，关闭后始终使用遮罩。
 
 ## ── 词卡 ───────────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =

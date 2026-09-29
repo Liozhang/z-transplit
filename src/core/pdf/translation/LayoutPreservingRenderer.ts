@@ -404,6 +404,11 @@ export async function renderOverlayTranslated(
     latinFontBytes?: ArrayBuffer | Uint8Array;
     /** Title written into the output PDF's Info dict. Defaults to a marker string. */
     docTitle?: string;
+    /**
+     * 画白色/背景色遮罩盖住原文（默认 true）。管线在删除器已真正移除
+     * 原文时传 false，译文直接落在干净的页面上（搜索/复制不再命中原文）。
+     */
+    maskOriginalText?: boolean;
   },
 ): Promise<{ bytes: Uint8Array; stats: RenderResult["stats"] }> {
   const lineHeight =
@@ -440,6 +445,7 @@ export async function renderOverlayTranslated(
     imagesDropped: 0,
   };
 
+  const maskOriginalText = options.maskOriginalText !== false;
   for (let i = 0; i < assemblies.length && i < pages.length; i++) {
     const assembly = assemblies[i];
     const translated = translatedSets[i] ?? [];
@@ -478,20 +484,23 @@ export async function renderOverlayTranslated(
       // page in b.json). Drawing the mask/text there would land off-page.
       const cp = clampParagraph(p, pageW, pageH);
 
-      // Cover the original text so it doesn't bleed through. Use the
-      // paragraph's recovered background color when known, else opaque white.
-      const bg =
-        cp.backgroundColor != null
-          ? rgb(cp.backgroundColor.r, cp.backgroundColor.g, cp.backgroundColor.b)
-          : rgb(1, 1, 1);
-      page.drawRectangle({
-        x: cp.x0 - 1,
-        // pdf-lib rectangle `y` = bottom edge, same y-up space as ODL bbox. No flip.
-        y: cp.y0 - 1,
-        width: cp.x1 - cp.x0 + 2,
-        height: cp.y1 - cp.y0 + 2,
-        color: bg,
-      });
+      // Cover the original text so it doesn't bleed through — unless the
+      // original was already deleted upstream (original-text removal path).
+      // Use the paragraph's recovered background color when known, else white.
+      if (maskOriginalText) {
+        const bg =
+          cp.backgroundColor != null
+            ? rgb(cp.backgroundColor.r, cp.backgroundColor.g, cp.backgroundColor.b)
+            : rgb(1, 1, 1);
+        page.drawRectangle({
+          x: cp.x0 - 1,
+          // pdf-lib rectangle `y` = bottom edge, same y-up space as ODL bbox. No flip.
+          y: cp.y0 - 1,
+          width: cp.x1 - cp.x0 + 2,
+          height: cp.y1 - cp.y0 + 2,
+          color: bg,
+        });
+      };
       renderParagraph(page, fonts, cp, text, lineHeight, useCJK, stats);
       stats.paragraphsRendered++;
     }
@@ -823,7 +832,7 @@ function sanitizeForFont(text: string, font: PDFFont): string {
  * even if the translator mangled spacing, we still recognize and drop the token.
  * Phase 1 drops formulas entirely (no vector re-render); Phase 2 will emit them.
  */
-function stripFormulaPlaceholders(text: string): {
+export function stripFormulaPlaceholders(text: string): {
   text: string;
   dropped: number;
 } {

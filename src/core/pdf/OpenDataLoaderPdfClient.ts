@@ -250,7 +250,7 @@ function resolveJavaExecutable(): string | null {
   return null;
 }
 
-interface ExecResult {
+export interface ExecResult {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -259,7 +259,13 @@ interface ExecResult {
   aborted?: boolean;
 }
 
-async function execJava(
+/**
+ * Generic `java -jar <jarPath> <args…>` runner shared by every JVM-based tool
+ * (OpenDataLoader parser, original-text remover). Refreshes the managed-JRE
+ * cache, resolves the java executable, and enforces the JVM concurrency cap.
+ */
+export async function execJar(
+  jarPath: string,
   args: string[],
   timeoutMs: number,
   signal?: AbortSignal, // M-20: thread cancellation into the process runner
@@ -272,7 +278,7 @@ async function execJava(
     const { getManagedJavaExe } = await import("./JavaRuntimeManager");
     await getManagedJavaExe();
   } catch (e) {
-    safeDebug("[Z-Transplit] OpenDataLoaderPdfClient.execJava: " + e);
+    safeDebug("[Z-Transplit] OpenDataLoaderPdfClient.execJar: " + e);
     /* best-effort: fall through to system detection */
   }
   const javaExe = resolveJavaExecutable();
@@ -285,7 +291,6 @@ async function execJava(
     };
   }
 
-  const jarPath = await getJarPath();
   const commandArgs = [
     "-Djava.awt.headless=true",
     "-Dapple.awt.UIElement=true",
@@ -304,7 +309,16 @@ async function execJava(
   }
 }
 
-async function getJarPath(): Promise<string> {
+async function execJava(
+  args: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
+  const jarPath = await getJarPath();
+  return execJar(jarPath, args, timeoutMs, signal);
+}
+
+export async function getJarPath(jarFileName = "opendataloader-pdf-cli.jar"): Promise<string> {
   // Resolve relative to this file: src/core/pdf/lib/opendataloader-pdf-cli.jar
   // Note: zotero-plugin-scaffold strips the leading `src/` from build output,
   // so in the deployed extension the JAR lives at `core/pdf/lib/...`.
@@ -424,7 +438,7 @@ async function getJarPath(): Promise<string> {
     `[Z-Transplit ODL] getJarPath: baseDir="${baseDir}" PathUtils.join=${!!join}`,
   );
 
-  const relative = ["core", "pdf", "lib", "opendataloader-pdf-cli.jar"];
+  const relative = ["core", "pdf", "lib", jarFileName];
 
   // PathUtils.join does not accept an empty first segment.
   if (baseDir && join) {
@@ -454,8 +468,8 @@ async function getJarPath(): Promise<string> {
     candidates.push(normalize(baseDir + "/src/" + relative.join("/")));
   }
   candidates.push(
-    normalize(".scaffold/build/addon/core/pdf/lib/opendataloader-pdf-cli.jar"),
-    normalize("core/pdf/lib/opendataloader-pdf-cli.jar"),
+    normalize(`.scaffold/build/addon/core/pdf/lib/${jarFileName}`),
+    normalize(`core/pdf/lib/${jarFileName}`),
   );
 
   for (const candidate of candidates) {
@@ -484,7 +498,7 @@ async function getJarPath(): Promise<string> {
   const fallback = normalize(
     baseDir
       ? `${baseDir}/${relative.join("/")}`
-      : `./core/pdf/lib/opendataloader-pdf-cli.jar`,
+      : `./core/pdf/lib/${jarFileName}`,
   );
   log(`[Z-Transplit ODL] getJarPath fallback: ${fallback}`);
   return fallback;
@@ -494,7 +508,7 @@ async function getJarPath(): Promise<string> {
  * Run an external process via nsIProcess.runwAsync + observer pattern.
  * Simplified for single-shot Java calls.
  */
-function runProcess(
+export function runProcess(
   resolvedExe: string,
   args: string[],
   timeoutMs: number,
@@ -843,7 +857,7 @@ async function killProcessTree(proc: any): Promise<void> {
   }
 }
 
-function writeTempFile(content: string, ext: string): string {
+export function writeTempFile(content: string, ext: string): string {
   const Cc = (Components as any).classes;
   const Ci = (Components as any).interfaces;
 
@@ -870,7 +884,7 @@ function writeTempFile(content: string, ext: string): string {
   return file.path;
 }
 
-function createTempDir(): string {
+export function createTempDir(): string {
   const Cc = (Components as any).classes;
   const Ci = (Components as any).interfaces;
   const tmpDir =
@@ -885,7 +899,7 @@ function createTempDir(): string {
   return dir.path;
 }
 
-function readFile(path: string): Promise<string> {
+export function readFile(path: string): Promise<string> {
   const Cc = (Components as any).classes;
   const Ci = (Components as any).interfaces;
   const Z = (globalThis as any).Zotero;
@@ -916,7 +930,7 @@ function readFile(path: string): Promise<string> {
   });
 }
 
-function removePath(path: string): Promise<void> {
+export function removePath(path: string): Promise<void> {
   return new Promise((resolve) => {
     try {
       const Cc = (Components as any).classes;

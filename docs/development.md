@@ -53,6 +53,23 @@ npm run release      # 打 tag 并产出 xpi + update.json
 要求 Node.js ≥ 22.8（`zotero-plugin-scaffold@0.8` 的 engines 约束）。
 jar 更新后必须跑 `npm run check:jar`（与 `PROVENANCE.json` 的 sha256 对账）。
 
+### 原文删除器 jar（ztransplit-region-text-remover）
+
+`src/core/pdf/lib/ztransplit-region-text-remover.jar` 由本仓库自有 Java 源构建
+（源码在 `java/region-text-remover/src/`，依赖 pdfbox/fontbox/commons-logging
+在 `java/region-text-remover/lib/`），用于「翻译并分屏」时把已翻译段落的
+原文从页面内容流中真正删除（替代白色遮罩；表单内部文字保留由遮罩兜底）。
+修改 Java 源后重新构建并更新溯源清单：
+
+```bash
+node scripts/build-region-text-remover.cjs   # 编译 → fat jar → 更新 PROVENANCE
+npm run check:jar                            # 对账（同时校验 ODL jar 与本 jar）
+```
+
+要求 PATH 上有 JDK 17+。管线侧接入与回退语义见
+`src/core/pdf/OriginalTextRemovalClient.ts` 头注释；
+可行性验证数据见 `prototype/region-text-remover/README.md`。
+
 ## 质量门控
 
 | 命令 | 覆盖 |
@@ -92,6 +109,23 @@ node scripts/qa/real-machine.mjs shoot                   # 结束
 `allPanes`、`sectionState`、`listCommands`。
 
 排版/引擎相关的真机发现都建议带上 `docs/screenshots/` 截图归档。
+
+### README 截图再生成
+
+`scripts/qa/screenshots.mjs` 在真机装置上自动摆好六个界面状态并截图：英文版
+（README.md 引用）落在 `docs/screenshots/`，中文版（README.zh-CN.md 引用）落在
+`docs/screenshots/zh-CN/`。夹具论文在 `scripts/qa/fixtures/reading-brain.*`，
+两页版式与正文在两次重拍之间保持稳定。截图里的翻译走真实引擎，因此需要一份
+引擎配置 JSON（AI 引擎的接口地址 / 密钥 / 模型，外加窗格宽度的
+`extensions.zotero.pane.persist`），路径用 `--prefs` 传入；该文件在版本库外，
+密钥不入库。
+
+```bash
+node scripts/qa/screenshots.mjs --locale en-US --out docs/screenshots \
+     --prefs D:\zt-qa\qa-shot-prefs.json
+node scripts/qa/screenshots.mjs --locale zh-CN --out docs/screenshots/zh-CN \
+     --prefs D:\zt-qa\qa-shot-prefs.json
+```
 
 ## 移植来源
 

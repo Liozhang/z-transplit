@@ -1,0 +1,25 @@
+{
+  "artifact": "org.ztransplit:region-text-remover:1.0.0",
+  "name": "Z-Transplit Original-Text Remover",
+  "version": "1.0.0",
+  "file": "ztransplit-region-text-remover.jar",
+  "sha256": "8a676f4494615c0c03beb3efe64d4a769873a3e31167ec0a9ca85e78b9d447e4",
+  "bytes": 4466209,
+  "mainClass": "RegionTextRemover",
+  "jarRequiresJava": 17,
+  "builtWithJdk": 17,
+  "bundledLicenses": [
+    "Apache-2.0 (Apache PDFBox, Apache FontKit)",
+    "Apache-2.0 (commons-logging)",
+    "MIT (Z-Transplit 自有代码)"
+  ],
+  "licenseSource": "构建脚本 java/region-text-remover/lib/ 内的依赖 jar 与 java/region-text-remover/src/ 自有源码",
+  "consumedBy": "src/core/pdf/OriginalTextRemovalClient.ts（java -jar 子进程，翻译前删除页面层原文）",
+  "whyInSourceTree": "运行期真实依赖：删除原文时必须能在磁盘上找到这个 jar。由 git 直接承载（约 4.5MB）。",
+  "howToUpdate": [
+    "1. 修改 java/region-text-remover/src/ 后运行 node scripts/build-region-text-remover.cjs",
+    "2. 脚本自动重算 sha256 与字节数并更新本文件",
+    "3. 跑 node scripts/check-jar-provenance.cjs 对账"
+  ],
+  "sourceOfTruth": "java/region-text-remover/src（本 jar 由构建脚本生成，勿手改）"
+}

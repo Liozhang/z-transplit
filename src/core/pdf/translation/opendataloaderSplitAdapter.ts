@@ -60,6 +60,19 @@ import { renderLayoutPreserving, renderOverlayTranslated } from "./LayoutPreserv
 import { mergePageBytes } from "./pdfMerge";
 import { importTranslatedBytes } from "./translatedAttachment";
 import {
+  buildRemovalRects,
+  serializeRemovalRects,
+} from "./removalRects";
+import {
+  excludeFigureTextBlocks,
+  parseFigureRegionLines,
+} from "./figureTextFilter";
+import {
+  isOriginalTextRemovalEnabled,
+  inspectFormTextRegions,
+  removeOriginalText,
+} from "../OriginalTextRemovalClient";
+import {
   createTranslator,
   supportsBatching,
   createAIBatchTranslator,
@@ -329,6 +342,27 @@ export async function translateAndSplitWithOpenDataLoader(
     );
   }
   //    already sliced paragraphs with geometry in the right coordinate space).
+  // 图片区域完全不翻译：删除器检查模式报告含文字表单对象（矢量图）的
+  // 边界框，落在其中的段落（刻度、图例、示意图标注）在装配前整体排除。
+  // 图注在页面层、位于表单框之外，照常翻译。检查失败只跳过过滤，
+  // 不影响管线其余部分；面积接近整页的表单按页级包装处理，不排除。
+  try {
+    const regionText = await inspectFormTextRegions(inputPath, opts.signal);
+    const excluded = excludeFigureTextBlocks(
+      analysis.pages,
+      parseFigureRegionLines(regionText),
+    );
+    if (excluded > 0) {
+      safeDebug(
+        `[Z-Transplit] opendataloaderSplitAdapter: excluded ${excluded} figure-region text block(s)`,
+      );
+    }
+  } catch (e) {
+    safeDebug(
+      "[Z-Transplit] opendataloaderSplitAdapter: figure-region inspection skipped: " +
+        e,
+    );
+  }
   const { assemblies, pageSizes, formulaBlocks } = odlAnalysisToAssembly(analysis);
   const totalPages = assemblies.length;
   const totalParagraphs = assemblies.reduce(
@@ -475,26 +509,65 @@ export async function translateAndSplitWithOpenDataLoader(
   }
 
   if (sourcePdfBytes) {
+    // 原文删除前置步骤：把已翻译段落的原文从页面内容流中真正删除，
+    // 之后叠加译文时不再画遮罩（搜索/复制不再命中原文）。任何失败
+    // （jar/Java 缺失、超时、输出损坏）都回退到原有遮罩路径，零回归。
+    let cleanedBytes: Uint8Array | null = null;
+    if (isOriginalTextRemovalEnabled() && inputPath) {
+      try {
+        onProgress(getString("odl-progress-remove-original"));
+        const rectsContent = serializeRemovalRects(
+          buildRemovalRects(assemblies, translatedSets),
+        );
+        cleanedBytes = await removeOriginalText(inputPath, rectsContent, opts.signal);
+      } catch (e) {
+        safeDebug(
+          "[Z-Transplit] opendataloaderSplitAdapter: original-text removal failed, falling back to masks: " +
+            e,
+        );
+        cleanedBytes = null;
+      }
+    }
+
     onProgress(getString("odl-progress-overlay"));
-    const result = await renderOverlayTranslated(
-      sourcePdfBytes,
-      assemblies,
-      translatedSets,
-      {
-        targetLanguage,
-        ...(cjkFontBytes ? { cjkFontBytes } : {}),
-        ...(latinFontBytes ? { latinFontBytes } : {}),
-        ...(fontVariants.bold ? { boldFontBytes: fontVariants.bold } : {}),
-        ...(fontVariants.italic
-          ? { italicFontBytes: fontVariants.italic }
-          : {}),
-        ...(fontVariants.boldItalic
-          ? { boldItalicFontBytes: fontVariants.boldItalic }
-          : {}),
-        docTitle: translatedTitle,
-      },
-    );
-    merged = result.bytes;
+    const renderOptions = {
+      targetLanguage,
+      ...(cjkFontBytes ? { cjkFontBytes } : {}),
+      ...(latinFontBytes ? { latinFontBytes } : {}),
+      ...(fontVariants.bold ? { boldFontBytes: fontVariants.bold } : {}),
+      ...(fontVariants.italic
+        ? { italicFontBytes: fontVariants.italic }
+        : {}),
+      ...(fontVariants.boldItalic
+        ? { boldItalicFontBytes: fontVariants.boldItalic }
+        : {}),
+      docTitle: translatedTitle,
+      ...(cleanedBytes ? { maskOriginalText: false } : {}),
+    };
+    const renderSource = cleanedBytes ?? sourcePdfBytes;
+    try {
+      const result = await renderOverlayTranslated(
+        renderSource,
+        assemblies,
+        translatedSets,
+        renderOptions,
+      );
+      merged = result.bytes;
+    } catch (e) {
+      // 删除后的 PDF 渲染失败（理论上不应发生）：用原始字节 + 遮罩兜底
+      if (!cleanedBytes) throw e;
+      safeDebug(
+        "[Z-Transplit] opendataloaderSplitAdapter: rendering cleaned PDF failed, falling back to masks: " +
+          e,
+      );
+      const result = await renderOverlayTranslated(
+        sourcePdfBytes,
+        assemblies,
+        translatedSets,
+        { ...renderOptions, maskOriginalText: true },
+      );
+      merged = result.bytes;
+    }
   } else {
     onProgress(getString("odl-progress-render-white"));
     const pageBytes: Uint8Array[] = [];
@@ -717,7 +790,9 @@ async function extractFormulasForTranslation(
         }
         failed++;
       }
-      if (processed > 0 && processed % 5 === 0) {
+      // Every 10 items (not 5): each report appends a ProgressWindow row, and
+      // formula-heavy documents would otherwise stack the window too tall.
+      if (processed > 0 && processed % 10 === 0) {
         onProgress(getString("odl-progress-crop-progress", {
           current: processed,
           total: formulaBlocks.length,
@@ -806,7 +881,8 @@ async function captureFormulaScreenshots(
         safeDebug("[Z-Transplit] opendataloaderSplitAdapter: " + e);
         failed++;
       }
-      if (captured > 0 && captured % 5 === 0) {
+      // Every 10 items — see the matching note in extractFormulasForTranslation.
+      if (captured > 0 && captured % 10 === 0) {
         onProgress(getString("odl-progress-shot-progress", {
           current: captured,
           total: formulaBlocks.length,

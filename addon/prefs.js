@@ -71,6 +71,8 @@ pref("extensions.zotero.ztransplit.pdfParser.opendataloader.tableEnable", "defau
 pref("extensions.zotero.ztransplit.pdfParser.opendataloader.useStructTree", false);
 pref("extensions.zotero.ztransplit.pdfParser.opendataloader.timeout", 300);
 pref("extensions.zotero.ztransplit.pdfParser.opendataloader.returnImages", false);
+// 翻译前把已翻译段落的原文从 PDF 内容流中删除（替代白色遮罩）；失败自动回退遮罩
+pref("extensions.zotero.ztransplit.pdfParser.originalTextRemoval.enabled", true);
 
 // Persistent paragraph translation cache (src/core/translation/translationCache.ts).
 // Content-addressed translation records under

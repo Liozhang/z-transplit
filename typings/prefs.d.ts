@@ -30,6 +30,7 @@ declare namespace _ZoteroTypes {
       "pdfParser.opendataloader.useStructTree": boolean;
       "pdfParser.opendataloader.timeout": number;
       "pdfParser.opendataloader.returnImages": boolean;
+      "pdfParser.originalTextRemoval.enabled": boolean;
       "translate.cache.enabled": boolean;
       "translate.cache.maxSizeMB": number;
       "reader.bilingual.defaultMode": string;
