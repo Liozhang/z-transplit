@@ -153,22 +153,49 @@ export class ReaderPane implements ReaderPaneAdapter {
    * The scroll DOM element the sync engine listens on. Reaches four levels deep:
    * browser → reader.html → internal iframe → pdf.js's #viewerContainer.
    */
-  getScrollContainer(): any {
+  /**
+   * Resolve the pdf.js content-realm window and its `#viewerContainer`.
+   *
+   * Both the scroll container and the scroll listener need the same pair, and
+   * both must reach them in the CONTENT realm. On current Gecko (verified on
+   * Zotero 10.0.3) the element is reachable through the Xray-wrapped
+   * `contentWindow`, while the `wrappedJSObject` sibling returns null for
+   * `getElementById` — the reverse of what the older Gecko path assumed.
+   * Preferring one unconditionally therefore loses the scroll container (and
+   * with it every scroll fraction and the injected listener) on those builds,
+   * so try both and keep whichever actually yields the element.
+   *
+   * Returns null when the reader isn't far enough along yet — pdf.js builds
+   * this chain some time after `_reader` itself appears, so callers that poll
+   * (waitForScrollContainer) treat null as "not ready yet", not as "no scroll".
+   */
+  private getContentViewer(): { win: any; el: any } | null {
     const internalReader = this.getInternalReader();
     const primaryView = internalReader?._primaryView;
     const iframe = primaryView?._iframe;
     const iframeWin: any = iframe?.contentWindow;
     if (!iframeWin) return null;
-    const wrappedWin = iframeWin.wrappedJSObject || iframeWin;
-    const doc = wrappedWin.document;
-    if (!doc) return null;
-    // pdf.js names its scroll wrapper #viewerContainer.
-    return (
-      doc.getElementById("viewerContainer") ||
-      doc.scrollingElement ||
-      doc.documentElement ||
-      null
+    const candidates: any[] = [iframeWin.wrappedJSObject, iframeWin].filter(
+      Boolean,
     );
+    for (const candidate of candidates) {
+      try {
+        const doc = candidate?.document;
+        const el =
+          (doc?.getElementById?.("viewerContainer") as any) ??
+          doc?.scrollingElement ??
+          doc?.documentElement ??
+          null;
+        if (el) return { win: candidate, el };
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    return null;
+  }
+
+  getScrollContainer(): any {
+    return this.getContentViewer()?.el ?? null;
   }
 
   getPosition(): {
@@ -270,33 +297,26 @@ export class ReaderPane implements ReaderPaneAdapter {
    *   - Cu.exportFunction(onScroll, contentWin) returns a function the content
    *     realm can call that invokes our chrome onScroll;
    *   - we register it with the content element's addEventListener (reached
-   *     through wrappedJSObject, so the listener lives in the content realm
-   *     where scroll events actually fire).
+   *     through the unwrapped content window, so the listener lives in the
+   *     content realm where scroll events actually fire).
    *
    * Returns a cleanup fn that removes the listener, or null if the container
    * wasn't reachable / exportFunction unavailable (caller falls back to polling).
    */
   installScrollTrigger(onScroll: () => void): (() => void) | null {
     try {
-      const internalReader = this.getInternalReader();
-      const iframe = internalReader?._primaryView?._iframe;
-      const iframeWin: any = iframe?.contentWindow;
-      if (!iframeWin) return null;
-      // wrappedJSObject: the content element/document seen without an Xray
-      // wrapper, so addEventListener registers in the content realm.
-      const contentWin: any = iframeWin.wrappedJSObject || iframeWin;
-      const el = contentWin.document?.getElementById?.("viewerContainer");
-      if (!el) return null;
+      const view = this.getContentViewer();
+      if (!view) return null;
 
       const Cu = (Components as any).utils;
       if (!Cu || typeof Cu.exportFunction !== "function") return null;
 
-      const cb = Cu.exportFunction(onScroll, contentWin);
-      el.addEventListener("scroll", cb, { passive: true });
+      const cb = Cu.exportFunction(onScroll, view.win);
+      view.el.addEventListener("scroll", cb, { passive: true });
 
       return () => {
         try {
-          el.removeEventListener("scroll", cb);
+          view.el.removeEventListener("scroll", cb);
         } catch (e) {
           safeDebug("[Z-Transplit] readerPaneAdapter: " + e);
           /* best-effort */

@@ -314,34 +314,52 @@ export function primeSyncBaselines(state: SplitTabState): void {
  * Inject scroll triggers into both panes and start the backstop interval.
  * Call after both readers are ready. Injection failure is non-fatal — the
  * backstop interval still drives sync (just at ~400ms instead of real-time).
+ *
+ * Injection is retried for a short window on the panes that didn't take:
+ * attach() only waits for the content-side `_reader`, while pdf.js builds its
+ * iframe + #viewerContainer a moment later (verified on Zotero 10.0.3, where
+ * both panes landed after the first attempt and dropped to the backstop poll
+ * for the whole session).
  */
 export function installSync(state: SplitTabState): void {
   primeSyncBaselines(state);
 
   // FAST PATH: inject a content-realm scroll listener on each pane. The
   // listener calls requestSync() (via exportFunction) on every scroll.
-  if (state.leftAdapter) {
-    const cleanup = state.leftAdapter.installScrollTrigger(() =>
-      requestSync(state),
-    );
-    state.leftTriggerCleanup = cleanup;
-    if (!cleanup) {
-      Zotero.debug?.(
-        "[Z-Transplit splitView] left scroll-trigger injection failed — relying on backstop poll",
-      );
+  const tryInject = (side: "left" | "right") => {
+    const adapter = side === "left" ? state.leftAdapter : state.rightAdapter;
+    if (!adapter) return;
+    if (
+      side === "left" ? state.leftTriggerCleanup : state.rightTriggerCleanup
+    ) {
+      return; // already injected
     }
-  }
-  if (state.rightAdapter) {
-    const cleanup = state.rightAdapter.installScrollTrigger(() =>
-      requestSync(state),
-    );
-    state.rightTriggerCleanup = cleanup;
-    if (!cleanup) {
-      Zotero.debug?.(
-        "[Z-Transplit splitView] right scroll-trigger injection failed — relying on backstop poll",
-      );
+    const cleanup = adapter.installScrollTrigger(() => requestSync(state));
+    if (cleanup) {
+      if (side === "left") state.leftTriggerCleanup = cleanup;
+      else state.rightTriggerCleanup = cleanup;
     }
-  }
+  };
+
+  tryInject("left");
+  tryInject("right");
+
+  // Retry the panes that missed, until the container exists or time runs out.
+  const RETRY_MS = 15_000;
+  const RETRY_EVERY = 100;
+  const started = Date.now();
+  const retryTimer = (state.win as any).setInterval(() => {
+    tryInject("left");
+    tryInject("right");
+    const injected =
+      !!state.leftTriggerCleanup && !!state.rightTriggerCleanup;
+    if (injected || Date.now() - started > RETRY_MS) {
+      (state.win as any).clearInterval(retryTimer);
+      const idx = state.timeoutIds.indexOf(retryTimer);
+      if (idx >= 0) state.timeoutIds.splice(idx, 1);
+    }
+  }, RETRY_EVERY);
+  state.timeoutIds.push(retryTimer);
 
   // SLOW PATH: backstop poll in case injection failed or an event was missed.
   const id = (state.win as any).setInterval(
