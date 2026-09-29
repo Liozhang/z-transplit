@@ -145,6 +145,17 @@ const KEYLESS_ENDPOINT_TIMEOUT_MS = 10000;
  */
 const AI_ENDPOINT_TIMEOUT_MS = 120000;
 
+/**
+ * Floor for the model-backed engines' output budget. Reasoning-style models
+ * spend completion tokens on hidden thinking before any visible text, so a
+ * purely length-derived cap empties the budget mid-reasoning and returns no
+ * content at all (observed on StepFun step-3.7-flash: a 37-char selection with
+ * the length-derived cap came back finish_reason=length, content=""; 2048
+ * returned the translation). 2048 matches the smallest budget observed to
+ * clear reasoning and still leave room for the answer.
+ */
+const MODEL_OUTPUT_FLOOR_TOKENS = 2048;
+
 async function httpPost(
   url: string,
   headers: Record<string, string>,
@@ -583,7 +594,7 @@ async function translateWithAI(
           }),
         },
       ],
-      maxTokens: Math.min(text.length * 2, 4000),
+      maxTokens: Math.max(MODEL_OUTPUT_FLOOR_TOKENS, Math.min(text.length * 2, 4000)),
       temperature: 0.3,
       timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
     });
@@ -628,7 +639,7 @@ async function translateWithCustom(
         },
         { role: "user", content: text },
       ],
-      maxTokens: Math.min(text.length * 2, 4000),
+      maxTokens: Math.max(MODEL_OUTPUT_FLOOR_TOKENS, Math.min(text.length * 2, 4000)),
       temperature: 0.3,
     });
 
@@ -1322,7 +1333,10 @@ export async function createAIBatchTranslator(
                 { role: "system", content: singlePrompt },
                 { role: "user", content: texts[i] },
               ],
-              maxTokens: Math.min(texts[i].length * 2, 4000),
+              maxTokens: Math.max(
+                MODEL_OUTPUT_FLOOR_TOKENS,
+                Math.min(texts[i].length * 2, 4000),
+              ),
               temperature: 0.1,
               signal,
             }),

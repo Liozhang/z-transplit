@@ -262,7 +262,7 @@ describe("engine wire contracts", () => {
     expect(call.headers.Authorization).toBe("Bearer ck-1");
     const body = JSON.parse(call.body);
     expect(body.model).toBe("llama3");
-    expect(body.max_tokens).toBe(10); // min(len*2, 4000)
+    expect(body.max_tokens).toBe(2048); // reasoning floor > min(len*2, 4000)
     expect(body.temperature).toBe(0.3);
     expect(body.messages[0].role).toBe("system");
     // formula-preserving prompt (the ex-"ai" engine's contract, now on custom)
@@ -678,9 +678,18 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     expect(call.headers.Authorization).toBe("Bearer ak-1");
     const body = JSON.parse(call.body);
     expect(body.model).toBe("qwen-max");
-    expect(body.max_tokens).toBe(10); // min(len*2, 4000)
+    expect(body.max_tokens).toBe(2048); // reasoning floor > min(len*2, 4000)
     expect(body.temperature).toBe(0.3);
     expect(call.signal).toBeDefined();
+  });
+
+  it("a long selection caps the output budget at 4000 above the reasoning floor", async () => {
+    aiPrefs();
+    aiRoute();
+    const t = createTranslator("zh-CN");
+    await t("word ".repeat(1000).trim(), "zh-CN"); // 5000 chars
+    const body = JSON.parse(h.fetchCalls[0].body);
+    expect(body.max_tokens).toBe(4000); // max(2048, min(len*2, 4000))
   });
 
   it("no key configured: no Authorization header is sent", async () => {
