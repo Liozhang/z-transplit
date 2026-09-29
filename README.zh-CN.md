@@ -1,4 +1,10 @@
-# Z-Transplit
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="addon/content/icons/ztransplit-dark.svg" />
+    <img src="addon/content/icons/ztransplit-light.svg" width="42" height="42" alt="Z-Transplit logo" align="top" />
+  </picture>
+  Z-Transplit
+</h1>
 
 [English](README.md) | **中文**
 
@@ -116,6 +122,11 @@ AI 引擎把「发给模型什么」交给用户：翻译提示词是一个可�
 - 阅读器右键（PDF 视图）：「翻译并分屏」「对比分屏」「取消正在进行的翻译」
 - 文献列表右键：「翻译全文（生成译文附件）」「翻译并分屏对照」，选中 PDF 时才显示
 - 编辑 ▸ 设置 ▸ Z-Transplit：引擎、密钥、目标语言、Java 与 OpenDataLoader 选项
+
+## 开发
+
+架构说明、移植来源，以及构建、质量门控与测试分层的流程，见
+[docs/development.md](docs/development.md)。
 
 ## License
 
