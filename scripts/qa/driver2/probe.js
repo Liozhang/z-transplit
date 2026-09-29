@@ -645,8 +645,14 @@ PROBE_CMDS.openContextPane = async function () {
       doc.querySelector("[id*='context'][class*='toggle']");
     if (btn) {
       btn.click();
-    } else if (Zotero.ContextPane?.toggle) {
-      Zotero.ContextPane.toggle();
+    }
+    // Zotero 10: the module is the window global ZoteroContextPane (not
+    // Zotero.ContextPane); setting collapsed=false drives the splitter state
+    // through its setter, which is what actually expands the reader sidebar.
+    const zcp = win.ZoteroContextPane;
+    if (zcp) {
+      zcp.collapsed = false;
+      if (typeof zcp.update === "function") zcp.update();
     }
     await Zotero.Promise.delay(1500);
   }
@@ -1648,6 +1654,95 @@ PROBE_CMDS.installPdf = async function (src) {
 
 PROBE_CMDS.listCommands = async function () {
   return Object.keys(PROBE_CMDS);
+};
+
+/** Jump to the first reader tab — the enabled state of the translate section
+ *  is driven by onItemChange on tab switches, and a tab opened programmatically
+ *  may never have fired it. The section's data-pane carries the full plugin ID
+ *  (ztransplit\@zotero\.org-ztransplit-translate), so match with includes(). */
+PROBE_CMDS.activateReader = async function () {
+  const { Zotero_Tabs } = probeWin();
+  const doc = Zotero.getMainWindow().document;
+  const readSection = () => {
+    const el = Array.from(doc.querySelectorAll("item-pane-custom-section")).find(
+      (c) => (c.dataset.pane || "").includes("transplit"),
+    );
+    return {
+      found: !!el,
+      hidden: el ? el.hidden : null,
+      text: el ? (el.textContent || "").slice(0, 300) : "",
+    };
+  };
+  const readerTab = Zotero_Tabs._tabs.find((t) => t.type === "reader");
+  if (!readerTab) {
+    return { error: "no reader tab", tabs: Zotero_Tabs._tabs.map((t) => t.type) };
+  }
+  // Leave + re-enter: two switch events, so onItemChange runs against the
+  // reader tab last no matter which direction Zotero reports first.
+  Zotero_Tabs.select("zotero-pane");
+  await Zotero.Promise.delay(600);
+  Zotero_Tabs.select(readerTab.id);
+  await Zotero.Promise.delay(1500);
+  return {
+    jumped: readerTab.id,
+    selectedID: Zotero_Tabs.selectedID,
+    selectedType: Zotero_Tabs.selectedType,
+    section: readSection(),
+  };
+};
+
+/** Force the custom section's itemChange hook to re-run. The hook fires from
+ *  the item setter, so if item was assigned before tabType the section latches
+ *  disabled; re-assigning re-evaluates with the current tabType. */
+PROBE_CMDS.pokeSection = async function () {
+  const doc = Zotero.getMainWindow().document;
+  const sections = Array.from(
+    doc.querySelectorAll("item-pane-custom-section"),
+  ).filter((c) => (c.dataset.pane || "").includes("transplit"));
+  const before = sections.map((el) => ({
+    tabType: el.tabType,
+    itemID: el.item?.id ?? null,
+    hidden: el.hidden,
+  }));
+  for (const el of sections) {
+    try {
+      el.item = el.item;
+    } catch (e) {
+      probeLog("poke: " + e);
+    }
+  }
+  await Zotero.Promise.delay(800);
+  const after = sections.map((el) => ({
+    tabType: el.tabType,
+    itemID: el.item?.id ?? null,
+    hidden: el.hidden,
+    text: (el.textContent || "").slice(0, 200),
+  }));
+  return { before, after };
+};
+
+/** Maximize the main window — the context pane auto-collapses under Zotero's
+ *  width threshold, which hides the translate section on small QA windows. */
+PROBE_CMDS.maximize = async function () {
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const before = {
+    w: win.outerWidth,
+    h: win.outerHeight,
+    sizemode: doc.documentElement.getAttribute("sizemode"),
+    contextCollapsed: doc.getElementById("zotero-context-pane")?.collapsed ?? null,
+  };
+  win.maximize();
+  await Zotero.Promise.delay(1000);
+  return {
+    before,
+    after: {
+      w: win.outerWidth,
+      h: win.outerHeight,
+      sizemode: doc.documentElement.getAttribute("sizemode"),
+      contextCollapsed: doc.getElementById("zotero-context-pane")?.collapsed ?? null,
+    },
+  };
 };
 
 // ── driver: poll command.json ───────────────────────────────────────────────
