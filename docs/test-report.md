@@ -204,3 +204,54 @@ R1/R2 各补了回归测试（`translatePane.dom.test.ts` 15 例，zotero-mock �
 
 处置后全量门控：vitest **166/166**（含 2 个真机回归测试）、tsc ×2 清零、build OK、
 structure-check 9/9、test:qa 40/40、check:jar OK。
+
+---
+
+# 第二轮实机测试（2026-09-29，Zotero 10.0.3 win-x64 + 隔离 profile/数据目录）
+
+> 本轮用 `scripts/qa/real-machine.mjs` + `scripts/qa/driver2/probe.js` 在**真实 Zotero 10.0.3**
+> 上从零装载构建产物，逐项点了全部功能与按钮。manifest 已声明 `strict_max_version
+> 10.*`，因此这一轮是插件实际声明的支持面，而非上一轮「Zotero 7.0.15 便携版」的替代。
+
+## 发现并修复的缺陷（2 个）
+
+| # | 缺陷 | 症状（真机日志证据） | 修复 | 真机复验 |
+|---|------|---------------------|------|---------|
+| R4 | `platform.ts#windowsDir` 读 `process.env.WINDIR` | 真机日志每次流水线都吐 `[Z-Transplit] platform: ReferenceError: process is not defined`——chrome realm 里 `process` 根本不存在，被 try/catch 吞掉后回落到 `C:\Windows`。文件头注释明明写着「Never `process.platform`」，实际却在用它 | 改走 XPCOM directory service 的 `WinD` key（同文件其它目录解析的同款路径） | 重跑 PDF 流水线，日志中 `platform:` 报错 **0 条** |
+| R5 | 分屏滚动同步的快路径在 Zotero 10 上整体失效 | `[Z-Transplit splitView] left/right scroll-trigger injection failed — relying on backstop poll`，左右两屏都只能靠 400ms 轮询兜底。真机探测：`viewerOnDirect=true, viewerOnWrapped=false, cuAvailable=true` | 两个根因一起修：① `readerPaneAdapter` 里 `wrappedJSObject \|\| iframeWin` 的解析顺序在现行 Gecko 上反了，`getScrollContainer()` 与 `installScrollTrigger()` 都取不到 `#viewerContainer`（后者返回 null 会让 `getScrollFraction()` 恒为 null，同步引擎整体空转）；抽出 `getContentViewer()` 两个候选窗口都试，谁拿到元素用谁；② `attach()` 只等 `_reader` 出现，pdf.js 的 iframe + `#viewerContainer` 要晚一步，`installSync()` 首次注入必然落空——改为 15s 内按 100ms 重试注入，成功即停 | 复跑后 `scroll-trigger injection failed` **0 条**，分屏 Tab（`isSplitView:true`）正常创建 |
+
+两处各补了回归测试：`tests/node/readerPaneAdapter-scroll-trigger.spec.ts`（8 例：
+direct-only / wrapped-only / 都看不到 / 无 Cu / 未初始化链 + `getScrollContainer` 三态 +
+listener 真的回调 `onScroll`）。`installSync` 的重试逻辑由既有 `split-sync.spec.ts`
+23 例与真机复验覆盖。
+
+## 真机确认通过的项（Zotero 10.0.3）
+
+- 插件安装/启动：bootstrap startup 无错误日志；section、设置 pane、阅读器菜单、文献列表菜单全部注册
+- 阅读器「翻译」面板：注册、门控（仅 reader 标签页）、DOM 渲染、样式、本地化（en-US 下无裸 FTL id）、
+  选区读取、**真实网络翻译**（免 key Google 端点，186 字符选中 → 中文译文 + 「复制」按钮）、
+  语言框失焦即提交、空选区披露文案
+- 阅读器右键菜单：两条（「翻译并分屏」「对比分屏」）均注册且文案本地化，`_registeredListeners`
+  是真数组 `{pluginID,type,handler}`（探针最初按 `_listeners` 读所以误报 0，属测试侧问题）
+- 文献列表右键菜单：两条 + 分隔符 + 仅当选中 PDF 时显示的门控
+- 设置 pane：真实 Settings 窗口打开、三组分区渲染、引擎字段组显隐、切到 ai/custom 后 pref 落盘、
+  静态兜底文案生效（无裸 `preferences-ztransplit-` id）
+- 全文翻译流水线：真实 PDF → Java + ODL jar（exit 0）→ 逐段翻译（`translation-cache` 实见证书
+  240+ 条）→ 版式重排 → 「译文 (zh-CN)」附件入库；CJK 目标下译文 PDF 反提取得 135 个汉字，
+  证明字体内嵌与 Unicode 映射正确（4189B → 31850B）
+- 双语对照：SDT pack 生成（1772ms）、`startSession` → `injected 3 blocks`，toggle 变「退出双语」
+- 朗读：`speechSynthesis` 可用（9 voices）、`buildPdfSegments from page, total=3`，
+  按 PDF 文本层逐页取段（429 字符/页）
+- 分屏对照：真机创建 `isSplitView` Tab，分隔条与左右 reader 就位
+
+## 本轮新增能力（可复用的真机测试基建）
+
+`scripts/qa/real-machine.mjs`：独立 profile + 独立数据目录启动真机，把驱动探针以
+「构建产物副本 + bootstrap 打补丁」的方式装载（发布物 `.scaffold/build` 本身不改），
+通过 `D:\zt-qa\command.json` / `result.json` 下发命令与回收结果。探针 action 见
+[docs/development.md](development.md)。用户的真实文献库与数据目录全程未被触碰。
+
+## 处置后全量门控
+
+vitest **286/286**（23 个文件，含 8 个新增真机回归）、tsc ×2 清零、build OK、
+structure-check **9/9**、test:qa **40/40**（14 harness + 26 正控）、check:jar OK。
