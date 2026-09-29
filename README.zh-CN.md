@@ -35,7 +35,7 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 目标语言框（回车或失焦即提交，输入法组词期间回车不会误触发）、译文朗读。
 翻译失败、结果为空、字符超限、引擎未配置都各有明确提示，不会出现静默空窗。
 
-![划词翻译](docs/screenshots/selection-translate.png)
+![划词翻译](docs/screenshots/zh-CN/selection-translate.png)
 
 - 源文本区带「刷新选区」按钮，重新读取当前阅读器选区
 - 目标语言框回车或失焦即提交；输入法组词期间回车只确认候选词，不触发翻译
@@ -49,7 +49,7 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 （JVM）解析版面 → 逐段翻译 → 按原版式重排渲染，产物作为「Translated (zh-CN)」附件入库并自动打开。
 重复翻译自动去重：已有译文时直接打开，不再重跑。
 
-![全文翻译附件](docs/screenshots/translated-attachment.png)
+![全文翻译附件](docs/screenshots/zh-CN/translated-attachment.png)
 
 - 保留原版面：分栏、表格、图片位置按解析结果贴回，中英文混排分段各自用对应字体绘制
 - CJK 字体自动解析：按目标语言在系统字体目录中找微软雅黑 / 苹方 / Noto，找不到时明确提示而不是画「豆腐块」；也可在数据目录 `ztransplit/translation-assets` 放入 `translated-regular.ttf` 覆盖，想匹配论文的衬线风格可放思源宋体
@@ -61,7 +61,7 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 右键（阅读器或文献列表）→「翻译并分屏对照」/「对比分屏」：同一个标签页内左右两个阅读器
 并排，左右各一个 5px 拖拽分隔条调节比例，滚动、翻页、缩放双向同步，适合逐段精读。
 
-![分屏对照](docs/screenshots/split-view.png)
+![分屏对照](docs/screenshots/zh-CN/split-view.png)
 
 - 「对比分屏」不需要翻译，把当前 PDF 与同一父条目下的另一个 PDF 直接并排
 - 「翻译并分屏」没有现成译文时先跑全文翻译，再打开分屏；已有译文则直接复用
@@ -72,13 +72,13 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 阅读器右侧「翻译」面板中开启「双语对照」：Zotero 10 的 SDT 阅读模式把 PDF 重排为结构化文本，
 每段原文下方插入译文块；视口懒翻译，滚到哪译到哪，进度实时显示 `3/12 段已译`。
 
-![上下对照双语](docs/screenshots/bilingual-interleave.png)
+![上下对照双语](docs/screenshots/zh-CN/bilingual-interleave.png)
 
 ### 5. 仅译文模式
 
 同一双语会话内切换到「仅译文」：隐藏原文块，只保留译文，适合通读全文。
 
-![仅译文](docs/screenshots/translation-only.png)
+![仅译文](docs/screenshots/zh-CN/translation-only.png)
 
 > 双语对照 / 仅译文依赖 Zotero 10 的阅读模式；在 Zotero 7 上面板会明确提示降级，
 > 其余功能（划词、全文翻译、分屏、朗读）在 7 与 10 上均可用。
@@ -102,7 +102,7 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 | 自定义接口 | 必填 | OpenAI 兼容 chat/completions |
 | zotero-pdf-translate | — | 检测到该插件时可直接转交 |
 
-![AI 翻译引擎设置](docs/screenshots/ai-engine.png)
+![AI 翻译引擎设置](docs/screenshots/zh-CN/ai-engine.png)
 
 ### AI 翻译的提示词模板
 
