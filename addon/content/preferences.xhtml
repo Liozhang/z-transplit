@@ -73,6 +73,20 @@
         >打开阅读器条目或选中文本时立即翻译，不需要再点「翻译」按钮。需要先开启上面的「启用文本翻译」。自动翻译会按下面的字符上限分段请求，打开长文档时会产生较多网络请求。</description>
       </vbox>
 
+      <checkbox
+        id="ztransplit-pref-wordcards-enabled"
+        native="true"
+        preference="extensions.zotero.ztransplit.wordcards.enabled"
+        data-l10n-id="preferences-ztransplit-wordcards-enabled"
+        label="记录查过的单词（词卡）"
+      />
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-wordcards-enabled-desc"
+        >开启后，在 PDF 阅读器中选中一个单词会按词典卡片查询（音标、词性、释义、例句），并自动积累到「词卡」标签页中。关闭后单词按普通文本翻译，已有词卡保留，可随时重新开启。</description>
+      </vbox>
+
       <hbox class="ztransplit-row" align="center">
         <label
           id="ztransplit-pref-maxchars-label"

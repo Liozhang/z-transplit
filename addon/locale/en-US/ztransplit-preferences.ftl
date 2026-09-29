@@ -292,3 +292,13 @@ preferences-ztransplit-pdf-odl-images-desc =
     the translation, keeping figures complete; when off, only text is
     translated and image areas are left blank — parsing is faster and the
     output file smaller.
+
+## ── Word cards ─────────────────────────────────────────────────────────────
+preferences-ztransplit-wordcards-enabled =
+    .label = Record looked-up words (word cards)
+preferences-ztransplit-wordcards-enabled-desc =
+    When on, a single-word selection in the PDF reader is looked up as a
+    dictionary card (phonetics, part of speech, senses, examples) and
+    accumulates into the Word Cards tab. When off, single words are translated
+    as plain text; existing cards are kept and recording can be re-enabled at
+    any time.

@@ -100,3 +100,43 @@ export interface BatchTranslatorHandle {
   /** Max estimated output chars per chunk (from maxOutputTokens). */
   outputBudgetChars: number;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dictionary cards (single-word reader lookups)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One sense line of a dictionary card. */
+export interface DictionarySense {
+  /** Part-of-speech tag as displayed ("n.", "v.", "adj.", "m.", …). */
+  pos?: string;
+  meaning: string;
+  /** Per-sense usage example (model cards). */
+  example?: string;
+  exampleTranslation?: string;
+}
+
+/** Card-level bilingual example pair (Youdao cards). */
+export interface DictionaryExample {
+  text: string;
+  translation: string;
+}
+
+/** Where a card's content came from — shown on the card as a source tag. */
+export type DictionaryCardSource = "youdao" | "model" | "mt";
+
+/**
+ * Content of one dictionary card. Produced by the lookup chain in
+ * dictionaryCard.ts (Youdao → model engine → MT simple card) and persisted
+ * verbatim inside word-card records (wordCardStore.ts), so a card must stay
+ * JSON-safe and self-contained.
+ */
+export interface DictionaryCardContent {
+  /** Display form of the looked-up word. */
+  word: string;
+  /** Phonetic transcription as displayed (IPA, slashes included where the source gives them). */
+  phonetic?: string;
+  senses: DictionarySense[];
+  /** Card-level bilingual examples (Youdao); model cards use per-sense examples. */
+  examples?: DictionaryExample[];
+  source: DictionaryCardSource;
+}

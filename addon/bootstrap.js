@@ -99,16 +99,20 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
 }
 
 async function uninstall(data, reason) {
-  // Remove the persistent translation cache directory. Everything else the
-  // addon stores lives in the extensions.zotero.ztransplit.* preference
-  // branch, which Zotero clears together with the default prefs declared in
-  // addon/prefs.js. Best-effort: Zotero may be tearing down already.
+  // Remove the persistent cache directories (translation cache + word cards).
+  // Everything else the addon stores lives in the extensions.zotero.ztransplit.*
+  // preference branch, which Zotero clears together with the default prefs
+  // declared in addon/prefs.js. Best-effort: Zotero may be tearing down already.
   try {
     const IOUtils = globalThis.IOUtils;
     const dir = Zotero.DataDirectory?.dir;
     if (IOUtils?.remove && dir) {
       await IOUtils.remove(
         dir + "/ztransplit/translation-cache",
+        { recursive: true, ignoreExisting: true },
+      );
+      await IOUtils.remove(
+        dir + "/ztransplit/word-cards",
         { recursive: true, ignoreExisting: true },
       );
     }

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Z-Transplit 词卡</title>
+  <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4.5" y="3.5" width="15" height="17" rx="2"/>
+    <path d="M9.2 14.5 L12 8 L14.8 14.5"/>
+    <path d="M10.4 12.3 H13.6"/>
+    <path d="M8.5 17.5 H15.5"/>
+  </g>
+</svg>

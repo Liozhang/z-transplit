@@ -36,6 +36,7 @@ declare namespace _ZoteroTypes {
       "reader.bilingual.concurrency": number;
       "readAloud.rate": number;
       "readAloud.voice": string;
+      "wordcards.enabled": boolean;
     };
   }
 }

@@ -256,3 +256,11 @@ preferences-ztransplit-pdf-odl-images =
 preferences-ztransplit-pdf-odl-images-desc =
     让解析器输出页面内嵌图像，翻译后随译文贴回原位置，图表更完整；关闭后只
     翻译文字，图像区域留白，解析更快、生成的文件更小。
+
+## ── 词卡 ───────────────────────────────────────────────────────────────────
+preferences-ztransplit-wordcards-enabled =
+    .label = 记录查过的单词（词卡）
+preferences-ztransplit-wordcards-enabled-desc =
+    开启后，在 PDF 阅读器中选中一个单词会按词典卡片查询（音标、词性、释义、
+    例句），并自动积累到「词卡」标签页中。关闭后单词按普通文本翻译，已有词卡
+    保留，可随时重新开启。

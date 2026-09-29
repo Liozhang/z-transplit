@@ -75,6 +75,20 @@ async function onStartup() {
     );
   }
 
+  // Word-cards entry points: the reader-toolbar listener (global, once per
+  // plugin lifecycle) plus library toolbar buttons for windows that already
+  // exist; windows opened later are covered by onMainWindowLoad. Each button
+  // preflights its own anchor and degrades to a log — see
+  // src/modules/registerWordCardsUI.ts.
+  try {
+    const mod = await import("./modules/registerWordCardsUI");
+    mod.registerWordCardsUI();
+  } catch (e) {
+    safeDebug(
+      `[Z-Transplit] ./modules/registerWordCardsUI unavailable: ${toErrorMessage(e)}`,
+    );
+  }
+
   // Fire-and-forget cache maintenance (prune is LRU, size from prefs).
   void (async () => {
     try {
@@ -103,6 +117,13 @@ async function onMainWindowLoad(window: any) {
   } catch {
     /* best-effort */
   }
+  // This window's word-cards library toolbar button.
+  try {
+    const mod = await import("./modules/registerWordCardsUI");
+    mod.registerWordCardsUIForWindow(window);
+  } catch {
+    /* best-effort */
+  }
 }
 
 async function onMainWindowUnload(window: any) {
@@ -116,6 +137,15 @@ async function onMainWindowUnload(window: any) {
   } catch (e) {
     safeDebug(
       `[Z-Transplit] ./modules/registerItemTreeMenu unavailable on window unload: ${toErrorMessage(e)}`,
+    );
+  }
+  // Revoke this window's word-cards library toolbar button.
+  try {
+    const mod = await import("./modules/registerWordCardsUI");
+    mod.unregisterWordCardsUIForWindow(window);
+  } catch (e) {
+    safeDebug(
+      `[Z-Transplit] ./modules/registerWordCardsUI unavailable on window unload: ${toErrorMessage(e)}`,
     );
   }
 }
@@ -154,6 +184,15 @@ async function onShutdown() {
     mod.unregisterItemTreeMenu();
   } catch {
     /* best-effort */
+  }
+  // Revoke the word-cards entry buttons and close an open word-cards tab.
+  try {
+    const mod = await import("./modules/registerWordCardsUI");
+    mod.unregisterWordCardsUI();
+  } catch (e) {
+    safeDebug(
+      `[Z-Transplit] ./modules/registerWordCardsUI unavailable on shutdown: ${toErrorMessage(e)}`,
+    );
   }
   // Stop the split-view sync pollers; a live 400ms interval would otherwise
   // survive disable/reload for as long as the user keeps a split tab open.

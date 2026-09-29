@@ -19,6 +19,7 @@ import { JSDOM } from "jsdom";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mountTranslatePane } from "../../../src/ui/translatePane";
 import { clearTranslationCache } from "../../../src/core/translation/translationEngines";
+import { clearAllWordCards } from "../../../src/core/wordcards/wordCardStore";
 import { createZoteroMock } from "../../qa/harness/zotero-mock";
 import { createFetchMock } from "../../qa/harness/fetch-mock";
 
@@ -40,6 +41,9 @@ const K = {
   genericError: "ztransplit-pane-translate-error",
   noReader: "ztransplit-pane-translate-no-reader",
   copyFailed: "ztransplit-pane-translate-copy-failed",
+  lookup: "ztransplit-pane-translate-lookup-action",
+  lookingUp: "ztransplit-pane-translate-looking-up",
+  sourceYoudao: "ztransplit-pane-translate-card-source-youdao",
 };
 
 interface Ctx {
@@ -115,9 +119,12 @@ function routeOK(fm: ReturnType<typeof createFetchMock>, translated = "译文"):
 
 // The engine's LRU translation cache is module-level and survives across tests
 // in this file. Clearing it per test keeps each case's fetch-count assertion
-// honest (a cache hit legitimately means zero network calls).
+// honest (a cache hit legitimately means zero network calls). The word-card
+// store keeps an in-memory index too — clear it so chip-strip cases start
+// from an empty shelf.
 beforeEach(() => {
   clearTranslationCache();
+  clearAllWordCards();
 });
 
 describe("B16 阅读器翻译面板：选区与自动翻译", () => {
@@ -351,5 +358,156 @@ describe("B16 阅读器翻译面板：生命周期", () => {
     const second = mountTranslatePane({ doc: ctx.doc, body: ctx.body });
     expect(second).toBe(first);
     expect(ctx.body.childNodes.length).toBe(nodes); // 没有重复渲染
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 词卡：单词选区走词典链（src/core/translation/dictionaryCard.ts）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 有道英汉响应，按 2026-09-29 真机实测形状精简。 */
+const YOUDAO_EN = {
+  simple: { word: [{ word: "resonance", usphone: "ˈrezənəns" }] },
+  ec: {
+    word: [{ trs: [{ tr: [{ l: { i: ["n. 共鸣；（物理）共振"] } }] }] }],
+  },
+  blng_sents_part: {
+    "sentence-pair": [
+      {
+        "sentence-eng": "The city resonates with history.",
+        "sentence-translation": "这座城市回荡着历史的回声。",
+      },
+    ],
+  },
+};
+
+function routeYoudao(fm: ReturnType<typeof createFetchMock>): void {
+  fm.route("https://dict.youdao.com/**").reply(200, YOUDAO_EN);
+}
+
+describe("词卡：单词选区走词典链", () => {
+  let ctx: Ctx;
+  afterEach(() => {
+    ctx?.fm.uninstall();
+    ctx?.z.uninstall();
+    ctx?.dom.window.close();
+  });
+
+  it("单词选区 idle 给「查询」按钮，点击渲染词典卡片（音标+释义+例句+来源）", async () => {
+    ctx = setup(
+      { ...ENGINE_PREFS, "wordcards.enabled": true },
+      ["resonance"],
+    );
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    expect(ctx.buttons(K.lookup).length).toBe(1);
+    ctx.click(K.lookup);
+    await flush();
+    const text = ctx.text(ctx.body);
+    expect(text).toContain("resonance");
+    expect(text).toContain("ˈrezənəns");
+    expect(text).toContain("共鸣");
+    expect(text).toContain("这座城市回荡着历史的回声。");
+    expect(text).toContain(K.sourceYoudao);
+    expect(ctx.buttons(K.copy).length).toBe(1);
+  });
+
+  it("查词成功后自动入库：最近查词词块行出现当前词", async () => {
+    ctx = setup(
+      { ...ENGINE_PREFS, "wordcards.enabled": true },
+      ["resonance"],
+    );
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.lookup);
+    await flush(60); // 查询 + 入库 + 词块刷新三段异步
+    const chips = ctx.doc.querySelector(".ztransplit-tp-chips");
+    expect(chips).not.toBeNull();
+    expect((chips as any).hidden).toBe(false);
+    expect(ctx.text(chips)).toContain("resonance");
+  });
+
+  it("查词不做引擎就绪前置检查：未配置引擎时有道层照样出卡", async () => {
+    ctx = setup(
+      {
+        "translate.enabled": true,
+        "translate.auto": false,
+        "translate.engineType": "custom",
+        "wordcards.enabled": true,
+      },
+      ["resonance"],
+    );
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.lookup);
+    await flush();
+    expect(ctx.text(ctx.body)).toContain("ˈrezənəns");
+    expect(ctx.fm.calls.length).toBe(1); // 只打了有道
+  });
+
+  it("wordcards.enabled=false：单词选区保持普通翻译路径", async () => {
+    ctx = setup(
+      { ...ENGINE_PREFS, "wordcards.enabled": false },
+      ["resonance"],
+    );
+    routeOK(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    expect(ctx.buttons(K.action).length).toBe(1);
+    expect(ctx.buttons(K.lookup).length).toBe(0);
+    ctx.click(K.action);
+    await flush();
+    expect(ctx.text(ctx.body)).toContain("译文");
+    expect(ctx.fm.calls[0].url).toContain("127.0.0.1");
+  });
+
+  it("有道失败降级到 MT 简卡，卡片标注翻译来源", async () => {
+    ctx = setup(
+      { ...ENGINE_PREFS, "wordcards.enabled": true },
+      ["resonance"],
+    );
+    ctx.fm.route("https://dict.youdao.com/**").reply(500, { error: "down" });
+    routeOK(ctx.fm, "共振");
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.lookup);
+    // 降级链路含模型层 chatJson 的一次 500ms 重试退避，等待要覆盖它
+    await flush(1200);
+    expect(ctx.text(ctx.body)).toContain("共振");
+    expect(ctx.text(ctx.body)).toContain(
+      "ztransplit-pane-translate-card-source-mt",
+    );
+  });
+
+  it("词块点击离线重画存储卡片，不打网络", async () => {
+    ctx = setup(
+      { ...ENGINE_PREFS, "wordcards.enabled": true },
+      ["resonance"],
+    );
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.lookup);
+    await flush(60);
+    expect(ctx.fm.calls.length).toBe(1);
+
+    // 换成句子选区，走普通翻译
+    ctx.z.reader = { tabID: 1, selectionRanges: [{ text: "hello world" }] };
+    routeOK(ctx.fm);
+    ctx.click(K.refresh);
+    await flush();
+    expect(ctx.buttons(K.action).length).toBe(1);
+    ctx.click(K.action);
+    await flush();
+    expect(ctx.text(ctx.body)).toContain("译文");
+    const callsAfterSentence = ctx.fm.calls.length;
+
+    // 点词块 → 卡片回来，零新增网络请求
+    const chip = [...ctx.doc.querySelectorAll(".ztransplit-tp-chip")].find(
+      (c: any) => String(c.textContent) === "resonance",
+    );
+    expect(chip).toBeTruthy();
+    (chip as any).click();
+    await flush();
+    expect(ctx.fm.calls.length).toBe(callsAfterSentence);
+    expect(ctx.text(ctx.body)).toContain("ˈrezənəns");
+    expect(ctx.text(ctx.body)).toContain(K.sourceYoudao);
   });
 });

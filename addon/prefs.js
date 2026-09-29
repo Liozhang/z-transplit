@@ -90,6 +90,14 @@ pref("extensions.zotero.ztransplit.reader.bilingual.concurrency", 2);
 pref("extensions.zotero.ztransplit.readAloud.rate", 1.0);
 pref("extensions.zotero.ztransplit.readAloud.voice", "");
 
+// Word cards (src/core/wordcards/wordCardStore.ts, src/ui/translatePane.ts).
+// When on, a single-word reader selection is looked up as a dictionary card,
+// every lookup is recorded under {DataDir}/ztransplit/word-cards/, and the
+// pane shows a recent-words strip. Off = the pane keeps the plain-translation
+// behaviour for word selections; the word-cards tab stays reachable and shows
+// a disabled hint instead of cards.
+pref("extensions.zotero.ztransplit.wordcards.enabled", true);
+
 // ─── Preference pane ───────────────────────────────────────────────────────
 // The Z-Transplit settings pane (编辑 → 设置 → Z-Transplit) is a Zotero 7
 // native preference pane, i.e. an XUL fragment that Zotero.PreferencePanes

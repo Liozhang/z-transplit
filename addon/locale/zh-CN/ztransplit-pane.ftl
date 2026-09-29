@@ -48,6 +48,32 @@ pane-translate-error-service = 翻译服务不可用：无法加载翻译引擎�
 pane-translate-error-not-ready = 翻译未就绪：{ $reason }。请在设置中补齐后重试。
 pane-translate-error-too-long = 选中文本为 { $count } 字符，超过每次请求的 { $max } 字符上限。请缩小选区后重试。
 
+## 单词查询（词典卡片）与最近查词词块行
+pane-translate-lookup-action = 查询
+pane-translate-looking-up = 正在查询…
+pane-translate-recent = 最近查词
+pane-translate-card-source-youdao = 释义来源：有道词典
+pane-translate-card-source-model = 释义来源：模型引擎
+pane-translate-card-source-mt = 释义来源：翻译引擎
+
+## ─── 词卡标签页（src/ui/wordCardsTab.ts + src/modules/registerWordCardsUI.ts）
+wordcards-tab-title = 词卡
+wordcards-toolbar-tooltip = 词卡（查过的单词）
+wordcards-search-placeholder =
+    .placeholder = 搜索单词或释义
+wordcards-sort-recent = 最近查询
+wordcards-sort-alpha = 字母顺序
+wordcards-clear = 清空
+wordcards-clear-confirm = 确认清空全部词卡？
+wordcards-count = 共 { $count } 张词卡
+wordcards-empty-title = 还没有词卡
+wordcards-empty-hint = 在 PDF 阅读器中选中一个单词，查过的词会自动积累成词卡。
+wordcards-disabled-hint = 词卡记录已在设置中关闭；重新开启后，查过的单词会继续积累。
+wordcards-history = 查询历史
+wordcards-delete = 删除
+wordcards-detail-empty = 选择左侧一张词卡查看详情。
+wordcards-no-match = 没有匹配的词卡。
+
 ## ─── 条目右键菜单（src/modules/registerItemTreeMenu.ts）──────────────────
 itemtree-menu = Z-Transplit
 itemtree-translate-attachment = 翻译全文（生成译文附件）
@@ -64,6 +90,7 @@ bilingual-block-failed = 翻译失败
 bilingual-retry = 重试
 bilingual-sdt-loading = 正在准备文档结构…
 bilingual-sdt-unavailable = 双语对照需要 Zotero 10 的阅读模式。当前版本可用：分屏对照（左右）、全文翻译附件。
+bilingual-sdt-missing = 文档结构会话未能建立，双语对照暂不可用。分屏对照与全文翻译仍可使用。
 bilingual-sdt-unpack-failed = 文档结构不可用（{ $error }）。分屏对照与全文翻译仍可使用。
 
 ## ─── 朗读（src/core/readAloud/）───────────────────────────────────────────

@@ -9,6 +9,9 @@
 ## The zh-CN locale (addon/locale/zh-CN/) must keep the exact same key set —
 ## Zotero picks a plugin locale per file and falls back to en-US.
 
+## Shared title (progress-window headlines / dialog titles)
+app-title = Z-Transplit
+
 ## Engine errors and hints (src/core/translation/translationEngines.ts)
 ## Key names follow leadero's translation-error-* naming. The `ai-prompt-*`
 ## keys double as the template rejection reasons reported by
@@ -63,15 +66,22 @@ odl-error-file-path = Invalid file path: the PDF or Java path is not valid. Chec
 odl-error-network = { $detail }
 odl-error-not-configured = Translation is not configured. Pick a translation engine and fill in its credentials in Zotero's Z-Transplit settings.
 odl-error-parse-empty = { $detail }
+odl-error-http-auth = The translation service rejected the request (HTTP { $code }): the API key is invalid or lacks access. Check the key in the Z-Transplit settings.
+odl-error-http-rate = The translation service is busy or the quota is exhausted (HTTP { $code }). Try again later.
+odl-error-http-other = The translation service returned an error (HTTP { $code }): { $detail }
 
 ## Split view errors and progress (splitViewFactory / readerPaneAdapter /
 ## splitViewCleanup)
+splitview-error-dialog-title = Split View (Z-Transplit)
 splitview-error-open = Could not open the split view: { $detail }
 splitview-error-tab-create = Failed to create the split-view tab (container not ready).
 splitview-error-container-timeout = The split-view container ({ $tabID }) did not appear in the DOM within 2 s.
 splitview-error-reader-timeout = The reader did not finish initializing within 10 s; the split view was aborted.
 splitview-error-scroll-timeout = The split-view readers' scroll areas did not become ready in time; page sync is unavailable.
-splitview-progress-reused = Reused the existing translation (attachment { $attachmentId })
+splitview-error-no-item = Could not resolve the PDF attachment for the current reader. Reopen the item and try again.
+splitview-error-in-flight = A translation is already in progress. Use "Cancel translation in progress" in the reader context menu.
+splitview-progress-reused = Reused the existing translation "{ $title }"
+splitview-tab-title = { $left } | { $right }
 
 ## Item tree context menu progress (src/modules/registerItemTreeMenu.ts)
 itemtree-progress-attachment = Z-Transplit: Translating full text…
@@ -84,9 +94,14 @@ java-dialog-title = Java required
 java-dialog-body =
     Java 11 or later is required for "Translate and open side by side".
 
-    Click OK to download and install Java automatically (about 40 MB, extracted
-    into the plugin's data directory — no administrator rights needed), or click
-    Cancel and download it manually from https://adoptium.net.
+    "Download and install": fetches the ~40 MB Java runtime and extracts it
+    into the plugin's data directory — no administrator rights needed.
+    "Open download page": opens https://adoptium.net in your browser so you
+    can install manually.
+    "Cancel": do nothing for now.
+java-dialog-button-download = &Download and install
+java-dialog-button-openpage = &Open download page
+java-dialog-button-cancel = Cancel
 java-progress-install = Installing the Java runtime…
 java-progress-download-prepare = Preparing download…
 java-progress-retry = ✓ Java installed. Click "Translate and open side by side" again.
@@ -107,10 +122,10 @@ java-progress-done = Java installation complete
 
 ## OpenDataLoader pipeline progress and errors
 ## (opendataloaderSplitAdapter / splitViewFactory / registerItemTreeMenu)
-odl-progress-translating = Z-Transplit: Translating with OpenDataLoader…
+odl-progress-translating = Z-Transplit: Translating full text…
 odl-error-dialog-title = Translate and split (OpenDataLoader)
 odl-progress-preparing = Preparing…
-odl-progress-done-split = Done: opened side by side (attachment { $attachmentId })
+odl-progress-done-split = Done: opened side by side — "{ $title }"
 odl-progress-cancelled = Translation cancelled
 odl-error-engine-not-ready = The translation engine is not fully configured: { $gaps }. Complete the settings in Z-Transplit preferences and retry.
 odl-progress-parsing = Parsing the PDF layout…
@@ -143,3 +158,7 @@ odl-progress-shot-failed = , { $count } failed
 
 ## Layout preserving renderer (LayoutPreservingRenderer.ts)
 render-error-rotated-page = Rotated pages are not supported yet (/Rotate { $angle }°). Straighten the PDF before translating.
+
+## Dictionary card lookup chain (src/core/translation/dictionaryCard.ts)
+dictionary-error-all-failed = Dictionary lookup failed: neither Youdao nor the configured translation engines returned a result ({ $error }).
+dictionary-error-unavailable = Dictionary lookup failed: { $error }

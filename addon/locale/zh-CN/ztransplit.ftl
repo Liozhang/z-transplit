@@ -7,6 +7,9 @@
 ## 本目录的键集合必须与 en-US 完全一致——Zotero 按文件粒度选择插件 locale，
 ## 缺失的文件会回落到 en-US。
 
+## 通用标题（进度窗 headline / 对话框标题）
+app-title = Z-Transplit
+
 ## 引擎错误与提示（src/core/translation/translationEngines.ts）
 ## 键名沿用 leadero 的 translation-error-* 命名。ai-prompt-* 同时是
 ## src/core/translation/promptTemplate.ts 的模板拒绝原因：每条规则一个文案，
@@ -60,14 +63,21 @@ odl-error-file-path = 文件路径无效：PDF 或 Java 路径不合法。请检
 odl-error-network = { $detail }
 odl-error-not-configured = 未配置翻译。请在 Zotero 设置的 Z-Transplit 中选择翻译引擎并填写其配置。
 odl-error-parse-empty = { $detail }
+odl-error-http-auth = 翻译服务拒绝了请求（HTTP { $code }）：API 密钥无效或没有访问权限，请检查 Z-Transplit 设置中的密钥。
+odl-error-http-rate = 翻译服务繁忙或配额不足（HTTP { $code }），请稍后重试。
+odl-error-http-other = 翻译服务返回错误（HTTP { $code }）：{ $detail }
 
 ## 分屏错误与进度（splitViewFactory / readerPaneAdapter / splitViewCleanup）
+splitview-error-dialog-title = 分屏对照 (Z-Transplit)
 splitview-error-open = 无法打开分屏：{ $detail }
 splitview-error-tab-create = 分屏标签页创建失败（容器未就绪）。
 splitview-error-container-timeout = 分屏容器（{ $tabID }）在 2 秒内未出现在 DOM 中。
 splitview-error-reader-timeout = 阅读器未在 10 秒内完成初始化，分屏中止。
 splitview-error-scroll-timeout = 分屏阅读器的滚动区域未在限定时间内就绪，页面同步不可用。
-splitview-progress-reused = 已复用已有译文（附件 { $attachmentId }）
+splitview-error-no-item = 无法确定当前阅读器对应的 PDF 附件，请重新打开该文献后重试。
+splitview-error-in-flight = 已有翻译正在进行，可在阅读器右键菜单选择「取消进行中的翻译」。
+splitview-progress-reused = 已复用已有译文「{ $title }」
+splitview-tab-title = { $left } | { $right }
 
 ## 文献树右键菜单进度（src/modules/registerItemTreeMenu.ts）
 itemtree-progress-attachment = Z-Transplit: 正在翻译全文…
@@ -80,8 +90,12 @@ java-dialog-title = 需要安装 Java
 java-dialog-body =
     需要 Java 11+ 才能使用「翻译并分屏」。
 
-    点击「确定」自动下载安装 Java（约 40MB，解压到插件目录，无需管理员权限）；
-    或点击「取消」后手动访问 https://adoptium.net 下载。
+    「自动下载安装」：下载约 40MB 的 Java 运行时并解压到插件数据目录，无需管理员权限；
+    「打开下载页」：在浏览器中打开 https://adoptium.net，由你手动下载安装；
+    「取消」：本次不做任何处理。
+java-dialog-button-download = 自动下载安装(&D)
+java-dialog-button-openpage = 打开下载页(&O)
+java-dialog-button-cancel = 取消
 java-progress-install = 正在安装 Java 运行时…
 java-progress-download-prepare = 准备下载…
 java-progress-retry = ✓ Java 安装完成。请再次点击「翻译并分屏」。
@@ -102,10 +116,10 @@ java-progress-done = Java 安装完成
 
 ## OpenDataLoader 流水线进度与错误
 ## （opendataloaderSplitAdapter / splitViewFactory / registerItemTreeMenu）
-odl-progress-translating = Z-Transplit: OpenDataLoader 翻译中…
+odl-progress-translating = Z-Transplit: 正在翻译全文…
 odl-error-dialog-title = 翻译并分屏 (OpenDataLoader)
 odl-progress-preparing = 准备…
-odl-progress-done-split = 完成：已分屏打开（附件 { $attachmentId }）
+odl-progress-done-split = 完成：已分屏打开「{ $title }」
 odl-progress-cancelled = 翻译已取消
 odl-error-engine-not-ready = 翻译引擎尚未配置完成：{ $gaps }。请先在 Z-Transplit 设置中补齐后重试。
 odl-progress-parsing = 正在解析 PDF 版面…
@@ -138,3 +152,7 @@ odl-progress-shot-failed = ，{ $count } 段失败
 
 ## 版式保留渲染器（LayoutPreservingRenderer.ts）
 render-error-rotated-page = 暂不支持旋转页面（/Rotate { $angle }°）。请先将 PDF 转正再翻译。
+
+## 词典卡片查询链（src/core/translation/dictionaryCard.ts）
+dictionary-error-all-failed = 词典查询失败：有道词典与可用的翻译引擎都没有返回结果（{ $error }）。
+dictionary-error-unavailable = 词典查询失败：{ $error }

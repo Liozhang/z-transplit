@@ -23,6 +23,11 @@
  *   - Translation runs in the chrome realm by importing
  *     src/core/translation/translationEngines directly — there is no
  *     window/React bridge (leadero's LeaderoAPI.translate).
+ *   - Word extension: a single-word selection (and wordcards.enabled) is
+ *     looked up as a dictionary card (src/core/translation/dictionaryCard.ts)
+ *     and every lookup is recorded in the word-card store
+ *     (src/core/wordcards/wordCardStore.ts); a recent-words chip strip under
+ *     the result area re-renders stored cards without touching the network.
  *
  * Differences forced by the port (also listed in the run's deviations):
  *   - No React: the whole panel is built with native DOM nodes
@@ -40,14 +45,28 @@ import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import { createAbortController } from "../utils/abort";
 import { toErrorMessage } from "../utils/error";
+import { isIMEComposing } from "../utils/ime";
+import { clearChildren, el, XHTML_NS } from "../utils/dom";
+import { copyText } from "../utils/clipboard";
 import { safeDebug } from "../utils/logger";
 import { checkTranslationReadiness } from "../core/translation/featureReadiness";
-
-/** XHTML namespace — the section body lives in Zotero 7's chrome document. */
-const XHTML_NS = "http://www.w3.org/1999/xhtml";
+import {
+  flattenCardText,
+  isSingleWord,
+  lookupWord,
+} from "../core/translation/dictionaryCard";
+import type { DictionaryCardContent } from "../core/translation/types";
+import {
+  recentWordCards,
+  upsertWordCard,
+} from "../core/wordcards/wordCardStore";
+import type { WordCardRecord } from "../core/wordcards/wordCardStore";
 
 /** Class prefix for every node this module creates. */
 const CLS = "ztransplit-tp";
+
+/** Word cards shown in the recent-words chip strip under the result area. */
+const CHIP_COUNT = 10;
 
 /** Result-area states, mirroring leadero's `TranslateStatus`. */
 export type TranslatePaneStatus = "idle" | "loading" | "success" | "error";
@@ -224,6 +243,64 @@ const PANE_CSS = `
 @media (prefers-reduced-motion: reduce) {
   .${CLS}-shimmer-line { animation: none; background-position: 0 0; }
 }
+
+/* Dictionary card (single-word lookup success state) */
+.${CLS}-card {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 20em; overflow-y: auto;
+  padding: 8px 10px;
+  border: var(--material-border-quinary, 1px solid rgba(127,127,127,0.25));
+  border-radius: 6px;
+  background: var(--material-background, transparent);
+  box-sizing: border-box;
+}
+.${CLS}-card-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.${CLS}-card-word { font-size: 1.15em; font-weight: 600; }
+.${CLS}-card-phonetic { font-size: 0.85em; opacity: 0.7; }
+.${CLS}-card-sense {
+  display: flex; gap: 6px; align-items: baseline;
+  font-size: 0.92em; line-height: 1.45;
+}
+.${CLS}-card-pos {
+  flex: 0 0 auto;
+  font-size: 0.78em; line-height: 1.4;
+  padding: 0 5px; border-radius: 4px;
+  background: var(--fill-quinary, rgba(127,127,127,0.15));
+  opacity: 0.9;
+}
+.${CLS}-card-example {
+  font-size: 0.85em; font-style: italic; opacity: 0.75; line-height: 1.4;
+}
+.${CLS}-card-example-trans {
+  font-size: 0.85em; opacity: 0.75; line-height: 1.4;
+}
+.${CLS}-card-foot {
+  display: flex; align-items: center; gap: 6px; margin-top: 2px;
+}
+.${CLS}-card-source { font-size: 0.78em; opacity: 0.6; }
+
+/* Recent-words chip strip (hidden entirely while the store is empty) */
+.${CLS}-chips {
+  display: flex; gap: 6px;
+  overflow-x: auto; padding: 2px 0;
+}
+.${CLS}-chip {
+  flex: 0 0 auto;
+  padding: 1px 10px;
+  border: 1px solid var(--fill-quinary, rgba(127,127,127,0.35));
+  border-radius: 999px;
+  background: var(--material-background, transparent);
+  color: var(--fill-primary, inherit);
+  font-size: 0.85em; line-height: 1.5;
+  cursor: pointer;
+}
+.${CLS}-chip:hover { background: var(--fill-quinary, rgba(127,127,127,0.18)); }
+.${CLS}-chip-active {
+  border-color: var(--accent-blue, #4072e5);
+  color: var(--accent-blue, #4072e5);
+}
 `;
 
 function ensureStyle(doc: Document, body: HTMLElement): HTMLStyleElement {
@@ -241,25 +318,8 @@ function ensureStyle(doc: Document, body: HTMLElement): HTMLStyleElement {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Small DOM helpers
+// Small DOM helpers — shared implementations live in src/utils/dom.ts
 // ─────────────────────────────────────────────────────────────────────────────
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  doc: Document,
-  tag: K,
-  className?: string,
-): HTMLElementTagNameMap[K] {
-  const node = doc.createElementNS(
-    XHTML_NS,
-    tag,
-  ) as unknown as HTMLElementTagNameMap[K];
-  if (className) node.className = className;
-  return node;
-}
-
-function clearChildren(node: Element): void {
-  while (node.firstChild) node.removeChild(node.firstChild);
-}
 
 type TrackedListener = {
   target: EventTarget;
@@ -359,67 +419,9 @@ function readSelection(doc: Document, itemID?: number): SelectionRead {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Clipboard + IME helpers (inlined: no src/utils/clipboard.ts or ime.ts yet)
+// Clipboard + IME helpers — shared implementations live in
+// src/utils/clipboard.ts and src/utils/ime.ts
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Copy text through Zotero's own clipboard helper first (works in every chrome
- * context, no secure-context requirement), then the async Clipboard API, then
- * a hidden textarea. Mirrors leadero's src/react/utils/clipboard.ts chain.
- *
- * @returns an empty string on success, otherwise the reason the copy failed.
- */
-async function copyText(doc: Document, text: string): Promise<string> {
-  try {
-    const zotero: any =
-      (typeof Zotero === "undefined" ? undefined : (Zotero as any)) ??
-      (doc?.defaultView as any)?.Zotero;
-    if (zotero?.Utilities?.Internal?.copyTextToClipboard) {
-      zotero.Utilities.Internal.copyTextToClipboard(text);
-      return "";
-    }
-  } catch (e) {
-    safeDebug("[Z-Transplit] translatePane: Zotero clipboard failed: " + e);
-  }
-
-  try {
-    const nav = (doc?.defaultView as any)?.navigator;
-    if (nav?.clipboard?.writeText) {
-      await nav.clipboard.writeText(text);
-      return "";
-    }
-  } catch (e) {
-    safeDebug("[Z-Transplit] translatePane: navigator.clipboard failed: " + e);
-  }
-
-  try {
-    const textarea = el(doc, "textarea");
-    textarea.value = text;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    doc.body?.appendChild(textarea);
-    textarea.select();
-    const ok = (doc as any).execCommand?.("copy");
-    textarea.remove();
-    if (ok) return "";
-    return "execCommand('copy') returned false";
-  } catch (e) {
-    return toErrorMessage(e);
-  }
-}
-
-/**
- * IME-safe keyboard test, ported from leadero's src/utils/ime.ts.
- *
- * During composition, Enter CONFIRMS the candidate — it must not submit.
- * `isComposing` covers the modern path, `keyCode === 229` the legacy one.
- */
-function isIMEComposing(e: any): boolean {
-  if (!e) return false;
-  if (e.isComposing === true || e.keyCode === 229) return true;
-  const native = e.nativeEvent;
-  return native?.isComposing === true || native?.keyCode === 229;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Translator loading (chrome realm, direct import — no bridge)
@@ -473,6 +475,14 @@ export function mountTranslatePane(
   let sourceText = "";
   let status: TranslatePaneStatus = "idle";
   let result: string | null = null;
+  /** Dictionary card for word lookups (success state); null in text mode. */
+  let card: DictionaryCardContent | null = null;
+  /**
+   * Whether the current source is treated as a dictionary word. Set when the
+   * selection/chip is chosen, never recomputed mid-flight, so a retry replays
+   * the same path the user started.
+   */
+  let wordMode = false;
   let error: string | null = null;
   let copied = false;
   let targetLang = defaultTargetLang();
@@ -487,6 +497,8 @@ export function mountTranslatePane(
   let abortController: AbortController | null = null;
   /** Result of the last selection read — drives the source block's disclosure. */
   let lastRead: SelectionRead["kind"] = "empty";
+  /** Top of the word-card store, refreshed after mount and after each lookup. */
+  let currentChips: WordCardRecord[] = [];
 
   const listeners: TrackedListener[] = [];
 
@@ -543,6 +555,13 @@ export function mountTranslatePane(
   root.appendChild(langBar);
   root.appendChild(resultArea);
 
+  // Recent-words chip strip — hidden until the store has content, so a fresh
+  // install sees exactly leadero's three-block layout.
+  const chipsBar = el(doc, "div", `${CLS}-chips`);
+  chipsBar.setAttribute("aria-label", getString("pane-translate-recent"));
+  chipsBar.hidden = true;
+  root.appendChild(chipsBar);
+
   const styleEl = ensureStyle(doc, body);
   body.appendChild(root);
 
@@ -578,14 +597,80 @@ export function mountTranslatePane(
     sourceText?: string;
     status?: TranslatePaneStatus;
     result?: string | null;
+    card?: DictionaryCardContent | null;
     error?: string | null;
     copied?: boolean;
   }): void {
     if (patch.sourceText !== undefined) sourceText = patch.sourceText;
     if (patch.status !== undefined) status = patch.status;
     if (patch.result !== undefined) result = patch.result;
+    if (patch.card !== undefined) card = patch.card;
     if (patch.error !== undefined) error = patch.error;
     if (patch.copied !== undefined) copied = patch.copied;
+  }
+
+  /**
+   * Dictionary card box: word header (+ phonetic), sense list with POS badges
+   * and per-sense examples, card-level bilingual examples, and a footer with
+   * the content-source tag and the copy action (copies flattenCardText).
+   */
+  function buildCardBox(): HTMLElement {
+    const shown = card!;
+    const box = el(doc, "div", `${CLS}-card`);
+    const head = el(doc, "div", `${CLS}-card-head`);
+    const wordEl = el(doc, "span", `${CLS}-card-word`);
+    wordEl.textContent = shown.word;
+    head.appendChild(wordEl);
+    if (shown.phonetic) {
+      const phonetic = el(doc, "span", `${CLS}-card-phonetic`);
+      phonetic.textContent = shown.phonetic;
+      head.appendChild(phonetic);
+    }
+    box.appendChild(head);
+
+    for (const sense of shown.senses) {
+      const line = el(doc, "div", `${CLS}-card-sense`);
+      if (sense.pos) {
+        const pos = el(doc, "span", `${CLS}-card-pos`);
+        pos.textContent = sense.pos;
+        line.appendChild(pos);
+      }
+      const meaning = el(doc, "span");
+      meaning.textContent = sense.meaning;
+      line.appendChild(meaning);
+      box.appendChild(line);
+      if (sense.example) {
+        const example = el(doc, "div", `${CLS}-card-example`);
+        example.textContent = sense.example;
+        box.appendChild(example);
+        if (sense.exampleTranslation) {
+          const exampleTrans = el(doc, "div", `${CLS}-card-example-trans`);
+          exampleTrans.textContent = sense.exampleTranslation;
+          box.appendChild(exampleTrans);
+        }
+      }
+    }
+
+    for (const pair of shown.examples ?? []) {
+      const example = el(doc, "div", `${CLS}-card-example`);
+      example.textContent = pair.text;
+      box.appendChild(example);
+      const exampleTrans = el(doc, "div", `${CLS}-card-example-trans`);
+      exampleTrans.textContent = pair.translation;
+      box.appendChild(exampleTrans);
+    }
+
+    const foot = el(doc, "div", `${CLS}-card-foot`);
+    const sourceTag = el(doc, "span", `${CLS}-card-source`);
+    sourceTag.textContent = getString(`pane-translate-card-source-${shown.source}`);
+    foot.appendChild(sourceTag);
+    const copy = el(doc, "button", `${CLS}-btn`) as HTMLButtonElement;
+    copy.type = "button";
+    copy.textContent = copied ? getString("pane-translate-copied") : getString("pane-translate-copy");
+    copy.addEventListener("click", () => void handleCopy());
+    foot.appendChild(copy);
+    box.appendChild(foot);
+    return box;
   }
 
   function renderResult(): void {
@@ -597,7 +682,9 @@ export function mountTranslatePane(
       const line1 = el(doc, "span", `${CLS}-shimmer-line`);
       const line2 = el(doc, "span", `${CLS}-shimmer-line ${CLS}-shimmer-short`);
       const meta = el(doc, "span", `${CLS}-meta`);
-      meta.textContent = getString("pane-translate-translating");
+      meta.textContent = getString(
+        wordMode ? "pane-translate-looking-up" : "pane-translate-translating",
+      );
       loading.appendChild(line1);
       loading.appendChild(line2);
       loading.appendChild(meta);
@@ -616,11 +703,24 @@ export function mountTranslatePane(
       // discarded with it, so its listener dies with the node. Only listeners
       // on long-lived nodes go through listen()/destroy().
       retry.addEventListener("click", () => {
-        if (sourceText) void runTranslation(sourceText);
+        if (!sourceText) return;
+        if (wordMode) void runLookup(sourceText);
+        else void runTranslation(sourceText);
       });
       box.appendChild(msg);
       box.appendChild(retry);
       resultArea.appendChild(box);
+      return;
+    }
+
+    if (status === "success" && card) {
+      resultArea.appendChild(buildCardBox());
+      // Copy failure keeps the result on screen; the hint auto-dismisses.
+      if (copyError) {
+        const note = el(doc, "div", `${CLS}-error`);
+        note.textContent = copyError;
+        resultArea.appendChild(note);
+      }
       return;
     }
 
@@ -654,8 +754,13 @@ export function mountTranslatePane(
       const box = el(doc, "div", `${CLS}-result-idle`);
       const action = el(doc, "button", `${CLS}-btn`) as HTMLButtonElement;
       action.type = "button";
-      action.textContent = getString("pane-translate-action");
-      action.addEventListener("click", () => void runTranslation(sourceText));
+      action.textContent = getString(
+        wordMode ? "pane-translate-lookup-action" : "pane-translate-action",
+      );
+      action.addEventListener("click", () => {
+        if (wordMode) void runLookup(sourceText);
+        else void runTranslation(sourceText);
+      });
       box.appendChild(action);
       resultArea.appendChild(box);
     }
@@ -817,6 +922,108 @@ export function mountTranslatePane(
     if (!destroyed) renderResult();
   }
 
+  /**
+   * Run one dictionary lookup for a single word. Same request-supersession
+   * and error-state machinery as runTranslation, minus the readiness/char
+   * budget prechecks: the chain's first layer (Youdao) needs no engine at
+   * all, and a word can never exceed the char budget.
+   */
+  async function runLookup(word: string): Promise<void> {
+    if (!word) return;
+
+    // Any earlier request is superseded from here on.
+    abortController?.abort();
+    abortController = null;
+    const controller = createAbortController();
+    abortController = controller;
+
+    copyError = null;
+    setState({ status: "loading", error: null, result: null, card: null });
+    renderResult();
+
+    try {
+      const target = targetLang.trim() || defaultTargetLang();
+      const looked = await lookupWord(word, target, controller.signal);
+      if (controller.signal.aborted || destroyed) return;
+      setState({
+        status: "success",
+        card: looked,
+        result: flattenCardText(looked),
+        error: null,
+        copied: false,
+      });
+      // Record + refresh the chip strip off the critical path; both are
+      // no-throw by contract, and a store failure must never look like a
+      // lookup failure.
+      void upsertWordCard({
+        word: looked.word || word,
+        targetLang: target,
+        content: looked,
+        sourceItemID: itemID,
+      }).then(() => void refreshChips());
+    } catch (e) {
+      if (controller.signal.aborted || destroyed) return;
+      setState({
+        status: "error",
+        error: getString("pane-translate-error", { error: toErrorMessage(e) }),
+        result: null,
+        card: null,
+      });
+    }
+    if (!destroyed) renderResult();
+  }
+
+  // ── recent-words chip strip ────────────────────────────────────────────────
+
+  /** Reload the strip's data from the store, then re-render it. */
+  async function refreshChips(): Promise<void> {
+    if (destroyed) return;
+    currentChips = await recentWordCards(CHIP_COUNT);
+    renderChips();
+  }
+
+  function renderChips(): void {
+    clearChildren(chipsBar);
+    if (currentChips.length === 0) {
+      chipsBar.hidden = true;
+      return;
+    }
+    chipsBar.hidden = false;
+    const activeKey = sourceText.trim().toLowerCase();
+    for (const record of currentChips) {
+      const chip = el(doc, "button", `${CLS}-chip`) as HTMLButtonElement;
+      chip.type = "button";
+      chip.textContent = record.word;
+      if (record.word.toLowerCase() === activeKey) {
+        chip.classList.add(`${CLS}-chip-active`);
+      }
+      // Rebuilt on every renderChips — the listener dies with the node.
+      chip.addEventListener("click", () => showStoredCard(record));
+      chipsBar.appendChild(chip);
+    }
+  }
+
+  /**
+   * Show a stored card. Deliberately offline: no re-lookup, no readiness
+   * check — the card was already fetched and persisted, so the chip must
+   * render it even with the engine unconfigured or the network down.
+   */
+  function showStoredCard(record: WordCardRecord): void {
+    abortController?.abort();
+    abortController = null;
+    copyError = null;
+    wordMode = true;
+    setState({
+      sourceText: record.latest.word || record.word,
+      status: "success",
+      card: record.latest,
+      result: flattenCardText(record.latest),
+      error: null,
+      copied: false,
+    });
+    renderAll();
+  }
+
   function handleRefreshSelection(): void {
     copyError = null; // a new selection makes the old copy hint stale
     const read = readSelection(doc, itemID);
@@ -828,22 +1035,27 @@ export function mountTranslatePane(
         copiedTimer = null;
       }
       setState({ copied: false });
+      // Word selections route to the dictionary chain when the feature is on;
+      // everything else keeps the plain-translation path.
+      wordMode = !!getPref("wordcards.enabled") && isSingleWord(read.text);
       // translate.auto is read LIVE — a pref flipped while the pane is open
       // takes effect on the next refresh.
       if (getPref("translate.auto")) {
-        void runTranslation(read.text);
+        if (wordMode) void runLookup(read.text);
+        else void runTranslation(read.text);
       } else {
         // Nothing is in flight for the new selection.
         abortController?.abort();
         abortController = null;
-        setState({ status: "idle", result: null, error: null });
+        setState({ status: "idle", result: null, error: null, card: null });
       }
     } else {
       // Nothing (or nothing readable): drop the stale source text so the pane
       // cannot show a translation of text that is no longer selected.
       abortController?.abort();
       abortController = null;
-      setState({ sourceText: "", status: "idle", result: null, error: null });
+      wordMode = false;
+      setState({ sourceText: "", status: "idle", result: null, error: null, card: null });
     }
     renderAll();
   }
@@ -905,11 +1117,14 @@ export function mountTranslatePane(
   }
   if (initial.kind === "text") {
     setState({ sourceText: initial.text });
+    wordMode = !!getPref("wordcards.enabled") && isSingleWord(initial.text);
     if (getPref("translate.auto")) {
-      void runTranslation(initial.text);
+      if (wordMode) void runLookup(initial.text);
+      else void runTranslation(initial.text);
     }
   }
   renderAll();
+  void refreshChips();
 
   const handle: TranslatePaneHandle = {
     refresh() {

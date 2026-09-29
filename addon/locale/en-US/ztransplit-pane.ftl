@@ -49,6 +49,32 @@ pane-translate-error-service = Translation service unavailable: could not load t
 pane-translate-error-not-ready = Translation is not ready: { $reason }. Complete the setup in the settings and try again.
 pane-translate-error-too-long = The selection is { $count } characters, above the { $max }-character limit per request. Narrow the selection and try again.
 
+## Single-word lookup (dictionary card) and the recent-words chip strip
+pane-translate-lookup-action = Look up
+pane-translate-looking-up = Looking up…
+pane-translate-recent = Recent words
+pane-translate-card-source-youdao = Source: Youdao Dictionary
+pane-translate-card-source-model = Source: model engine
+pane-translate-card-source-mt = Source: translation engine
+
+## ─── Word-cards tab (src/ui/wordCardsTab.ts + src/modules/registerWordCardsUI.ts)
+wordcards-tab-title = Word Cards
+wordcards-toolbar-tooltip = Word cards (words you looked up)
+wordcards-search-placeholder =
+    .placeholder = Search words or meanings
+wordcards-sort-recent = Recent
+wordcards-sort-alpha = Alphabetical
+wordcards-clear = Clear all
+wordcards-clear-confirm = Clear all word cards?
+wordcards-count = { $count } cards
+wordcards-empty-title = No word cards yet
+wordcards-empty-hint = Select a single word in the PDF reader — every lookup accumulates into a card here.
+wordcards-disabled-hint = Word card recording is turned off in the settings; new lookups accumulate again once it is re-enabled.
+wordcards-history = Lookup history
+wordcards-delete = Delete
+wordcards-detail-empty = Select a card on the left to see its details.
+wordcards-no-match = No matching cards.
+
 ## ─── Library item context menu (src/modules/registerItemTreeMenu.ts) ──────
 itemtree-menu = Z-Transplit
 itemtree-translate-attachment = Translate full text (save as attachment)
@@ -65,6 +91,7 @@ bilingual-block-failed = Translation failed
 bilingual-retry = Retry
 bilingual-sdt-loading = Preparing the document structure…
 bilingual-sdt-unavailable = Bilingual reading requires the Zotero 10 reading mode. Still available here: side-by-side split view and full-text translation to attachment.
+bilingual-sdt-missing = The document-structure session could not be established; bilingual reading is unavailable. The split view and full-text translation remain available.
 bilingual-sdt-unpack-failed = The document structure is unavailable ({ $error }). The split view and full-text translation remain available.
 
 ## ─── Read aloud (src/core/readAloud/) ──────────────────────────────────────

@@ -76,9 +76,14 @@ export interface OpenAICompatClient {
   readonly apiUrl: string;
   readonly model: string;
   chat(request: OpenAICompatChatRequest): Promise<OpenAICompatChatResult>;
+  /**
+   * `Input` is widened to `any` so schemas with a preprocessing step
+   * (z.preprocess, whose input type is `unknown`) fit alongside plain
+   * ZodObjects — the output type T is what callers consume.
+   */
   chatJson<T>(
     request: OpenAICompatChatRequest,
-    schema?: z.ZodType<T>,
+    schema?: z.ZodType<T, z.ZodTypeDef, any>,
   ): Promise<OpenAICompatJsonResult<T>>;
 }
 
