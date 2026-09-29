@@ -32,6 +32,7 @@ const readyFile = path.join(cmdDir, "probe-ready.json");
 const cmdFile = path.join(cmdDir, "command.json");
 const resultFile = path.join(cmdDir, "result.json");
 const zoteroLog = path.join(cmdDir, "zotero-stdout.log");
+const pidFile = path.join(cmdDir, "qa-zotero.pid");
 
 const profileDir = path.join(cmdDir, "profile");
 const dataDir = path.join(cmdDir, "data");
@@ -53,11 +54,58 @@ function stopZotero() {
   }
 }
 
-function rmIfExists(f) {
+/** Kill only the QA instance(s): every Zotero whose command line points at
+ *  the QA profile/data dir. A tree-kill from the recorded root pid misses
+ *  content processes that were (re)spawned after the root died. */
+function stopQaZotero() {
   try {
-    fs.rmSync(f, { force: true });
+    const ps =
+      `Get-CimInstance Win32_Process -Filter "name='zotero.exe'" | ` +
+      `Where-Object { $_.CommandLine -like '*zt-qa*' } | ForEach-Object { $_.ProcessId }`;
+    const out = execSync(
+      `powershell -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`,
+      { encoding: "utf8" },
+    );
+    for (const token of out.split(/\s+/)) {
+      const pid = parseInt(token, 10);
+      if (pid) {
+        try {
+          execSync(`taskkill /f /t /pid ${pid}`, { stdio: "ignore" });
+        } catch {
+          /* already gone */
+        }
+      }
+    }
   } catch {
-    /* ignore */
+    /* no matching process */
+  }
+  rmIfExists(pidFile);
+}
+
+function rmIfExists(f) {
+  // A force-killed Zotero can hold handles for a moment; retry instead of
+  // silently leaving a stale profile (a stale extensions.json skips the addon).
+  for (let i = 0; i < 10; i++) {
+    try {
+      fs.rmSync(f, { force: true, recursive: true });
+      if (!fs.existsSync(f)) return;
+    } catch {
+      /* retry */
+    }
+    sleepSync(500);
+  }
+  throw new Error("could not remove " + f + " after 10 attempts");
+}
+
+function sleepSync(ms) {
+  const at = Date.now() + ms;
+  // Atomics.wait is the only synchronous sleep that doesn't spin the CPU.
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    while (Date.now() < at) {
+      /* spin */
+    }
   }
 }
 
@@ -106,7 +154,11 @@ function buildProbeCopy() {
 }
 
 function boot() {
-  stopZotero();
+  // Kill only OUR previous instance by default; a full machine-wide kill is
+  // opt-in (QA_KILL_ALL=1) so the user's own Zotero session survives a QA boot.
+  stopQaZotero();
+  if (process.env.QA_KILL_ALL) stopZotero();
+  sleepSync(1000);
   // A fresh profile each boot: Zotero caches extensions.json and a stale
   // entry would silently skip our addon. The data dir is wiped too unless
   // QA_KEEP_DATA=1, so a pipeline run can be inspected afterwards.
@@ -124,6 +176,22 @@ function boot() {
   writeProxyAddon(ADDON_ID, buildProbeCopy());
   log("installed:", fs.readdirSync(extensionsDir).join(", "));
 
+  // QA_LOCALE picks the UI language (default en-US, matching the repo's
+  // language-independent QA assertions); QA_EXTRA_PREFS points at a JSON
+  // object of extra user_pref values (engine credentials for a shot run —
+  // the file lives outside the repo and is never committed).
+  const locale = process.env.QA_LOCALE || "en-US";
+  const extraPrefs = [];
+  if (process.env.QA_EXTRA_PREFS && fs.existsSync(process.env.QA_EXTRA_PREFS)) {
+    const parsed = JSON.parse(fs.readFileSync(process.env.QA_EXTRA_PREFS, "utf8"));
+    for (const [name, value] of Object.entries(parsed)) {
+      extraPrefs.push(
+        `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});`,
+      );
+    }
+    log("extra prefs:", Object.keys(parsed).join(", "));
+  }
+
   fs.writeFileSync(
     path.join(profileDir, "prefs.js"),
     [
@@ -134,9 +202,11 @@ function boot() {
       `user_pref("extensions.lastAppVersion", "");`,
       `user_pref("browser.shell.checkDefaultBrowser", false);`,
       `user_pref("toolkit.telemetry.enabled", false);`,
-      // English UI keeps the QA assertions language-independent.
-      `user_pref("general.useragent.locale", "en-US");`,
-      `user_pref("intl.locale.requested", "en-US");`,
+      // The UI language under test (en-US keeps QA assertions language-
+      // independent; zh-CN exercises the Chinese strings).
+      `user_pref("general.useragent.locale", "${locale}");`,
+      `user_pref("intl.locale.requested", "${locale}");`,
+      ...extraPrefs,
     ].join("\n") + "\n",
     "utf8",
   );
@@ -158,6 +228,7 @@ function boot() {
   );
   child.unref();
   fs.closeSync(out);
+  fs.writeFileSync(pidFile, String(child.pid), "utf8");
 
   return child.pid;
 }
@@ -223,7 +294,10 @@ if (main === "boot") {
   const res = await send(action, arg);
   console.log(JSON.stringify(res, null, 2));
 } else if (main === "shoot") {
-  stopZotero();
+  // Default: close only the QA instance. QA_KILL_ALL=1 keeps the old
+  // machine-wide behaviour for CI-style runs.
+  if (process.env.QA_KILL_ALL) stopZotero();
+  else stopQaZotero();
   log("zotero stopped");
 } else if (main === "log") {
   const which = process.argv[3] === "zotero" ? zoteroLog : zoteroLog;

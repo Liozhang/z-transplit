@@ -1006,9 +1006,9 @@ PROBE_CMDS.menus = async function (action) {
 
   const re =
     action === "split"
-      ? /side by side|Side-by-side|分屏|Split-screen/i
+      ? /side by side|分屏打开/i
       : action === "compare"
-        ? /comparison|Compare|对比/i
+        ? /comparison|分屏对照/i
         : null;
   const entry = re ? appended.find((a) => a.label && re.test(a.label)) : null;
   if (!entry) return { labels, error: "no entry matching " + action };
@@ -1525,6 +1525,7 @@ PROBE_CMDS.bilingual = async function (mode) {
   } catch (e) {
     out.readerError = String(e);
   }
+  await probeScrollSectionIntoView(doc);
   return out;
 };
 
@@ -2083,6 +2084,387 @@ PROBE_CMDS.wordcards = async function (action) {
   }
 
   return { error: "unknown wordcards sub-action: " + action };
+};
+
+// ── README screenshot staging ───────────────────────────────────────────────
+// Commands that stage the exact UI states the README screenshots show and
+// capture them. They drive the real addon through the real user paths; the
+// only shortcut is the staged reader selection (same as wordcards/lookup).
+
+/**
+ * shot — screenshot a Zotero window to an absolute PNG path.
+ *   arg: { file, win: "main" | "prefs" }  (win defaults to "main")
+ */
+PROBE_CMDS.shot = async function (arg) {
+  const opts = typeof arg === "string" ? { file: arg } : arg || {};
+  let target;
+  if (opts.win === "prefs") {
+    target = Services.wm.getMostRecentWindow("zotero:pref");
+    if (!target) return { ok: false, error: "no prefs window open" };
+  } else {
+    target = Zotero.getMainWindow();
+  }
+  const doc = target.document;
+  const w = target.outerWidth;
+  const h = target.outerHeight;
+  // Capture at the device pixel ratio so HiDPI displays give crisp PNGs.
+  const dpr = target.devicePixelRatio || 1;
+  const canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx2d = canvas.getContext("2d");
+  ctx2d.scale(dpr, dpr);
+  ctx2d.drawWindow(target, 0, 0, w, h, "rgb(255,255,255)");
+  const dataURL = canvas.toDataURL("image/png");
+  const bytes = Uint8Array.from(atob(dataURL.split(",")[1]), (c) =>
+    c.charCodeAt(0),
+  );
+  await IOUtils.write(opts.file, bytes);
+  return { ok: true, file: opts.file, bytes: bytes.length, w, h };
+};
+
+/**
+ * Open the reader context pane. On a fresh profile the pane has no persisted
+ * width, so uncollapsing alone leaves it at zero pixels — seed a width first.
+ */
+async function probeOpenContextPane(doc) {
+  const pane = doc.getElementById("zotero-context-pane");
+  if (!pane) return null;
+  if (pane.collapsed) {
+    if (!Number(pane.getAttribute("width") || 0)) {
+      pane.setAttribute("width", "470");
+    }
+    const toggle = doc.getElementById("context-pane-toggle");
+    if (toggle) toggle.click();
+    else pane.collapsed = false;
+    await Zotero.Promise.delay(1200);
+  } else if (!Number(pane.getAttribute("width") || 0)) {
+    pane.setAttribute("width", "470");
+    await Zotero.Promise.delay(800);
+  }
+  return pane;
+}
+
+/** Scroll the visible translate section to the top of the item pane. */
+async function probeScrollSectionIntoView(doc) {
+  const section = Array.from(doc.querySelectorAll("item-pane-custom-section")).find(
+    (c) => (c.dataset.pane || "").includes("transplit") && !c.hidden,
+  );
+  if (!section) return false;
+  try {
+    section.scrollIntoView({ block: "start", inline: "nearest" });
+  } catch {
+    section.scrollIntoView();
+  }
+  await Zotero.Promise.delay(600);
+  return true;
+}
+
+/**
+ * demoItem — import a fixture PDF as a real item + attachment, open it in the
+ * reader, and open the context pane (collapsed on a fresh profile).
+ *   arg: { pdf, title, filename }  (pdf defaults to <dataDir>/qa-sample.pdf)
+ */
+PROBE_CMDS.demoItem = async function (arg) {
+  const opts = typeof arg === "string" ? { pdf: arg } : arg || {};
+  const dataDir = Zotero.DataDirectory.dir;
+  const pdfPath = opts.pdf || PathUtils.join(dataDir, "qa-sample.pdf");
+  if (!(await IOUtils.exists(pdfPath))) return { error: "no PDF at " + pdfPath };
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const { ZoteroPane, Zotero_Tabs } = probeWin();
+
+  let item = new Zotero.Item("journalArticle");
+  item.setField("title", opts.title || "QA sample paper");
+  const itemID = await item.saveTx();
+  const att = await Zotero.Attachments.importFromFile({
+    file: pdfPath,
+    parentItemID: itemID,
+    title: opts.filename || "QA sample PDF",
+  });
+  PROBE_STATE.demo = { itemID, attachmentID: att.id };
+
+  ZoteroPane.selectItem(att.id);
+  await Zotero.Promise.delay(500);
+  await ZoteroPane.viewAttachment(att.id);
+  await Zotero.Promise.delay(5000);
+  PROBE_STATE.demoTabID = Zotero_Tabs.selectedID;
+
+  const contextPaneEl = await probeOpenContextPane(doc);
+  return {
+    itemID,
+    attachmentID: att.id,
+    tabID: Zotero_Tabs.selectedID,
+    contextCollapsed: contextPaneEl?.collapsed ?? null,
+    contextWidth: contextPaneEl?.getAttribute("width") ?? null,
+  };
+};
+
+/**
+ * selectTranslate — stage a reader selection and run the pane's Translate
+ * through to a settled state (result, error, or timeout).
+ *   arg: { text, targetLang }
+ */
+PROBE_CMDS.selectTranslate = async function (arg) {
+  const opts = typeof arg === "string" ? { text: arg } : arg || {};
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const { Zotero_Tabs } = probeWin();
+  const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+  if (!reader) return { error: "no reader open" };
+
+  await probeOpenContextPane(doc);
+
+  const q = (sel) => doc.querySelector(sel);
+  const qa = (sel) => [...doc.querySelectorAll(sel)];
+  const langInput = q(".ztransplit-tp-lang-input");
+  if (!langInput) return { error: "no language input" };
+  if (opts.targetLang) {
+    langInput.value = opts.targetLang;
+    langInput.dispatchEvent(new win.Event("input", { bubbles: true }));
+    langInput.dispatchEvent(new win.FocusEvent("blur"));
+    await Zotero.Promise.delay(300);
+  }
+
+  const view = reader._internalReader?._primaryView;
+  if (!view) return { error: "no _primaryView" };
+  view._selectionRanges = [{ text: opts.text }];
+
+  const refreshBtn = qa("button").find((b) =>
+    /refresh selection|刷新选区/i.test(b.textContent || ""),
+  );
+  if (!refreshBtn) {
+    return { error: "no refresh button", buttons: qa("button").map((b) => b.textContent) };
+  }
+  refreshBtn.click();
+  await Zotero.Promise.delay(800);
+
+  const findTranslateBtn = () =>
+    qa("button").find((b) => /^(translate|翻译)$/i.test((b.textContent || "").trim()));
+  const translateBtn = findTranslateBtn();
+  if (translateBtn) translateBtn.click();
+
+  const t0 = Date.now();
+  let state = "timeout";
+  for (; Date.now() - t0 < 90000; ) {
+    await Zotero.Promise.delay(1000);
+    if (q(".ztransplit-tp-error")) {
+      state = "error";
+      break;
+    }
+    if (q(".ztransplit-tp-result-text")) {
+      state = "done";
+      break;
+    }
+    // A language commit or a state reset can bring the idle button back while
+    // nothing is in flight — press it again so the run cannot stall idle.
+    const again = findTranslateBtn();
+    if (again && !q(".ztransplit-tp-shimmer") && !q(".ztransplit-tp-loading")) {
+      again.click();
+    }
+  }
+  await probeScrollSectionIntoView(doc);
+  return {
+    state,
+    source: q(".ztransplit-tp-source-text")?.textContent?.slice(0, 150) ?? null,
+    result: q(".ztransplit-tp-result-text")?.textContent?.slice(0, 250) ?? null,
+    error: q(".ztransplit-tp-error")?.textContent?.slice(0, 250) ?? null,
+  };
+};
+
+/**
+ * bilingualMode — switch an already-running bilingual session's presentation
+ * (unlike `bilingual`, which toggles the session on). The mode control is a
+ * <select> dropdown (ztransplit-bc-mode) in the current build.
+ *   arg: "only" | "interleave"  (aliases: "transOnly", "translation only")
+ */
+PROBE_CMDS.bilingualMode = async function (mode) {
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const section = Array.from(
+    doc.querySelectorAll("item-pane-custom-section"),
+  ).find((c) => (c.dataset.pane || "").includes("transplit") && c.hidden === false);
+  if (!section) return { error: "no visible translate section" };
+  const wantOnly = /only|仅译文/i.test(mode || "");
+  const sel = section.querySelector("select.ztransplit-bc-mode");
+  if (!sel) {
+    return {
+      error: "no mode select",
+      controls: Array.from(section.querySelectorAll("button, select"), (b) =>
+        b.tagName + ":" + (b.textContent || b.value || ""),
+      ),
+    };
+  }
+  const target = wantOnly ? "transOnly" : "interleave";
+  const before = sel.value;
+  sel.disabled = false;
+  sel.value = target;
+  sel.dispatchEvent(new win.Event("change", { bubbles: true }));
+  await Zotero.Promise.delay(2500);
+  await probeScrollSectionIntoView(doc);
+  return {
+    before,
+    after: sel.value,
+    sectionText: (section.textContent || "").slice(0, 300),
+  };
+};
+
+/**
+ * openTranslated — open the demo item's `Translated (…)` attachment tab
+ * (the pipeline normally auto-opens it; this is the recovery path).
+ */
+PROBE_CMDS.openTranslated = async function () {
+  const { ZoteroPane, Zotero_Tabs } = probeWin();
+  const demoID = PROBE_STATE.demo?.itemID;
+  if (!demoID) return { error: "no demo item — run demoItem first" };
+  const item = await Zotero.Items.getAsync(demoID);
+  const atts = item.getAttachments().map((id) => Zotero.Items.get(id));
+  const translated = atts.find((a) =>
+    /^Translated \(/.test(a.getField("title") || ""),
+  );
+  if (!translated) {
+    return {
+      error: "no Translated (…) attachment",
+      attachments: atts.map((a) => a.getField("title")),
+    };
+  }
+  await ZoteroPane.viewAttachment(translated.id);
+  await Zotero.Promise.delay(4000);
+  return { opened: translated.getField("title"), tabID: Zotero_Tabs.selectedID };
+};
+
+/**
+ * frame — set the main-window pane layout for a screenshot.
+ *   arg: { contextPane: "open"|"close", collections: "open"|"close",
+ *          itemPane: "open"|"close" }   (omitted keys keep the current state)
+ */
+PROBE_CMDS.frame = async function (arg) {
+  let opts = arg || {};
+  if (typeof opts === "string") {
+    try {
+      opts = JSON.parse(opts);
+    } catch {
+      return { error: "frame arg is not JSON: " + opts };
+    }
+  }
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const out = {};
+  const setCollapsed = async (id, want) => {
+    const el = doc.getElementById(id);
+    if (!el) return;
+    if (want === "open") {
+      if (id === "zotero-context-pane") {
+        await probeOpenContextPane(doc);
+        out[id] = el.collapsed;
+        return;
+      }
+      if (el.collapsed) el.collapsed = false;
+    } else if (want === "close") {
+      el.collapsed = true;
+    }
+    out[id] = el.collapsed;
+  };
+  if (opts.collections) await setCollapsed("zotero-collections-pane", opts.collections);
+  if (opts.itemPane) await setCollapsed("zotero-item-pane", opts.itemPane);
+  if (opts.contextPane) await setCollapsed("zotero-context-pane", opts.contextPane);
+  await Zotero.Promise.delay(800);
+  return out;
+};
+
+/** prefsOpen — open the settings window on the Z-Transplit pane (stays open). */
+PROBE_CMDS.prefsOpen = async function () {
+  let win = null;
+  try {
+    Zotero.Utilities.Internal.openPreferences("zotero-prefpane-ztransplit");
+    for (let i = 0; i < 30 && !win; i++) {
+      await Zotero.Promise.delay(300);
+      win = Services.wm.getMostRecentWindow("zotero:pref");
+    }
+  } catch (e) {
+    return { error: "openPreferences: " + e };
+  }
+  if (!win) return { error: "no prefs window" };
+  // A readable screenshot size (the default window is ~800x640 and scrolls).
+  try {
+    win.resizeTo(1300, 1000);
+    win.moveTo(
+      Math.max(0, (win.screen.availWidth - 1300) / 2),
+      Math.max(0, (win.screen.availHeight - 1000) / 2),
+    );
+  } catch (e) {
+    probeLog("prefs resize: " + e);
+  }
+  await Zotero.Promise.delay(1200);
+  const doc = win.document;
+  return {
+    ok: true,
+    paneLoaded: !!doc.getElementById("zotero-prefpane-ztransplit"),
+    title: doc.title || null,
+  };
+};
+
+/** prefsClose — close the settings window opened by prefsOpen. */
+PROBE_CMDS.prefsClose = async function () {
+  const win = Services.wm.getMostRecentWindow("zotero:pref");
+  if (!win) return { ok: false, error: "no prefs window" };
+  win.close();
+  await Zotero.Promise.delay(500);
+  return { ok: true };
+};
+
+/**
+ * demoTab — switch back to the demo item's source reader tab (the tab demoItem
+ * opened), so later commands act on the original PDF rather than a derived tab.
+ */
+PROBE_CMDS.demoTab = async function () {
+  const { Zotero_Tabs } = probeWin();
+  const tabID = PROBE_STATE.demoTabID;
+  if (!tabID) return { error: "no demo tab recorded — run demoItem first" };
+  Zotero_Tabs.select(tabID);
+  await Zotero.Promise.delay(1500);
+  return {
+    selectedID: Zotero_Tabs.selectedID,
+    isDemo: Zotero_Tabs.selectedID === tabID,
+    tabs: Zotero_Tabs._tabs.map((t) => [t.id, t.type, t.title]),
+  };
+};
+
+/**
+ * bilingualWait — poll the running bilingual session's progress until it
+ * settles (translated count stable for 3 s) or the cap is hit, so a screenshot
+ * shows filled blocks rather than mid-run placeholders.
+ */
+PROBE_CMDS.bilingualWait = async function (capMs) {
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const t0 = Date.now();
+  const cap = Number(capMs) || 180000;
+  let last = "";
+  let stable = 0;
+  let sample = "";
+  while (Date.now() - t0 < cap) {
+    await Zotero.Promise.delay(1000);
+    const section = Array.from(
+      doc.querySelectorAll("item-pane-custom-section"),
+    ).find((c) => (c.dataset.pane || "").includes("transplit") && c.hidden === false);
+    sample = section ? (section.textContent || "") : "";
+    const m = sample.match(/(\d+)\s*\/\s*(\d+)/);
+    const cur = m ? m[1] + "/" + m[2] : sample.slice(0, 60);
+    if (m && m[1] === m[2]) {
+      stable = 99;
+      last = cur;
+      break;
+    }
+    if (cur === last) {
+      stable++;
+      if (stable >= 3) break;
+    } else {
+      stable = 0;
+      last = cur;
+    }
+  }
+  return { progress: last, stableFor: stable, ms: Date.now() - t0 };
 };
 
 // ── driver: poll command.json ───────────────────────────────────────────────
