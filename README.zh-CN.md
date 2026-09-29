@@ -8,7 +8,9 @@
 
 [English](README.md) | **中文**
 
+[![Release](https://img.shields.io/github/v/release/Liozhang/z-transplit?color=blue&logo=github)](https://github.com/Liozhang/z-transplit/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/Liozhang/z-transplit/total?color=orange)](https://github.com/Liozhang/z-transplit/releases)
 [![Zotero 7 ~ 10](https://img.shields.io/badge/Zotero-7%20~%2010-CC6633.svg)](https://www.zotero.org/)
 
 **划词翻译 · PDF 保排版全文翻译 · 分屏对照 · 双语对照 · 仅译文 · 朗读 —— 一站式 Zotero 文献翻译插件。**
@@ -44,13 +46,13 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 ### 2. PDF 全文翻译（生成译文附件）
 
 文献列表右键 PDF（或阅读器右键）→「翻译全文（生成译文附件）」。本地 OpenDataLoader
-（JVM）解析版面 → 逐段翻译 → 按原版式重排渲染，产物作为「译文 (zh-CN)」附件入库并自动打开。
+（JVM）解析版面 → 逐段翻译 → 按原版式重排渲染，产物作为「Translated (zh-CN)」附件入库并自动打开。
 重复翻译自动去重：已有译文时直接打开，不再重跑。
 
 ![全文翻译附件](docs/screenshots/translated-attachment.png)
 
 - 保留原版面：分栏、表格、图片位置按解析结果贴回，中英文混排分段各自用对应字体绘制
-- CJK 字体自动解析：按目标语言在系统字体目录中找微软雅黑 / 苹方 / Noto，找不到时明确提示而不是画「豆腐块」
+- CJK 字体自动解析：按目标语言在系统字体目录中找微软雅黑 / 苹方 / Noto，找不到时明确提示而不是画「豆腐块」；也可在数据目录 `ztransplit/translation-assets` 放入 `translated-regular.ttf` 覆盖，想匹配论文的衬线风格可放思源宋体
 - 公式 `$…$` / `{v0}` 先替换为占位标记，译文按位置贴回，默认模板要求模型原样保留
 - 多选 PDF 时逐个串行处理，进度窗带序号，单个失败不影响其余
 

@@ -97,9 +97,10 @@ function selectionHasPdf(items: any[]): boolean {
 
 /**
  * True when a translation attachment already sits under the source's parent
- * (same title convention the adapter produces: `译文 (lang)` /
- * `Translated (…)`), or when the source carries a dc:relation link to one
- * (the only path for top-level sources). Used to skip duplicate translations.
+ * (title convention: the adapter produces `Translated (lang)`; legacy
+ * `译文 (…)` still counts), or when the source carries a dc:relation link to
+ * one (the only path for top-level sources). Used to skip duplicate
+ * translations.
  */
 function hasExistingTranslation(sourceItem: any): boolean {
   try {

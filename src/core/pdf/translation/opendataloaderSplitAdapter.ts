@@ -147,74 +147,51 @@ function realmLocalCopy(bytes: Uint8Array): Uint8Array {
 }
 
 /**
- * Resolve the CJK font for a translation target language, preferring a
- * user-placed asset in `{DataDir}/ztransplit/translation-assets/`, then the
- * OS system-default font for that script (via the shared platform module).
- *
- * `assetsFilename` is the conventional name a user may drop into the assets
- * dir to OVERRIDE the system font (e.g. "NotoSansSC.ttf"). It's optional —
- * when absent we fall through to the system default.
+ * User font overrides live in `{DataDir}/ztransplit/translation-assets/` under
+ * script-neutral basenames — the same file serves every target language, and
+ * users pick whatever face they prefer (e.g. Noto Serif SC to match a paper's
+ * serif typography). Each name accepts .ttf / .otf / .ttc (matching the
+ * preferences-pane copy). The legacy per-language NotoSans* names are still
+ * honored last so overrides placed before the neutral convention keep working
+ * after an upgrade.
  */
-async function resolveCjkFont(
-  targetLanguage: string,
-  assetsFilename: string,
-): Promise<Uint8Array | null> {
-  const IOUtils = (globalThis as any).IOUtils;
-  if (IOUtils) {
-    try {
-      const dataDir = (Zotero as any).DataDirectory?.dir;
-      if (dataDir) {
-        const p = joinAssetPath(dataDir, assetsFilename);
-        if (await IOUtils.exists(p)) {
-          return realmLocalCopy(await IOUtils.read(p));
-        }
-      }
-    } catch (e) {
-      safeDebug("[Z-Transplit] opendataloaderSplitAdapter: " + e);
-      /* ignore */
-    }
-  }
-  const lang = fontLangForTarget(targetLanguage);
-  return readFontBytesForLang(lang);
-}
+const FONT_OVERRIDE_EXTENSIONS = [".ttf", ".otf", ".ttc"] as const;
+const FONT_OVERRIDE_BASENAMES = {
+  regular: "translated-regular",
+  bold: "translated-bold",
+  italic: "translated-italic",
+  boldItalic: "translated-bold-italic",
+} as const;
 
-/**
- * Map a target language to the conventional user-override filename
- * (e.g. "NotoSansSC.ttf") a user may drop into the assets dir.
- */
-function cjkFontDescriptor(
-  targetLanguage: string,
-): { filename: string } | null {
-  const lang = fontLangForTarget(targetLanguage);
-  switch (lang) {
+/** Legacy exact-filename regular override, before the neutral convention. */
+function legacyRegularOverride(targetLanguage: string): string | null {
+  switch (fontLangForTarget(targetLanguage)) {
     case "zh":
-      return { filename: "NotoSansSC.ttf" };
+      return "NotoSansSC.ttf";
     case "ja":
-      return { filename: "NotoSansJP.ttf" };
+      return "NotoSansJP.ttf";
     case "ko":
-      return { filename: "NotoSansKR.ttf" };
+      return "NotoSansKR.ttf";
     default:
       return null; // non-CJK target — no CJK font needed
   }
 }
 
-/**
- * Resolve bold/italic CJK variants a user may have placed in the assets dir.
- * Conventional names mirror the regular font (e.g. NotoSansSC-Bold.ttf). Each
- * is optional; when absent the renderer degrades to regular for that style.
- * System fonts don't supply these, so only user-placed assets are checked.
- */
-async function readCjkVariants(
+/** Legacy exact-filename variant override (e.g. "NotoSansSC-Bold.ttf"). */
+function legacyVariantOverride(
+  variant: "Bold" | "Italic" | "BoldItalic",
   targetLanguage: string,
-): Promise<{ bold: Uint8Array | null; italic: Uint8Array | null; boldItalic: Uint8Array | null }> {
+): string | null {
+  const legacy = legacyRegularOverride(targetLanguage);
+  return legacy ? `${legacy.replace(/\.ttf$/i, "")}-${variant}.ttf` : null;
+}
+
+/** Read the first existing asset among `names`; null when none is present. */
+async function readFirstAsset(names: string[]): Promise<Uint8Array | null> {
   const IOUtils = (globalThis as any).IOUtils;
   const dataDir = (Zotero as any).DataDirectory?.dir;
-  if (!IOUtils || !dataDir) {
-    return { bold: null, italic: null, boldItalic: null };
-  }
-  const desc = cjkFontDescriptor(targetLanguage);
-  const stem = desc ? desc.filename.replace(/\.ttf$/i, "") : "NotoSansSC";
-  const readIfExists = async (name: string): Promise<Uint8Array | null> => {
+  if (!IOUtils || !dataDir) return null;
+  for (const name of names) {
     try {
       const p = joinAssetPath(dataDir, name);
       if (await IOUtils.exists(p)) {
@@ -224,12 +201,48 @@ async function readCjkVariants(
       safeDebug("[Z-Transplit] opendataloaderSplitAdapter: " + e);
       /* ignore */
     }
-    return null;
-  };
+  }
+  return null;
+}
+
+/** Every filename one override slot may carry, most-preferred first. */
+function overrideCandidates(basename: string, legacyName: string | null): string[] {
+  const names = FONT_OVERRIDE_EXTENSIONS.map((ext) => `${basename}${ext}`);
+  if (legacyName) names.push(legacyName);
+  return names;
+}
+
+/**
+ * Resolve the CJK font for a translation target language: the first existing
+ * user-placed asset in `{DataDir}/ztransplit/translation-assets/`, then the
+ * OS system-default font for that script (via the shared platform module).
+ */
+async function resolveCjkFont(targetLanguage: string): Promise<Uint8Array | null> {
+  const override = await readFirstAsset(
+    overrideCandidates(FONT_OVERRIDE_BASENAMES.regular, legacyRegularOverride(targetLanguage)),
+  );
+  if (override) return override;
+  return readFontBytesForLang(fontLangForTarget(targetLanguage));
+}
+
+/**
+ * Resolve bold/italic CJK variants a user may have placed in the assets dir
+ * (neutral basenames, then the legacy per-language names). Each is optional;
+ * when absent the renderer degrades to regular for that style. System fonts
+ * don't supply these, so only user-placed assets are checked.
+ */
+async function readCjkVariants(
+  targetLanguage: string,
+): Promise<{ bold: Uint8Array | null; italic: Uint8Array | null; boldItalic: Uint8Array | null }> {
+  const readVariant = (
+    basename: string,
+    variant: "Bold" | "Italic" | "BoldItalic",
+  ): Promise<Uint8Array | null> =>
+    readFirstAsset(overrideCandidates(basename, legacyVariantOverride(variant, targetLanguage)));
   const [bold, italic, boldItalic] = await Promise.all([
-    readIfExists(`${stem}-Bold.ttf`),
-    readIfExists(`${stem}-Italic.ttf`),
-    readIfExists(`${stem}-BoldItalic.ttf`),
+    readVariant(FONT_OVERRIDE_BASENAMES.bold, "Bold"),
+    readVariant(FONT_OVERRIDE_BASENAMES.italic, "Italic"),
+    readVariant(FONT_OVERRIDE_BASENAMES.boldItalic, "BoldItalic"),
   ]);
   return { bold, italic, boldItalic };
 }
@@ -354,18 +367,21 @@ export async function translateAndSplitWithOpenDataLoader(
     // the final "zh-CN" only guards hosts with no Zotero global at all.
     zoteroUILocale() ||
     "zh-CN";
-  const cjkDesc = cjkFontDescriptor(targetLanguage);
-  const cjkFontBytes = cjkDesc
-    ? await resolveCjkFont(targetLanguage, cjkDesc.filename)
+  // One title, three consumers: the overlay PDF's metadata, the white-page
+  // merged PDF's metadata, and the Zotero attachment title. splitViewCleanup's
+  // recognition regex must keep matching this convention.
+  const translatedTitle = `Translated (${targetLanguage})`;
+  const cjkFontBytes = isCjkTarget(targetLanguage)
+    ? await resolveCjkFont(targetLanguage)
     : null;
   // Latin font is always resolved — used for the Latin runs in mixed paragraphs
   // (and as the sole font when the target is itself Latin).
   const latinFontBytes = await readFontBytesForLang("latin");
   const fontVariants = await readCjkVariants(targetLanguage);
-  if (!cjkFontBytes && isCjkTarget(targetLanguage) && cjkDesc) {
+  if (!cjkFontBytes && isCjkTarget(targetLanguage)) {
     onProgress(
       getString("odl-progress-font-missing", {
-        fontFile: cjkDesc.filename,
+        fontFile: `${FONT_OVERRIDE_BASENAMES.regular}.ttf`,
         assetsDir: translationAssetsDir(),
       }),
     );
@@ -475,7 +491,7 @@ export async function translateAndSplitWithOpenDataLoader(
         ...(fontVariants.boldItalic
           ? { boldItalicFontBytes: fontVariants.boldItalic }
           : {}),
-        docTitle: `译文 (${targetLanguage})`,
+        docTitle: translatedTitle,
       },
     );
     merged = result.bytes;
@@ -504,14 +520,13 @@ export async function translateAndSplitWithOpenDataLoader(
       pageBytes.push(render.bytes);
     }
     if (pageBytes.length === 0) throw new Error(getString("odl-error-render-empty"));
-    merged = await mergePageBytes(pageBytes);
+    merged = await mergePageBytes(pageBytes, translatedTitle);
   }
   const parentItemID = sourceItem.parentItemID;
-  const title = `译文 (${targetLanguage})`;
   const translatedAtt = await importTranslatedBytes(
     merged,
     parentItemID,
-    title,
+    translatedTitle,
     sourceItem,
   );
 

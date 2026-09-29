@@ -14,8 +14,8 @@
  *
  * Ported from leadero's src/core/pdf/splitview/splitViewCleanup.ts (verbatim;
  * log prefixes renamed). `findLatestTranslation`'s title regex must stay in
- * sync with the title the adapter produces (`译文 (${targetLanguage})`, see
- * opendataloaderSplitAdapter).
+ * sync with the title the adapter produces (`Translated (${targetLanguage})`,
+ * see opendataloaderSplitAdapter); legacy `译文 (…)` titles stay recognized.
  *
  * @module core/pdf/splitview/splitViewCleanup
  */
@@ -24,12 +24,12 @@ import type { SplitTabState } from "./types";
 import { safeDebug } from "../../../utils/logger";
 import { stateMap } from "./splitViewSync";
 
-/** Title convention the adapter produces (`译文 (lang)` / `Translated (…)`). */
+/** Title convention: the adapter produces `Translated (lang)`; legacy `译文 (…)` still matches. */
 const TRANSLATION_TITLE_RE = /^(译文|Translated)\s*\(/i;
 
 /**
  * Find the best right-pane PDF under `parentItemID`, preferring previously
- * translated attachments (titled `译文 (...)` or `Translated (...)`).
+ * translated attachments (titled `Translated (...)`, or legacy `译文 (...)`).
  * Falls back to the newest PDF sibling when no translation exists.
  */
 export function findLatestTranslation(

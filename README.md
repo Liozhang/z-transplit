@@ -8,7 +8,9 @@
 
 **English** | [中文](README.zh-CN.md)
 
+[![Release](https://img.shields.io/github/v/release/Liozhang/z-transplit?color=blue&logo=github)](https://github.com/Liozhang/z-transplit/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/Liozhang/z-transplit/total?color=orange)](https://github.com/Liozhang/z-transplit/releases)
 [![Zotero 7 ~ 10](https://img.shields.io/badge/Zotero-7%20~%2010-CC6633.svg)](https://www.zotero.org/)
 
 **Selection Translation · Layout-preserving PDF Translation · Split-screen · Bilingual Interleave · Translation-only · Read-aloud — an all-in-one Zotero translation plugin.**
@@ -56,7 +58,7 @@ and an unconfigured engine each get their own explicit message — never a silen
 Right-click a PDF (in the library or the reader) → "Translate full text (save as
 attachment)". OpenDataLoader (local JVM) parses the layout, paragraphs are translated,
 and the result is re-rendered preserving the original layout, stored as a
-"译文 (zh-CN)" attachment and opened automatically. Repeat runs are deduplicated: an
+"Translated (zh-CN)" attachment and opened automatically. Repeat runs are deduplicated: an
 existing translation is opened instead of re-running the pipeline.
 
 ![Translated attachment](docs/screenshots/translated-attachment.png)
@@ -64,7 +66,9 @@ existing translation is opened instead of re-running the pipeline.
 - Layout-preserving: columns, tables and image positions are mapped back, and mixed
   CJK/Latin paragraphs are drawn run-by-run with the matching font
 - CJK fonts are resolved automatically — Microsoft YaHei / PingFang / Noto per target
-  language — with an explicit notice when none is found instead of tofu glyphs
+  language — with an explicit notice when none is found instead of tofu glyphs; drop a
+  `translated-regular.ttf` into `{data dir}/ztransplit/translation-assets/` to override
+  (e.g. Noto Serif SC to match the serif look of most papers)
 - Formulas (`$…$` / `{v0}`) are swapped for placeholders before translation and painted
   back in position; the default template asks the model to keep them verbatim
 - A multi-PDF selection runs the pipeline serially, with ordinal labels in the

@@ -18,9 +18,16 @@ import { PDFDocument } from "pdf-lib";
  * page order. Each entry is assumed to be a complete PDF document (as produced
  * by LayoutPreservingRenderer.renderLayoutPreserving).
  *
+ * When `docTitle` is given it becomes the merged document's Title metadata —
+ * the white-page counterpart of the overlay path's docTitle, so both render
+ * paths produce the same document metadata.
+ *
  * Empty input → an empty (zero-page) PDF, so callers don't need a special case.
  */
-export async function mergePageBytes(pageBytesList: Uint8Array[]): Promise<Uint8Array> {
+export async function mergePageBytes(
+  pageBytesList: Uint8Array[],
+  docTitle?: string,
+): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   for (const pb of pageBytesList) {
     if (!pb || pb.length === 0) continue;
@@ -30,5 +37,6 @@ export async function mergePageBytes(pageBytesList: Uint8Array[]): Promise<Uint8
     const copied = await out.copyPages(src, src.getPageIndices());
     for (const page of copied) out.addPage(page);
   }
+  if (docTitle) out.setTitle(docTitle);
   return out.save();
 }

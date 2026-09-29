@@ -28,7 +28,7 @@
  * @param bytes Translated PDF bytes (already merged across pages).
  * @param parentItemID The original attachment's parentItemID (the journal
  *   article etc.), or null/undefined for a standalone source.
- * @param title Display title for the new attachment (e.g. "译文 (zh-CN)").
+ * @param title Display title for the new attachment (e.g. "Translated (zh-CN)").
  * @param sourceItem The source PDF attachment, when known — used to link the
  *   translation back via dc:relation so the dedup lookups also work for
  *   top-level sources.
