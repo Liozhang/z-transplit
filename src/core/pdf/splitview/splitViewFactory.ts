@@ -34,6 +34,7 @@ import { getString } from "../../../utils/locale";
 import { createReaderBrowser, ReaderPane } from "./readerPaneAdapter";
 import { safeDebug } from "../../../utils/logger";
 import { toErrorMessage } from "../../../utils/error";
+import { alertDialog } from "../../../utils/dialog";
 import { createAbortController } from "../../../utils/abort";
 import { config } from "../../../../package.json";
 import {
@@ -92,7 +93,10 @@ export async function openSplitView(
   rightItem: any,
 ): Promise<string | null> {
   const Zotero_Tabs = win.Zotero_Tabs || (Zotero as any).Tabs;
-  const title = `${leftItem.getField?.("title") || "left"} | ${rightItem.getField?.("title") || "right"}`;
+  const title = getString("splitview-tab-title", {
+    left: leftItem.getField?.("title") || "",
+    right: rightItem.getField?.("title") || "",
+  });
   const { id: tabID } = Zotero_Tabs.add({
     type: "reader",
     title,
@@ -421,14 +425,10 @@ export function registerSplitViewMenu(): void {
             await handleSplitFromReader({ itemID: currentItemID });
           } catch (e) {
             safeDebug("[Z-Transplit splitView] open failed: " + e);
-            try {
-              Components.classes["@mozilla.org/prompt-service;1"]
-                .getService(Components.interfaces.nsIPromptService)
-                .alert(null, "Split View", getString("splitview-error-open", { detail: String(e) }));
-            } catch (e) {
-              safeDebug("[Z-Transplit] splitViewFactory: " + e);
-              /* best-effort */
-            }
+            alertDialog(
+              getString("splitview-error-dialog-title"),
+              getString("splitview-error-open", { detail: String(e) }),
+            );
           }
         },
       });
@@ -531,17 +531,52 @@ export function unregisterSplitViewMenu(): void {
 }
 
 /**
+ * Java launch-failure signatures shared by isJavaMissingError and
+ * friendlyOdlError. Deliberately NOT a bare "java" substring: an API error
+ * mentioning java anywhere (model names, URLs, java.lang.* stack traces from a
+ * RUNNING JVM — see backendSelector's M-25 note) must not route the user to
+ * the "install Java?" dialog. Mirrors the launch-failure patterns
+ * backendSelector already classifies on, plus the wording PdfParseError and
+ * JavaRuntimeManager emit.
+ */
+const JAVA_MISSING_RE = new RegExp(
+  [
+    "java[^\\n]{0,80}(?:is not recognized|not found|command not found|no such file|无法找到|找不到)",
+    "(?:is not recognized|not found|command not found|no such file|无法找到|找不到)[^\\n]{0,80}java",
+    "requires\\s+java\\s+1[17]",
+    "install\\s+java",
+    "需要安装\\s*java",
+    "需要安裝\\s*java",
+    "jvm[^\\n]{0,40}not\\s+found",
+  ].join("|"),
+  "i",
+);
+
+/**
  * Convert raw OpenDataLoader translation error messages to user-friendly Chinese.
  */
 export function friendlyOdlError(msg: string): string {
-  const m = msg.toLowerCase();
-  if (
-    m.includes("java") ||
-    m.includes("jvm") ||
-    m.includes("需要安装 java") ||
-    m.includes("需要安裝 java")
-  )
+  // HTTP status first: 401/403 (bad key) and 429 (quota/rate) have dedicated
+  // copy; other HTTP failures keep the code plus a short response excerpt.
+  // Before this, all HTTP errors fell through to the raw `HTTP 401: …` text.
+  const http = /\bHTTP\s+(\d{3})\b/.exec(msg);
+  if (http) {
+    const code = Number(http[1]);
+    if (code === 401 || code === 403) {
+      return getString("odl-error-http-auth", { code });
+    }
+    if (code === 429) {
+      return getString("odl-error-http-rate", { code });
+    }
+    return getString("odl-error-http-other", {
+      code,
+      detail: msg.slice(0, 100),
+    });
+  }
+  if (JAVA_MISSING_RE.test(msg)) {
     return getString("odl-error-java-missing");
+  }
+  const m = msg.toLowerCase();
   if (m.includes("jar") || m.includes("opendataloader-pdf-cli"))
     return getString("odl-error-jar-missing");
   // XPCOM nsIFile / nsIError file-path failures — replace the raw
@@ -555,6 +590,9 @@ export function friendlyOdlError(msg: string): string {
     m.includes("網路") ||
     m.includes("network") ||
     m.includes("timeout") ||
+    // "timed out" — backendSelector already matches both spellings; fetch/XHR
+    // errors usually carry the two-word form.
+    m.includes("timed out") ||
     m.includes("连接") ||
     m.includes("連線")
   )
@@ -578,15 +616,10 @@ export function friendlyOdlError(msg: string): string {
 /**
  * Whether an error message indicates a missing/failed Java runtime (vs other
  * ODL failures like missing jar, network, or unconfigured translation engine).
+ * Signature-based — see JAVA_MISSING_RE.
  */
 export function isJavaMissingError(msg: string): boolean {
-  const m = (msg || "").toLowerCase();
-  return (
-    m.includes("java") ||
-    m.includes("jvm") ||
-    m.includes("需要安装 java") ||
-    m.includes("java runtime not found")
-  );
+  return JAVA_MISSING_RE.test(msg || "");
 }
 
 /**
@@ -600,12 +633,28 @@ export function isJavaMissingError(msg: string): boolean {
 export async function handleMissingJava(): Promise<boolean> {
   const Services = (globalThis as any).Services;
   const win = (Zotero as any).getMainWindow();
-  // Services.prompt.confirm gives OK/Cancel. We overload: OK = download, and
-  // offer the manual download URL in the body for Cancel users.
-  const body = getString("java-dialog-body");
-  const wantInstall = Services.prompt.confirm(win, getString("java-dialog-title"), body);
-  if (!wantInstall) {
-    // User chose Cancel — open the manual download page for them.
+  // Three explicit choices via confirmEx: download+install / open the manual
+  // download page / do nothing. The previous OK/Cancel pair overloaded Cancel
+  // as "open the browser anyway" while the dialog text promised a manual
+  // visit — behavior now matches the text, and there is a real opt-out.
+  const P = Services?.prompt;
+  if (typeof P?.confirmEx !== "function") return false;
+  const stringButtons =
+    P.BUTTON_POS_0 * P.BUTTON_TITLE_IS_STRING |
+    P.BUTTON_POS_1 * P.BUTTON_TITLE_IS_STRING |
+    P.BUTTON_POS_2 * P.BUTTON_TITLE_IS_STRING;
+  const choice = P.confirmEx(
+    win,
+    getString("java-dialog-title"),
+    getString("java-dialog-body"),
+    stringButtons,
+    getString("java-dialog-button-download"),
+    getString("java-dialog-button-openpage"),
+    getString("java-dialog-button-cancel"),
+    null,
+    {},
+  );
+  if (choice === 1) {
     try {
       (Zotero as any).launchURL?.("https://adoptium.net");
     } catch (e) {
@@ -614,17 +663,27 @@ export async function handleMissingJava(): Promise<boolean> {
     }
     return false;
   }
+  if (choice !== 0) return false; // Cancel — no side effects at all
 
   // Download + extract with progress.
-  const progress = new (Zotero as any).ProgressWindow();
+  const progress = new (Zotero as any).ProgressWindow({ window: win });
   progress.changeHeadline(getString("java-progress-install"));
   progress.addDescription(getString("java-progress-download-prepare"));
   progress.show();
   try {
     const { downloadJRE } = await import("../JavaRuntimeManager");
+    // ProgressWindow.addDescription appends a row per call, and the download
+    // fires a progress event per network chunk (hundreds for ~40 MB) — report
+    // phase changes and whole 10-percent steps only.
+    let lastDownloadStep = -1;
     await downloadJRE(17, (p) => {
       try {
-        progress.addDescription(`${p.message || p.phase} (${p.percent}%)`);
+        if (p.phase === "downloading") {
+          const step = Math.floor((p.percent || 0) / 10) * 10;
+          if (step === lastDownloadStep) return;
+          lastDownloadStep = step;
+        }
+        progress.addDescription(p.message || `${p.phase} (${p.percent}%)`);
       } catch (e) {
         safeDebug("[Z-Transplit] splitViewFactory: " + e);
         /* best-effort */
@@ -694,12 +753,22 @@ export function registerOpenDataLoaderMenu(): void {
         onCommand: async () => {
           // Defensive guard: if a translation is already in flight, don't start
           // another. The user should see "取消正在进行的翻译" above this item
-          // in the context menu, but if this fires anyway the debug log will
-          // tell us the menu entry-point assumption is wrong.
+          // in the context menu, but if this fires anyway say so — a silently
+          // ignored click reads as "the plugin is broken".
           if (activeTranslationController) {
             safeDebug(
               "[Z-Transplit splitView] translation already in progress, ignoring duplicate request",
             );
+            try {
+              const busy = new (Zotero as any).ProgressWindow();
+              busy.changeHeadline(getString("app-title"));
+              busy.addDescription(getString("splitview-error-in-flight"));
+              busy.show();
+              busy.startCloseTimer?.(4000);
+            } catch (e) {
+              safeDebug("[Z-Transplit] splitViewFactory: " + e);
+              /* best-effort */
+            }
             return;
           }
           const sourceItemID: number | undefined =
@@ -708,10 +777,20 @@ export function registerOpenDataLoaderMenu(): void {
             safeDebug(
               "[Z-Transplit splitView] cannot resolve source itemID from reader",
             );
+            alertDialog(
+              getString("splitview-error-dialog-title"),
+              getString("splitview-error-no-item"),
+            );
             return;
           }
           const sourceItem = (Zotero as any).Items.get(sourceItemID);
-          if (!sourceItem) return;
+          if (!sourceItem) {
+            alertDialog(
+              getString("splitview-error-dialog-title"),
+              getString("splitview-error-no-item"),
+            );
+            return;
+          }
 
           // Reuse an existing translation if one is already reachable from
           // this item — parent siblings, or the dc:relation link written at
@@ -724,25 +803,23 @@ export function registerOpenDataLoaderMenu(): void {
               await openSplitView(win, sourceItem, existing);
             } catch (e) {
               // openSplitView 带超时，复用译文路径同样可能抛错——按本文件惯例
-              // debug + nsIPromptService 提示。
+              // debug + 统一对话框提示。
               safeDebug(
                 "[Z-Transplit splitView] reuse-translation open failed: " + e,
               );
-              try {
-                Components.classes["@mozilla.org/prompt-service;1"]
-                  .getService(Components.interfaces.nsIPromptService)
-                  .alert(null, "Split View", getString("splitview-error-open", { detail: String(e) }));
-              } catch (e) {
-                safeDebug("[Z-Transplit] splitViewFactory: " + e);
-                /* best-effort */
-              }
+              alertDialog(
+                getString("splitview-error-dialog-title"),
+                getString("splitview-error-open", { detail: String(e) }),
+              );
               return;
             }
             try {
-              const p = new (Zotero as any).ProgressWindow();
-              p.changeHeadline("Z-Transplit");
+              const p = new (Zotero as any).ProgressWindow({ window: win });
+              p.changeHeadline(getString("app-title"));
               p.addDescription(
-                getString("splitview-progress-reused", { attachmentId: existing.id }),
+                getString("splitview-progress-reused", {
+                  title: existing.getField?.("title") || String(existing.id),
+                }),
               );
               p.show();
               p.startCloseTimer?.(3000);
@@ -755,7 +832,9 @@ export function registerOpenDataLoaderMenu(): void {
 
           let progress: any = null;
           try {
-            progress = new (Zotero as any).ProgressWindow();
+            progress = new (Zotero as any).ProgressWindow({
+              window: (Zotero as any).getMainWindow?.() || null,
+            });
             progress.changeHeadline(getString("odl-progress-translating"));
             progress.addDescription(getString("odl-progress-preparing"));
             progress.show();
@@ -769,6 +848,10 @@ export function registerOpenDataLoaderMenu(): void {
               onProgress: (msg: string) => {
                 try {
                   progress.addDescription(msg);
+                  // show() is a no-op while the window is up, but re-opens it
+                  // (and flushes queued descriptions) after the user closed it —
+                  // completion and error lines must not be lost silently.
+                  progress.show();
                 } catch (e) {
                   safeDebug("[Z-Transplit] splitViewFactory: " + e);
                   /* best-effort */
@@ -786,7 +869,10 @@ export function registerOpenDataLoaderMenu(): void {
               if (result.splitTabID) {
                 progress.addDescription(
                   getString("odl-progress-done-split", {
-                    attachmentId: result.translatedAttachmentId,
+                    title:
+                      (Zotero as any).Items.get(result.translatedAttachmentId)
+                        ?.getField?.("title") ||
+                      String(result.translatedAttachmentId),
                   }),
                 );
               }
@@ -833,14 +919,7 @@ export function registerOpenDataLoaderMenu(): void {
               safeDebug("[Z-Transplit] splitViewFactory: " + e);
               /* ignore */
             }
-            try {
-              Components.classes["@mozilla.org/prompt-service;1"]
-                .getService(Components.interfaces.nsIPromptService)
-                .alert(null, getString("odl-error-dialog-title"), friendly);
-            } catch (e) {
-              safeDebug("[Z-Transplit] splitViewFactory: " + e);
-              /* progress window already shows the error; this dialog is best-effort */
-            }
+            alertDialog(getString("odl-error-dialog-title"), friendly);
           } finally {
             activeTranslationController = null;
           }

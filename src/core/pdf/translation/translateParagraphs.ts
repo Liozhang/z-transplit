@@ -378,6 +378,10 @@ export async function translateAllPagesBatched(
   const translated = new Map<string, string>(); // `${pageIdx}:${paraIdx}` → text
   const failedKeys = new Set<string>();
   let completed = 0;
+  // ProgressWindow.addDescription appends one row per call — reporting every
+  // chunk would stack dozens of near-identical "x/y" lines on long documents.
+  // Report the first, the last, and ~5 evenly spaced steps in between.
+  const progressStep = Math.max(1, Math.ceil(chunks.length / 5));
 
   const signal = options.signal;
   const sem = new Semaphore(Math.min(concurrency, Math.max(chunks.length, 1)));
@@ -426,7 +430,18 @@ export async function translateAllPagesBatched(
       } finally {
         release();
         completed++;
-        onProgress(getString("pdf-progress-batch-progress", { done: completed, total: chunks.length }));
+        if (
+          completed === 1 ||
+          completed === chunks.length ||
+          completed % progressStep === 0
+        ) {
+          onProgress(
+            getString("pdf-progress-batch-progress", {
+              done: completed,
+              total: chunks.length,
+            }),
+          );
+        }
       }
     }),
   );

@@ -26,6 +26,7 @@
 import { getString } from "../utils/locale";
 import { safeDebug } from "../utils/logger";
 import { toErrorMessage } from "../utils/error";
+import { alertDialog } from "../utils/dialog";
 import {
   translateAndSplitWithOpenDataLoader,
 } from "../core/pdf/translation/opendataloaderSplitAdapter";
@@ -136,12 +137,7 @@ function openAttachmentOrAlert(win: any, attachmentId: number): boolean {
   } catch (e) {
     safeDebug("[Z-Transplit] itemTreeMenu viewAttachment: " + e);
   }
-  try {
-    const Services = (globalThis as any).Services;
-    Services?.prompt?.alert(win, "Z-Transplit", getString("itemtree-open-failed"));
-  } catch {
-    /* best-effort — the debug log has the details */
-  }
+  alertDialog(getString("app-title"), getString("itemtree-open-failed"), win);
   return false;
 }
 
@@ -182,7 +178,7 @@ async function runPipeline(
   label?: string,
 ): Promise<void> {
   const Zotero = (globalThis as any).Zotero;
-  const progress = new Zotero.ProgressWindow();
+  const progress = new Zotero.ProgressWindow({ window: win });
   progress.changeHeadline(
     (label ? `${label} ` : "") +
       getString(
@@ -244,7 +240,9 @@ async function runPipeline(
     });
     progress.startCloseTimer?.(8000);
   } catch (e: any) {
-    progress.startCloseTimer?.(2000);
+    // 10 s, matching the reader entry point — 2 s was too short to read the
+    // "✗" line (the modal dialog below is the real carrier, this is backup).
+    progress.startCloseTimer?.(10000);
     const raw = toErrorMessage(e);
     if (isJavaMissingError(raw)) {
       await handleMissingJava();
@@ -257,12 +255,7 @@ async function runPipeline(
     } catch {
       /* progress window already closed */
     }
-    try {
-      const Services = (globalThis as any).Services;
-      Services?.prompt?.alert(win, "Z-Transplit", friendly);
-    } catch {
-      /* best-effort — the debug log has the details */
-    }
+    alertDialog(getString("app-title"), friendly, win);
   }
 }
 

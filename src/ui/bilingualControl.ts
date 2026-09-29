@@ -189,7 +189,8 @@ async function startSession(
   const session = await enterBilingualSession(reader);
   safeDebug("[Z-Transplit] bilingualControl: session=" + !!session);
   if (!session) {
-    state.setStatus(getString("bilingual-sdt-unpack-failed", { error: "SDT unavailable" }));
+    // Null ≠ "unpack failed": the SDT session simply could not be established.
+    state.setStatus(getString("bilingual-sdt-missing"));
     return;
   }
 
