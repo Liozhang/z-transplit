@@ -153,6 +153,42 @@ function isRecord(value: any): value is WordCardRecord {
   return DictionaryCardContentSchema.safeParse(value.latest).success;
 }
 
+/**
+ * Normalize one IOUtils.getChildren result. Gecko's contract changed across
+ * versions: Zotero 7 returns FileSystemEntry objects ({path, isDirectory,
+ * size}); Zotero 10.0.3 returns plain path STRINGS whose stat() reports
+ * type:"directory" instead of an isDirectory flag (verified on a real
+ * machine — relying on either shape alone silently lists nothing). Handle both.
+ */
+async function statChildren(dir: string): Promise<Array<{ path: string; isDirectory: boolean; size: number }>> {
+  const IOUtils = (globalThis as any).IOUtils;
+  if (!IOUtils?.getChildren) return [];
+  const children = await IOUtils.getChildren(dir);
+  const isDir = (s: any) => !!s && (s.type === "directory" || s.isDirectory === true);
+  const out: Array<{ path: string; isDirectory: boolean; size: number }> = [];
+  for (const child of children as any[]) {
+    if (typeof child === "string") {
+      try {
+        const stat = await IOUtils.stat(child);
+        out.push({
+          path: child,
+          isDirectory: isDir(stat),
+          size: Number(stat?.size) || 0,
+        });
+      } catch {
+        /* vanished between listing and stat — skip */
+      }
+    } else if (child && typeof child === "object" && child.path) {
+      out.push({
+        path: child.path,
+        isDirectory: isDir(child),
+        size: Number(child.size) || 0,
+      });
+    }
+  }
+  return out;
+}
+
 /** Scan the store directory into a fresh Map. Never throws; corrupt files are skipped. */
 async function loadIndex(): Promise<Map<string, WordCardRecord>> {
   const map = new Map<string, WordCardRecord>();
@@ -161,11 +197,11 @@ async function loadIndex(): Promise<Map<string, WordCardRecord>> {
   if (!root || !IOUtils?.getChildren) return map;
   try {
     if (IOUtils.exists && !(await IOUtils.exists(root))) return map;
-    const buckets = await IOUtils.getChildren(root);
-    for (const bucket of buckets as any[]) {
+    const buckets = await statChildren(root);
+    for (const bucket of buckets) {
       if (!bucket.isDirectory) continue;
-      const files = await IOUtils.getChildren(bucket.path);
-      for (const file of files as any[]) {
+      const files = await statChildren(bucket.path);
+      for (const file of files) {
         if (file.isDirectory) continue;
         try {
           const bytes = await IOUtils.read(file.path);

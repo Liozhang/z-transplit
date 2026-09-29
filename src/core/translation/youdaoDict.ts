@@ -116,12 +116,17 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+/** Youdao embeds <b>/<i> highlight markup in senses and examples — strip it. */
+function stripTags(text: string): string {
+  return text.replace(/<[^>]*>/g, "").trim();
+}
+
 /**
  * Split "n. （声音的）深沉，洪亮" into { pos: "n.", meaning: "…" }.
  * Lines without a leading POS abbreviation keep the whole text as meaning.
  */
 function splitPosLine(line: string): DictionarySense | null {
-  const text = line.replace(/\s+/g, " ").trim();
+  const text = stripTags(line).replace(/\s+/g, " ").trim();
   if (!text) return null;
   const match = text.match(/^([a-zA-Z]{1,12}\.)\s+(.+)$/);
   if (match) {
@@ -187,7 +192,9 @@ function parseYoudaoResponse(
         .map((pair: any) => {
           const text = firstString(pair?.["sentence-eng"], pair?.["sentence-foreign"]);
           const translation = firstString(pair?.["sentence-translation"]);
-          return text && translation ? { text, translation } : null;
+          return text && translation
+            ? { text: stripTags(text), translation: stripTags(translation) }
+            : null;
         })
         .filter((x): x is { text: string; translation: string } => x !== null)
         .slice(0, MAX_EXAMPLES)

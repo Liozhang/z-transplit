@@ -310,6 +310,12 @@ export function openWordCardsTab(win: any): void {
     const { id, container } = Zotero_Tabs.add({
       id: WORDCARDS_TAB_ID,
       type: WORDCARDS_TAB_ID,
+      // Zotero 10's _update() reads tab.data.icon on EVERY non-library tab
+      // with no undefined guard — data must be a defined object or add()
+      // throws mid-flight (observed on 10.0.3: "can't access property
+      // \"icon\", tab.data is undefined", leaving a container-less tab).
+      // Empty icon = a title-only entry in the tab bar.
+      data: { icon: "" },
       title: getString("wordcards-tab-title"),
       select: true,
       onClose: () => destroyTab(),

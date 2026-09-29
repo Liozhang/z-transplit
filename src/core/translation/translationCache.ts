@@ -217,6 +217,45 @@ export async function putCachedTranslation(
 }
 
 /**
+ * Normalize one IOUtils.getChildren result. Gecko's contract changed across
+ * versions: Zotero 7 returns FileSystemEntry objects ({path, isDirectory,
+ * size}); Zotero 10.0.3 returns plain path STRINGS whose stat() reports
+ * type:"directory" instead of an isDirectory flag (found on a real machine:
+ * relying on either shape alone made pruneCache silently list nothing).
+ * Handle both.
+ */
+async function statChildren(dir: string): Promise<Array<{ path: string; isDirectory: boolean; size: number }>> {
+  const IOUtils = (globalThis as any).IOUtils;
+  if (!IOUtils?.getChildren) return [];
+  const children = await IOUtils.getChildren(dir);
+  const isDir = (s: any) => !!s && (s.type === "directory" || s.isDirectory === true);
+  const out: Array<{ path: string; isDirectory: boolean; size: number }> = [];
+  for (const child of children as any[]) {
+    if (typeof child === "string") {
+      try {
+        const stat = await IOUtils.stat(child);
+        out.push({
+          path: child,
+          isDirectory: isDir(stat),
+          size: Number(stat?.size) || 0,
+        });
+      } catch {
+        /* vanished between listing and stat — skip */
+      }
+    } else if (child && typeof child === "object" && child.path) {
+      out.push({
+        path: child.path,
+        isDirectory: isDir(child),
+        size: Number(child.size) || 0,
+      });
+    }
+  }
+  return out;
+}
+
+interface Entry { path: string; size: number; usedAt: number }
+
+/**
  * Prune the cache down to `maxBytes` (LRU by usedAt).
  *
  * @returns Number of files removed. Never throws.
@@ -232,14 +271,11 @@ export async function pruneCache(maxBytes: number): Promise<number> {
     if (!(await IOUtils.hasChildren(root))) return 0;
 
     // Collect every record file with its size and usedAt.
-    const buckets = await IOUtils.getChildren(root);
-    interface Entry { path: string; size: number; usedAt: number }
     const entries: Entry[] = [];
     let total = 0;
-    for (const bucket of buckets as any[]) {
+    for (const bucket of await statChildren(root)) {
       if (!bucket.isDirectory) continue;
-      const files = await IOUtils.getChildren(bucket.path);
-      for (const f of files as any[]) {
+      for (const f of await statChildren(bucket.path)) {
         if (f.isDirectory) continue;
         let usedAt = 0;
         try {
@@ -249,8 +285,8 @@ export async function pruneCache(maxBytes: number): Promise<number> {
         } catch {
           // Corrupt file: usedAt 0 makes it a prune priority.
         }
-        entries.push({ path: f.path, size: Number(f.size) || 0, usedAt });
-        total += Number(f.size) || 0;
+        entries.push({ path: f.path, size: f.size, usedAt });
+        total += f.size;
       }
     }
     if (total <= maxBytes) return 0;

@@ -1745,6 +1745,346 @@ PROBE_CMDS.maximize = async function () {
   };
 };
 
+// ── word cards (词典卡片 + 词卡标签页) ───────────────────────────────────────
+// Sub-actions:
+//   (none)/"ui"        entry-point presence (library button, reader listener,
+//                      reader toolbar button when a reader is open)
+//   "open-tab"         click the real library toolbar button, report the tab
+//                      and its rendered DOM (empty state)
+//   "lookup"           with a reader open: commit zh-CN as the target, set the
+//                      reader selection, click Refresh → Look up, report the
+//                      rendered dictionary card and the chip strip (REAL
+//                      Youdao network call)
+//   "store"            list the on-disk word-card store records
+//   "shot"             screenshot the main window to D:\zt-qa\wordcards-shot-*.png
+PROBE_CMDS.wordcards = async function (action) {
+  const { win, Zotero_Tabs } = probeWin();
+  const doc = win.document;
+  const out = { action: action || "ui" };
+
+  const button = doc.getElementById("ztransplit-wordcards-button");
+  out.libraryButton = button
+    ? {
+        found: true,
+        parent: button.parentElement?.id || button.parentElement?.tagName,
+        tip: button.getAttribute("tooltiptext"),
+        image: (button.getAttribute("style") || "").includes("wordcards"),
+      }
+    : { found: false };
+  try {
+    const registered = Array.from(Zotero.Reader._registeredListeners || []);
+    out.readerToolbarListeners = registered.filter(
+      (x) =>
+        x.type === "renderToolbar" &&
+        String(x.pluginID || "").includes("ztransplit"),
+    ).length;
+  } catch (e) {
+    out.readerListenersError = String(e);
+  }
+
+  if (!action || action === "ui") {
+    try {
+      const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+      const rdoc = reader?._iframeWindow?.document;
+      out.readerButton = rdoc
+        ? !!rdoc.querySelector(".ztransplit-wc-reader-btn")
+        : "no reader open";
+    } catch (e) {
+      out.readerButton = "err: " + e;
+    }
+    out.wordcardsPref = Zotero.Prefs.get(
+      "extensions.zotero.ztransplit.wordcards.enabled",
+      true,
+    );
+    return out;
+  }
+
+  if (action === "open-tab") {
+    if (!button) return { error: "no library toolbar button" };
+    button.doCommand();
+    await Zotero.Promise.delay(2500);
+    const tab = Zotero_Tabs._getTab?.("ztransplit-wordcards")?.tab;
+    out.tab = tab
+      ? {
+          id: tab.id,
+          type: tab.type,
+          title: tab.title,
+          selected: Zotero_Tabs.selectedID === "ztransplit-wordcards",
+        }
+      : null;
+    const container = doc.getElementById("ztransplit-wordcards");
+    out.dom = container
+      ? {
+          root: !!container.querySelector(".ztransplit-wc-root"),
+          search: !!container.querySelector(".ztransplit-wc-search"),
+          sort: !!container.querySelector(".ztransplit-wc-sort"),
+          count: container.querySelector(".ztransplit-wc-count")?.textContent ?? null,
+          grid: !!container.querySelector(".ztransplit-wc-grid"),
+          detail: !!container.querySelector(".ztransplit-wc-detail"),
+          emptyTitle: container.querySelector(".ztransplit-wc-empty-title")?.textContent ?? null,
+          emptyHint: container.querySelector(".ztransplit-wc-empty-hint")?.textContent ?? null,
+          rawFtlLeak: /ztransplit-wordcards-|pane-translate-/.test(
+            container.textContent || "",
+          ),
+          text: (container.textContent || "").slice(0, 500),
+        }
+      : null;
+    return out;
+  }
+
+  // Diagnostics for a rendered-but-empty section: the context pane's
+  // collapse state, every frame that could host the pane, and any
+  // ztransplit-tp nodes reachable from the main document.
+  if (action === "diag") {
+    const contextPane = doc.getElementById("zotero-context-pane");
+    out.context = {
+      collapsed: contextPane?.collapsed ?? null,
+      hidden: contextPane?.hidden ?? null,
+      hasWidth: contextPane ? !!contextPane.getBoundingClientRect().width : null,
+    };
+    out.frames = [];
+    for (const f of doc.querySelectorAll("browser, iframe")) {
+      try {
+        const fdoc = f.contentDocument;
+        if (!fdoc) continue;
+        out.frames.push({
+          tag: f.tagName,
+          id: f.id || null,
+          url: (fdoc.URL || "").slice(0, 80),
+          tpNodes: fdoc.querySelectorAll("[class*='ztransplit-tp']").length,
+          sections: fdoc.querySelectorAll("item-pane-custom-section").length,
+        });
+      } catch {
+        /* cross-domain frame */
+      }
+    }
+    out.tpNodesInMain = doc.querySelectorAll("[class*='ztransplit-tp']").length;
+    const sectionForDiag = Array.from(
+      doc.querySelectorAll("item-pane-custom-section"),
+    ).find((c) => (c.dataset.pane || "").includes("ztransplit-translate"));
+    out.section = sectionForDiag
+      ? {
+          pane: sectionForDiag.dataset.pane,
+          hidden: sectionForDiag.hidden,
+          html: (sectionForDiag.innerHTML || "").slice(0, 400),
+        }
+      : null;
+    return out;
+  }
+
+  if (action === "lookup") {
+    const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+    if (!reader) return { error: "no reader — run the 'reader' action first" };
+
+    // The reader's item pane (context pane) starts COLLAPSED on a fresh
+    // profile — a hidden section never renders its body (onRender fires only
+    // for visible sections). Open it BEFORE locating the section.
+    const contextPaneEl = doc.getElementById("zotero-context-pane");
+    if (contextPaneEl?.collapsed) {
+      const toggle = doc.getElementById("context-pane-toggle");
+      if (toggle) toggle.click();
+      else contextPaneEl.collapsed = false;
+      await Zotero.Promise.delay(1500);
+    }
+
+    // Zotero 10 prefixes custom section ids with the plugin ID
+    // ("ztransplit@zotero.org-ztransplit-translate"), and TWO copies exist —
+    // the library item pane's (hidden for reader tabs) and the reader context
+    // pane's (the live one). Prefer the context pane's visible section.
+    const allSections = Array.from(doc.querySelectorAll("item-pane-custom-section"));
+    const matching = allSections.filter((c) =>
+      (c.dataset.pane || "").includes("ztransplit-translate"),
+    );
+    const section =
+      matching.find((c) => contextPaneEl?.contains(c) && !c.hidden) ??
+      matching.find((c) => !c.hidden) ??
+      matching[0];
+    if (!section) {
+      return {
+        error: "no translate section rendered",
+        sections: allSections.map((c) => ({ pane: c.dataset.pane, hidden: c.hidden })),
+      };
+    }
+    out.section = {
+      pane: section.dataset.pane,
+      hidden: section.hidden,
+      inContextPane: !!contextPaneEl?.contains(section),
+    };
+
+    // 1) Commit zh-CN as the target while no selection is loaded (blur with
+    //    an empty source text never fires a request).
+    // One live pane instance exists (the store-backed chips + single section),
+    // so global main-document queries are equivalent and dodge any
+    // collapsible-section/shadow-root nesting quirks.
+    const q = (sel) => doc.querySelector(sel);
+    const qa = (sel) => [...doc.querySelectorAll(sel)];
+    const langInput = q(".ztransplit-tp-lang-input");
+    if (!langInput) {
+      return {
+        error: "no language input",
+        section: out.section,
+        text: (section.textContent || "").slice(0, 300),
+        sectionHTML: (section.innerHTML || "").slice(0, 300),
+        tpNodes: doc.querySelectorAll("[class*='ztransplit-tp']").length,
+        tpHosts: [
+          ...new Set(
+            [...doc.querySelectorAll("[class*='ztransplit-tp']")].map(
+              (n) =>
+                n.closest("item-pane-custom-section")?.dataset.pane ?? "none",
+            ),
+          ),
+        ],
+      };
+    }
+    langInput.value = "zh-CN";
+    langInput.dispatchEvent(new win.Event("input", { bubbles: true }));
+    langInput.dispatchEvent(new win.FocusEvent("blur"));
+    await Zotero.Promise.delay(300);
+
+    // 2) Fake the reader selection — the pane reads this exact property on
+    //    refresh (readSelection → _primaryView._selectionRanges).
+    const view = reader._internalReader?._primaryView;
+    if (!view) return { error: "no _primaryView on the reader" };
+    view._selectionRanges = [{ text: "resonance" }];
+
+    // 3) Refresh → idle state offers the Look up button (translate.auto off).
+    const refreshBtn = qa("button").find((b) =>
+      /refresh|刷新/i.test(b.textContent || ""),
+    );
+    if (!refreshBtn) {
+      return {
+        error: "no refresh button",
+        buttons: qa("button").map((b) => b.textContent),
+      };
+    }
+    refreshBtn.click();
+    await Zotero.Promise.delay(600);
+    const lookupBtn = qa("button").find((b) =>
+      /look up|查询/i.test(b.textContent || ""),
+    );
+    if (!lookupBtn) {
+      return {
+        error: "no Look up button after refresh",
+        buttons: qa("button").map((b) => b.textContent),
+        text: (section.textContent || "").slice(0, 400),
+      };
+    }
+    lookupBtn.click();
+
+    // 4) Wait for the card (real Youdao round trip) or an explicit error.
+    for (let i = 0; i < 40; i++) {
+      await Zotero.Promise.delay(500);
+      if (q(".ztransplit-tp-card") || q(".ztransplit-tp-error")) {
+        break;
+      }
+    }
+    out.card = {
+      found: !!q(".ztransplit-tp-card"),
+      word: q(".ztransplit-tp-card-word")?.textContent ?? null,
+      phonetic: q(".ztransplit-tp-card-phonetic")?.textContent ?? null,
+      senses: qa(".ztransplit-tp-card-sense").map((s) => s.textContent),
+      source: q(".ztransplit-tp-card-source")?.textContent ?? null,
+      error: q(".ztransplit-tp-error")?.textContent ?? null,
+    };
+    const chips = q(".ztransplit-tp-chips");
+    out.chips = {
+      found: !!chips,
+      hidden: chips?.hidden ?? null,
+      words: qa(".ztransplit-tp-chip").map((c) => c.textContent),
+    };
+    return out;
+  }
+
+  if (action === "store") {
+    const root = PathUtils.join(
+      Zotero.DataDirectory.dir,
+      "ztransplit",
+      "word-cards",
+      "v1",
+    );
+    out.root = root;
+    out.files = [];
+    try {
+      out.debug = {
+        exists: await IOUtils.exists(root).catch((e) => "ERR " + e),
+        statType: typeof IOUtils.stat,
+        children: await IOUtils.getChildren(root)
+          .then(async (c) => {
+            const info = {
+              count: c.length,
+              firstType: typeof c[0],
+              first: typeof c[0] === "string" ? c[0] : JSON.stringify(c[0]),
+            };
+            if (typeof c[0] === "string" && typeof IOUtils.stat === "function") {
+              info.stat = await IOUtils.stat(c[0])
+                .then((s) => JSON.stringify(s))
+                .catch((e) => "ERR " + e);
+            }
+            return info;
+          })
+          .catch((e) => "ERR " + e),
+      };
+      // IOUtils.getChildren returns plain path STRINGS and stat() reports
+      // type:"directory" (no isDirectory flag) on this Zotero (10.0.3).
+      const isDir = (s) => s && (s.type === "directory" || s.isDirectory === true);
+      if (await IOUtils.exists(root)) {
+        for (const bucketPath of await IOUtils.getChildren(root)) {
+          const bstat = await IOUtils.stat(bucketPath);
+          if (!isDir(bstat)) continue;
+          for (const filePath of await IOUtils.getChildren(bucketPath)) {
+            const fstat = await IOUtils.stat(filePath);
+            if (isDir(fstat)) continue;
+            let parsed = null;
+            try {
+              parsed = JSON.parse(await IOUtils.readUTF8(filePath));
+            } catch {
+              /* corrupt file */
+            }
+            out.files.push({
+              name: PathUtils.filename(filePath),
+              size: fstat.size,
+              word: parsed?.word ?? null,
+              lookups: parsed?.lookups ?? null,
+              source: parsed?.latest?.source ?? null,
+              senses: parsed?.latest?.senses?.length ?? null,
+              phonetic: parsed?.latest?.phonetic ?? null,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      out.error = String(e);
+    }
+    return out;
+  }
+
+  if (action === "shot") {
+    try {
+      const w = win.outerWidth;
+      const h = win.outerHeight;
+      const canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx2d = canvas.getContext("2d");
+      ctx2d.drawWindow(win, 0, 0, w, h, "rgb(255,255,255)");
+      const dataURL = canvas.toDataURL("image/png");
+      const bytes = Uint8Array.from(atob(dataURL.split(",")[1]), (c) =>
+        c.charCodeAt(0),
+      );
+      const file = PathUtils.join(
+        "D:\\zt-qa",
+        "wordcards-shot-" + Date.now() + ".png",
+      );
+      await IOUtils.write(file, bytes);
+      return { ok: true, file, bytes: bytes.length, w, h };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+
+  return { error: "unknown wordcards sub-action: " + action };
+};
+
 // ── driver: poll command.json ───────────────────────────────────────────────
 var probeTimer = null;
 
