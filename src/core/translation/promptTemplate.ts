@@ -44,16 +44,28 @@ export type AIPromptPlaceholder = (typeof AI_PROMPT_PLACEHOLDERS)[number];
 /**
  * Built-in template, used whenever the preference is empty.
  *
- * Same wording as formulaPreservingPrompt (src/core/translation/prompts.ts):
- * the PDF pipeline replaces formulas with `{vn}` tokens before translating, so
- * the prompt has to forbid the model from touching them. Keeping one wording
- * means switching engines does not silently drop the formula contract.
+ * The PDF pipeline replaces formulas with `{vn}` tokens before translating, so
+ * the template has to forbid the model from touching them — that contract is
+ * shared with prompts.ts#formulaPreservingPrompt (the custom engine's fixed
+ * prompt). Beyond the formula contract the default also pins the conventions a
+ * professional domain translation is expected to follow, so weaker
+ * self-hosted models behave deterministically instead of free-styling on their
+ * own judgement: field terminology translated consistently, the target
+ * language's written conventions, and an as-is list for citation markers,
+ * measurements/units, standards identifiers, gene/protein symbols and code
+ * identifiers (each came out correct in probes on strong models, but they are
+ * exactly what a small local model gets wrong without an explicit rule).
  */
 export const DEFAULT_AI_PROMPT = `You are a professional translator. Translate the following text from {{sourceLang}} to {{targetLang}}.
+Use the established terminology of the text's field, and keep it consistent: the same term always gets the same translation. Follow the standard written conventions of {{targetLang}} (punctuation, spacing, number formatting).
 Text to translate:
 {{text}}
-Output ONLY the translated text, no explanations.
-CRITICAL: The text contains tokens like {v0}, {v1}, {v2} that mark the position of mathematical formulas. You MUST preserve every such token EXACTLY as-is — same braces, same letter 'v', same number, in the correct position relative to the surrounding translated text. Do not translate, rename, expand, or renumber these tokens.`;
+Output ONLY the translated text — no explanations, no notes.
+CRITICAL — preserve EXACTLY as-is, never translate, rewrite or renumber:
+- Formula placeholder tokens like {v0}, {v1}, {v2}: same braces, same letter "v", same number, in the same position relative to the surrounding translated text.
+- Formulas between dollar signs ($...$): keep the signs and their content unchanged.
+- Citation markers like [12] / [13, 15]: keep the brackets and numbers exactly.
+- Measurements with units (3.3 V, 2 ms, 1.5 GB/s), standards identifiers (ISO 11898-2), gene/protein symbols (p53, TP53) and code identifiers: keep them as written.`;
 
 /** Length bounds for a user template (chars, after trimming). */
 export const AI_PROMPT_MAX_LENGTH = 4000;

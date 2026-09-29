@@ -190,6 +190,25 @@ describe("resolvePromptTemplate / promptFingerprint", () => {
     expect(resolvePromptTemplate("")).toBe(DEFAULT_AI_PROMPT);
   });
 
+  it("the built-in default carries the domain-translation contract", () => {
+    // Template contract: the three placeholders stay mandatory.
+    for (const p of ["{{text}}", "{{sourceLang}}", "{{targetLang}}"]) {
+      expect(DEFAULT_AI_PROMPT).toContain(p);
+    }
+    // Domain conventions the default pins (see the constant's doc comment).
+    expect(DEFAULT_AI_PROMPT).toContain(
+      "the same term always gets the same translation",
+    );
+    // Preserve-as-is list: formula tokens, $...$ formulas, citations, units.
+    expect(DEFAULT_AI_PROMPT).toContain("{v0}");
+    expect(DEFAULT_AI_PROMPT).toContain("dollar signs ($...$)");
+    expect(DEFAULT_AI_PROMPT).toContain("[13, 15]");
+    expect(DEFAULT_AI_PROMPT).toContain("ISO 11898-2");
+    // The template must still validate — a contract test on a template that
+    // the pane would reject would be nonsense.
+    expect(validatePromptTemplate(DEFAULT_AI_PROMPT).ok).toBe(true);
+  });
+
   it("fingerprint is stable for equal templates and differs across edits", () => {
     expect(promptFingerprint(VALID)).toBe(promptFingerprint(VALID));
     expect(promptFingerprint(VALID)).not.toBe(promptFingerprint(`${VALID} `));
