@@ -75,11 +75,21 @@ export function isLinux(): boolean {
   return !isWindows() && !isMac();
 }
 
-/** The Windows directory (where Fonts\ lives), e.g. "C:\Windows". Windows-only. */
+/**
+ * The Windows directory (where Fonts\ lives), e.g. "C:\Windows". Windows-only.
+ *
+ * Resolved through the XPCOM directory service's "WinD" key — `process` is not
+ * defined in the chrome realm, so reading `process.env.WINDIR` here only
+ * produced a ReferenceError on every call (caught, but it logged a lie and
+ * skipped this lookup entirely).
+ */
 function windowsDir(): string {
   try {
-    const w = (process as any)?.env?.WINDIR;
-    if (w) return w;
+    const dirSvc = (Components as any).classes[
+      "@mozilla.org/file/directory-service;1"
+    ].getService((Components as any).interfaces.nsIProperties);
+    const winD = dirSvc.get("WinD", (Components as any).interfaces.nsIFile);
+    if (winD?.path) return winD.path;
   } catch (e) {
     safeDebug("[Z-Transplit] platform: " + e);
     /* ignore */
