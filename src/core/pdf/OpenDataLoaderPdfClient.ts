@@ -386,7 +386,7 @@ async function getJarPath(): Promise<string> {
     if (!rawDir) {
       try {
         const dirService = Cc[
-          "@mozilla.org/file/directory-service;1"
+          "@mozilla.org/file/directory_service;1"
         ].getService((Components.interfaces as any).nsIProperties);
         const profileFile = dirService.get(
           "ProfD",
@@ -549,7 +549,7 @@ function runProcess(
       // Temp files for stdout/stderr capture
       const tmpDir =
         (Zotero as any).getTempDirectory?.() ||
-        Cc["@mozilla.org/file/directory-service;1"]
+        Cc["@mozilla.org/file/directory_service;1"]
           .getService(Ci.nsProperties)
           .get("TmpD", Ci.nsIFile);
 
@@ -849,7 +849,7 @@ function writeTempFile(content: string, ext: string): string {
 
   const tmpDir =
     (Zotero as any).getTempDirectory?.() ||
-    Cc["@mozilla.org/file/directory-service;1"]
+    Cc["@mozilla.org/file/directory_service;1"]
       .getService(Ci.nsProperties)
       .get("TmpD", Ci.nsIFile);
 
@@ -875,7 +875,7 @@ function createTempDir(): string {
   const Ci = (Components as any).interfaces;
   const tmpDir =
     (Zotero as any).getTempDirectory?.() ||
-    Cc["@mozilla.org/file/directory-service;1"]
+    Cc["@mozilla.org/file/directory_service;1"]
       .getService(Ci.nsProperties)
       .get("TmpD", Ci.nsIFile);
 

@@ -84,6 +84,12 @@ export interface OpenAICompatClient {
 
 const RETRY_BACKOFF_MS = 500;
 
+/**
+ * Budget for the one escalated retry after an empty completion — see the
+ * comment at the retry site inside chat().
+ */
+const EMPTY_COMPLETION_RETRY_MAX_TOKENS = 16384;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -164,6 +170,22 @@ export function createOpenAICompatClient(
     const data = (await resp.json()) as any;
     const content = data?.choices?.[0]?.message?.content;
     if (!content || typeof content !== "string") {
+      // Reasoning-style models spend completion tokens on hidden thinking that
+      // scales with input size, so a request-shaped cap can be exhausted
+      // mid-thought with an empty visible answer even when the text itself is
+      // short (observed on StepFun step-3.7-flash with whole-paper batches at
+      // 4096). One escalated retry with a much larger budget recovers those;
+      // well-behaved models never hit this path, and the retry keeps the same
+      // request shape so gateways that reject exotic params are unaffected.
+      if (
+        request.maxTokens !== undefined &&
+        request.maxTokens < EMPTY_COMPLETION_RETRY_MAX_TOKENS
+      ) {
+        return chat({
+          ...request,
+          maxTokens: EMPTY_COMPLETION_RETRY_MAX_TOKENS,
+        });
+      }
       throw new Error(getString(emptyErrorKey));
     }
     return { content: content.trim(), usage: toUsage(data?.usage) };

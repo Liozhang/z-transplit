@@ -86,7 +86,7 @@ export function isLinux(): boolean {
 function windowsDir(): string {
   try {
     const dirSvc = (Components as any).classes[
-      "@mozilla.org/file/directory-service;1"
+      "@mozilla.org/file/directory_service;1"
     ].getService((Components as any).interfaces.nsIProperties);
     const winD = dirSvc.get("WinD", (Components as any).interfaces.nsIFile);
     if (winD?.path) return winD.path;

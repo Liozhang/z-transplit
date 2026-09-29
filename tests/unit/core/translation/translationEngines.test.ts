@@ -711,6 +711,23 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     );
   });
 
+  it("an empty completion from a reasoning-exhausted budget retries once at the escalated budget", async () => {
+    aiPrefs();
+    route("chat/completions", (call) => {
+      const body = JSON.parse(call.body);
+      if ((body.max_tokens ?? 0) < 16384) {
+        // Simulate a reasoning-style model that consumed the whole budget on
+        // hidden thinking and returned no visible content.
+        return jsonResponse({ choices: [{ message: { content: "" } }] });
+      }
+      return jsonResponse({ choices: [{ message: { content: "最终译文" } }] });
+    });
+    const t = createTranslator("zh-CN");
+    expect(await t("hello", "zh-CN")).toBe("最终译文");
+    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(2048);
+    expect(JSON.parse(h.fetchCalls[1].body).max_tokens).toBe(16384);
+  });
+
   it("an invalid stored template fails before any request, with the exact reason", async () => {
     aiPrefs({ "translate.ai.prompt": "translate this: {{txt}}" });
     const t = createTranslator("zh-CN");
