@@ -33,3 +33,9 @@ Desktop.ini
 
 # Scratch dirs (render previews, QA staging, etc.)
 .tmp*/
+
+# Prototype validation artifacts (large binaries; source & README only)
+prototype/region-text-remover/work/
+prototype/region-text-remover/build/
+prototype/region-text-remover/src-tmp/
+prototype/region-text-remover/lib/
