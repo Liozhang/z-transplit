@@ -88,7 +88,7 @@ const RETRY_BACKOFF_MS = 500;
  * Budget for the one escalated retry after an empty completion — see the
  * comment at the retry site inside chat().
  */
-const EMPTY_COMPLETION_RETRY_MAX_TOKENS = 16384;
+const EMPTY_COMPLETION_RETRY_MAX_TOKENS = 32768;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

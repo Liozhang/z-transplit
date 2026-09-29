@@ -105,6 +105,39 @@
           data-l10n-id="preferences-ztransplit-translate-max-chars-range"
         >请输入 100 到 50000 之间的整数。</description>
       </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          id="ztransplit-pref-batchtokens-label"
+          value="合并批量输入上限（token）"
+          control="ztransplit-pref-batchtokens"
+          data-l10n-id="preferences-ztransplit-translate-batch-tokens"
+        />
+        <html:input
+          id="ztransplit-pref-batchtokens"
+          class="ztransplit-number"
+          type="number"
+          min="1000"
+          max="65536"
+          step="512"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-batchtokens-label"
+          aria-describedby="ztransplit-pref-batchtokens-desc"
+        />
+      </hbox>
+      <vbox>
+        <description
+          id="ztransplit-pref-batchtokens-desc"
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-translate-batch-tokens-desc"
+        >全文翻译与双语对照会把多个段落合并成一次模型请求，这里限制合并后的输入规模（按估算 token 计），可填 1000–65536，默认 8192。下一段会超出预算时提前收批（该批少带一个段落），而不是超限发送。调大批次更少、上下文更足，但思考型模型的推理开销随批次增大，超配额返回空结果的风险也更高。</description>
+        <description
+          id="ztransplit-pref-batchtokens-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+          data-l10n-id="preferences-ztransplit-translate-batch-tokens-range"
+        >请输入 1000 到 65536 之间的整数。</description>
+      </vbox>
     </groupbox>
 
     <!-- ── (b) 翻译引擎 ─────────────────────────────────────────────────── -->

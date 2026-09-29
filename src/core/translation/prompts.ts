@@ -10,6 +10,7 @@
  */
 
 import type { BatchTranslateResult } from "./types";
+import { renderPrompt } from "./promptTemplate";
 
 /**
  * Build a system prompt that instructs the model to preserve `{vn}` formula
@@ -56,6 +57,38 @@ export function batchJsonPrompt(
     `3. Preserve EVERY formula in $...$ or $$...$$ EXACTLY as-is. Never translate or modify content inside dollar signs.\n` +
     `4. Preserve tokens like {v0}, {v1} verbatim.\n` +
     `5. Output ONLY valid JSON, no markdown, no explanations.`
+  );
+}
+
+/**
+ * Batch prompt for the "ai" engine: carries the user's own template into the
+ * batch envelope. The template is single-text ({'{{text}}'} is one passage),
+ * which is why the ai engine used to be excluded from batching entirely; here
+ * the template is rendered once with a symbolic text role and applied to every
+ * segment, so a custom prompt still governs each paragraph's translation.
+ * {vn} / $…$ protection carries over verbatim through the rendered template,
+ * and the structural rules (count/order/JSON-only) stay non-negotiable.
+ */
+export function batchJsonPromptFromTemplate(
+  template: string,
+  targetDesc: string,
+  sourceDesc: string,
+): string {
+  const perSegment = renderPrompt(template, {
+    text: "the value of the JSON array element being translated",
+    sourceLang: sourceDesc,
+    targetLang: targetDesc,
+  });
+  return (
+    `You are a professional translator working on a list of text segments.\n\n` +
+    `You will receive a JSON object: {"segments": ["text1", "text2", ...]}.\n` +
+    `Translate each segment and output a JSON object: {"translations": ["translation1", "translation2", ...]}.\n\n` +
+    `For EACH segment, apply this instruction — the segment takes the role of the text below:\n` +
+    `${perSegment}\n\n` +
+    `CRITICAL RULES:\n` +
+    `1. The output array MUST contain EXACTLY the same number of elements as the input, in the same order.\n` +
+    `2. Do NOT merge, split, add, skip, or reorder segments.\n` +
+    `3. Output ONLY valid JSON, no markdown, no explanations.`
   );
 }
 

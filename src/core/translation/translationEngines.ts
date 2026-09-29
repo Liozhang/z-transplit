@@ -47,7 +47,12 @@ import { toErrorMessage } from "../../utils/error";
 import { getString } from "../../utils/locale";
 import { abortSignalTimeout } from "../../utils/abort";
 import { getLanguageName } from "../tool/language";
-import { batchJsonPrompt, formulaPreservingPrompt, sanitizeTranslations } from "./prompts";
+import {
+  batchJsonPrompt,
+  batchJsonPromptFromTemplate,
+  formulaPreservingPrompt,
+  sanitizeTranslations,
+} from "./prompts";
 import {
   promptFingerprint,
   renderPrompt,
@@ -151,10 +156,31 @@ const AI_ENDPOINT_TIMEOUT_MS = 120000;
  * purely length-derived cap empties the budget mid-reasoning and returns no
  * content at all (observed on StepFun step-3.7-flash: a 37-char selection with
  * the length-derived cap came back finish_reason=length, content=""; 2048
- * returned the translation). 2048 matches the smallest budget observed to
- * clear reasoning and still leave room for the answer.
+ * returned the translation). 4096 leaves comfortable headroom for reasoning
+ * plus the answer even on longer selections.
  */
-const MODEL_OUTPUT_FLOOR_TOKENS = 2048;
+const MODEL_OUTPUT_FLOOR_TOKENS = 4096;
+
+/**
+ * Cap for the single-paragraph request budget (before the floor applies). The
+ * floor dominates for anything under ~4k chars; this only bounds very long
+ * single passages so a pathological paste can't request an unbounded budget.
+ */
+const SINGLE_OUTPUT_MAX_TOKENS = 8192;
+
+/**
+ * Default merged-batch INPUT cap (translate.batchMaxTokens) in estimated
+ * tokens — the pane's default and the fallback when the pref holds a
+ * non-positive/garbage value.
+ */
+const DEFAULT_BATCH_MAX_TOKENS = 8192;
+
+/**
+ * How many times a non-compliant batch result (HTTP error, empty content,
+ * JSON parse/schema failure, count mismatch) is retried before the chunk
+ * degrades to per-paragraph — 1 initial attempt + 3 retries.
+ */
+const MAX_BATCH_RETRIES = 3;
 
 async function httpPost(
   url: string,
@@ -594,7 +620,10 @@ async function translateWithAI(
           }),
         },
       ],
-      maxTokens: Math.max(MODEL_OUTPUT_FLOOR_TOKENS, Math.min(text.length * 2, 4000)),
+      maxTokens: Math.max(
+        MODEL_OUTPUT_FLOOR_TOKENS,
+        Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+      ),
       temperature: 0.3,
       timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
     });
@@ -639,7 +668,10 @@ async function translateWithCustom(
         },
         { role: "user", content: text },
       ],
-      maxTokens: Math.max(MODEL_OUTPUT_FLOOR_TOKENS, Math.min(text.length * 2, 4000)),
+      maxTokens: Math.max(
+        MODEL_OUTPUT_FLOOR_TOKENS,
+        Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+      ),
       temperature: 0.3,
     });
 
@@ -708,6 +740,14 @@ export interface EngineConfig {
   aiModel?: string;
   /** Raw prompt template ("" = built-in default). */
   aiPrompt?: string;
+  /**
+   * User-set cap on one merged batch's INPUT size, in estimated tokens
+   * (translate.batchMaxTokens; undefined = default). planTranslationChunks
+   * packs paragraphs up to this budget — a paragraph that would overflow
+   * starts the next batch, i.e. the overflowing batch ships one paragraph
+   * short rather than exceeding the cap.
+   */
+  batchMaxTokens?: number;
 }
 
 /**
@@ -738,6 +778,10 @@ export function getEngineConfig(): EngineConfig {
     // Same "empty = server default" contract as customModel above.
     aiModel: get("translate.ai.model") || "",
     aiPrompt: get("translate.ai.prompt") || "",
+    batchMaxTokens: (() => {
+      const raw = Number(get("translate.batchMaxTokens"));
+      return Number.isFinite(raw) && raw > 0 ? raw : undefined;
+    })(),
   };
 }
 
@@ -1026,14 +1070,18 @@ const BatchTranslationSchema = z.object({
 
 /**
  * Whether the currently configured engine benefits from batch translation.
- * Only the custom engine does — it packs paragraphs into one model call with
- * structured JSON output. Traditional MT APIs (Google/Bing/DeepL) are stateless
- * and accept single text, so per-paragraph dispatch stays appropriate for them.
- * The "ai" engine is per-paragraph too: its prompt is a single-text template,
- * so a batch envelope would have to bypass the user's template.
+ * The model-backed engines ("custom" and "ai") do: paragraphs are packed into
+ * one model call with structured JSON output, which gives the model
+ * cross-paragraph context and cuts call count ~25-50×. For "ai" the user's
+ * template is single-text, so the batch system prompt is derived FROM that
+ * template (see prompts.ts#batchJsonPromptFromTemplate) — each segment takes
+ * the template's {{text}} role. Traditional MT APIs (Google/Bing/DeepL) are
+ * stateless and accept single text, so per-paragraph dispatch stays
+ * appropriate for them.
  */
 export function supportsBatching(): boolean {
-  return getEngineConfig().engineType === "custom";
+  const t = getEngineConfig().engineType;
+  return t === "custom" || t === "ai";
 }
 
 /**
@@ -1043,7 +1091,11 @@ export function supportsBatching(): boolean {
  * to and refines the ratio from real usage via calibrateCharsPerToken.
  */
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
-const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+// Batch output cap. Reasoning models burn completion tokens on hidden thinking
+// that scales with the packed batch size, so this deliberately overshoots the
+// expected translation length — max_tokens is a ceiling, not a target, and
+// well-behaved models still stop at their own end-of-sequence.
+const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const SYSTEM_RESERVE_TOKENS = 600; // batch prompt + JSON wrapper overhead
 const SAFETY_MARGIN = 0.15; // 15% for estimation error + delimiter overhead
 
@@ -1176,9 +1228,10 @@ async function executeWithIdleTimeout<T>(
  * model call via structured JSON output.
  *
  * The returned translator NEVER throws — on any failure it degrades:
- *   1. chatJson with BatchTranslationSchema (response_format json_object,
- *      one built-in retry on parse/validation failure)
- *   2. chat + parseJsonFromMarkdown (manual JSON, one retry)
+ *   1. Structured batch pass (response_format json_object + zod schema)
+ *   2. Up to MAX_BATCH_RETRIES manual-parse retries of the same batch request
+ *      (no response_format — some gateways mishandle it; prose-wrapped JSON is
+ *      the next most common failure shape)
  *   3. Per-paragraph chat (the original single-paragraph path)
  *   4. Original text preserved (marked as failed)
  *
@@ -1194,14 +1247,22 @@ export async function createAIBatchTranslator(
   sourceLanguage?: string,
 ): Promise<BatchTranslatorHandle> {
   const cfg = getEngineConfig();
-  if (!cfg.customApiUrl) {
-    throw new Error(getString("translation-error-custom-url-missing"));
+  // Both model-backed engines share this batch path; they differ in where the
+  // credentials come from and whose wording drives the prompt.
+  const isAI = cfg.engineType === "ai";
+  const apiUrl = isAI ? cfg.aiApiUrl : cfg.customApiUrl;
+  const apiKey = isAI ? cfg.aiApiKey : cfg.customApiKey;
+  const model = isAI ? cfg.aiModel : cfg.customModel;
+  if (!apiUrl) {
+    throw new Error(
+      getString(isAI ? "translation-error-ai-url-missing" : "translation-error-custom-url-missing"),
+    );
   }
 
   const client = createOpenAICompatClient({
-    apiUrl: cfg.customApiUrl,
-    apiKey: cfg.customApiKey,
-    defaultModel: cfg.customModel,
+    apiUrl,
+    apiKey,
+    defaultModel: model,
   });
 
   // ── Language descriptors ──
@@ -1210,9 +1271,23 @@ export async function createAIBatchTranslator(
     ? getLanguageName(sourceLanguage)
     : "auto-detect";
 
+  // ── Prompts ──
+  // "custom" keeps its fixed batch wording; "ai" derives the batch prompt from
+  // the user's own template so a custom prompt still governs every segment
+  // (rendered once with a symbolic {{text}} role — see prompts.ts).
+  const template = resolvePromptTemplate(cfg.aiPrompt);
+  const prompt = isAI
+    ? batchJsonPromptFromTemplate(template, targetDesc, sourceDesc)
+    : batchJsonPrompt(targetDesc, sourceDesc);
+  const singlePrompt = formulaPreservingPrompt(targetDesc, sourceDesc);
+
   // ── Token budgets ──
   // Two hard constraints: contextWindow (input + output must fit) and
   // maxOutputTokens (output cap). Output is usually the tighter bottleneck.
+  // The user-set translate.batchMaxTokens caps one merged batch's INPUT —
+  // planTranslationChunks closes a batch before the paragraph that would
+  // overflow it, so an over-budget batch ships one paragraph short. The
+  // context-window remainder is a ceiling the pref can only lower.
   // `||` (not `??`) on both: a 0 return means "unknown", not "zero".
   const contextWindow = DEFAULT_CONTEXT_WINDOW_TOKENS;
   const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
@@ -1224,103 +1299,115 @@ export async function createAIBatchTranslator(
   );
   const inputBudgetTokens = Math.max(
     1000,
-    contextWindow - SYSTEM_RESERVE_TOKENS - maxOutput,
+    Math.min(
+      contextWindow - SYSTEM_RESERVE_TOKENS - maxOutput,
+      Math.floor(cfg.batchMaxTokens || DEFAULT_BATCH_MAX_TOKENS),
+    ),
   );
   const inputBudgetChars = Math.max(
     1000,
     Math.floor(inputBudgetTokens * charsPerToken),
   );
 
-  const prompt = batchJsonPrompt(targetDesc, sourceDesc);
-  const singlePrompt = formulaPreservingPrompt(targetDesc, sourceDesc);
-
   // ── Timeouts ──
   // chatJson is a single non-streaming round trip → generous total timeout.
   // chat() likewise returns once, so the idle budget acts as a total timeout.
-  const TOTAL_TIMEOUT_BATCH_MS = 180000; // 3 min
+  // The totals assume a reasoning model on a full batch (16384-token ceiling):
+  // minutes, not seconds — an idle-based guard covers the hung-connection case.
+  const TOTAL_TIMEOUT_BATCH_MS = 300000; // 5 min
   const IDLE_TIMEOUT_BATCH_MS = 120000; // 2 min for batch calls
   const IDLE_TIMEOUT_SINGLE_MS = 60000; // 1 min for single-paragraph
 
-  // ── Batch translator (multi-level fallback; throws CANCELLED on abort) ──
+  // ── Batch translator (batch-first with bounded retries; throws CANCELLED
+  //    on abort) ──
   const translate: BatchTranslator = async (
     texts: string[],
     signal?: AbortSignal,
   ): Promise<BatchTranslateResult> => {
     const inputJson = JSON.stringify({ segments: texts });
 
-    // Level 1: chatJson with structured output + schema validation. Non-streaming
-    // → no idleness detection → generous total timeout. chatJson already retries
-    // once internally on parse/validation failure, so one call here keeps the
-    // total at two attempts (leadero's outer 2-attempt generateObject loop).
-    if (signal?.aborted) throw new Error(CANCELLED);
-    try {
-      const result = await raceAbort(
-        client.chatJson(
-          {
-            messages: [
-              { role: "system", content: prompt },
-              { role: "user", content: inputJson },
-            ],
-            maxTokens: maxOutput,
-            temperature: 0.1,
-            signal,
-          },
-          BatchTranslationSchema,
-        ),
-        signal,
-        TOTAL_TIMEOUT_BATCH_MS,
-      );
-      if (result.usage?.promptTokens) {
-        calibrateCharsPerToken(inputJson.length, result.usage.promptTokens);
-      }
-      const out = result.data.translations;
-      if (out.length === texts.length) {
-        return sanitizeTranslations(out, texts);
-      }
-      // Count mismatch — fall through to level 2.
-    } catch (e) {
-      if (isCancelled(e)) throw e;
-      // chatJson threw (parse/validation failure / HTTP / timeout) — level 2.
-    }
-
-    // Level 2: chat + manual JSON parse. Same shape contract, no
-    // response_format — some gateways 400 on it.
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Batch phase — up to 1 + MAX_BATCH_RETRIES attempts on the SAME chunk.
+    // A non-compliant result (HTTP error, empty content, JSON parse/schema
+    // failure, or a count mismatch) is retried rather than falling straight
+    // through to per-paragraph: reasoning-style models occasionally mangle the
+    // JSON envelope on a first pass but recover cleanly on a second. Attempt 1
+    // asks for structured output; the retries drop response_format and parse
+    // manually — some gateways 400 on (or behave worse with) response_format,
+    // and prose-wrapped JSON is the next most common failure shape.
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= MAX_BATCH_RETRIES; attempt++) {
       if (signal?.aborted) throw new Error(CANCELLED);
       try {
-        const result = await executeWithIdleTimeout(
-          () =>
-            client.chat({
-              messages: [
-                { role: "system", content: prompt },
-                { role: "user", content: inputJson },
-              ],
-              maxTokens: maxOutput,
-              temperature: 0.1,
-              signal,
-            }),
-          IDLE_TIMEOUT_BATCH_MS,
-          signal,
-        );
-        if (result.usage?.promptTokens) {
-          calibrateCharsPerToken(inputJson.length, result.usage.promptTokens);
-        }
-        const parsed = parseJsonFromMarkdown(result.content);
-        const arr = Array.isArray(parsed) ? parsed : parsed?.translations;
-        if (Array.isArray(arr) && arr.length === texts.length) {
-          const translations = arr.map((x: any) =>
-            typeof x === "string" ? x : (x?.translation ?? x?.text ?? ""),
+        if (attempt === 0) {
+          // Structured pass: chatJson validates against the zod schema.
+          // Non-streaming → generous total timeout via raceAbort.
+          const result = await raceAbort(
+            client.chatJson(
+              {
+                messages: [
+                  { role: "system", content: prompt },
+                  { role: "user", content: inputJson },
+                ],
+                maxTokens: maxOutput,
+                temperature: 0.1,
+                signal,
+              },
+              BatchTranslationSchema,
+            ),
+            signal,
+            TOTAL_TIMEOUT_BATCH_MS,
           );
-          return sanitizeTranslations(translations, texts);
+          if (result.usage?.promptTokens) {
+            calibrateCharsPerToken(inputJson.length, result.usage.promptTokens);
+          }
+          const out = result.data.translations;
+          if (out.length === texts.length) {
+            return sanitizeTranslations(out, texts);
+          }
+          // Count mismatch — non-compliant, retry.
+          lastError = new Error(
+            `batch count mismatch: ${out.length} of ${texts.length}`,
+          );
+        } else {
+          // Manual pass: same shape contract, no response_format.
+          const result = await executeWithIdleTimeout(
+            () =>
+              client.chat({
+                messages: [
+                  { role: "system", content: prompt },
+                  { role: "user", content: inputJson },
+                ],
+                maxTokens: maxOutput,
+                temperature: 0.1,
+                signal,
+              }),
+            IDLE_TIMEOUT_BATCH_MS,
+            signal,
+          );
+          if (result.usage?.promptTokens) {
+            calibrateCharsPerToken(inputJson.length, result.usage.promptTokens);
+          }
+          const parsed = parseJsonFromMarkdown(result.content);
+          const arr = Array.isArray(parsed) ? parsed : parsed?.translations;
+          if (Array.isArray(arr) && arr.length === texts.length) {
+            const translations = arr.map((x: any) =>
+              typeof x === "string" ? x : (x?.translation ?? x?.text ?? ""),
+            );
+            return sanitizeTranslations(translations, texts);
+          }
+          // Non-compliant — retry.
+          lastError = new Error("batch JSON non-compliant after manual parse");
         }
       } catch (e) {
         if (isCancelled(e)) throw e;
-        // timeout or error — retry
+        lastError = e;
       }
-      if (attempt === 0) await backoff();
+      if (attempt < MAX_BATCH_RETRIES) await backoff();
     }
 
-    // Level 3: per-paragraph fallback with the single-paragraph prompt.
+    // Per-paragraph last resort: the batch contract never came back compliant
+    // within the retry budget. Each paragraph ships on its own (original text
+    // preserved + flagged on failure), so the chunk still completes.
     const translations: string[] = [];
     const failedIndices: number[] = [];
     for (let i = 0; i < texts.length; i++) {
@@ -1328,18 +1415,39 @@ export async function createAIBatchTranslator(
       try {
         const result = await executeWithIdleTimeout(
           () =>
-            client.chat({
-              messages: [
-                { role: "system", content: singlePrompt },
-                { role: "user", content: texts[i] },
-              ],
-              maxTokens: Math.max(
-                MODEL_OUTPUT_FLOOR_TOKENS,
-                Math.min(texts[i].length * 2, 4000),
-              ),
-              temperature: 0.1,
-              signal,
-            }),
+            isAI
+              ? client.chat({
+                  // The user's template governs the fallback too: the rendered
+                  // template IS the request, same as the single-paragraph path.
+                  messages: [
+                    {
+                      role: "user",
+                      content: renderPrompt(template, {
+                        text: texts[i],
+                        sourceLang: sourceDesc,
+                        targetLang: targetDesc,
+                      }),
+                    },
+                  ],
+                  maxTokens: Math.max(
+                    MODEL_OUTPUT_FLOOR_TOKENS,
+                    Math.min(texts[i].length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+                  ),
+                  temperature: 0.1,
+                  signal,
+                })
+              : client.chat({
+                  messages: [
+                    { role: "system", content: singlePrompt },
+                    { role: "user", content: texts[i] },
+                  ],
+                  maxTokens: Math.max(
+                    MODEL_OUTPUT_FLOOR_TOKENS,
+                    Math.min(texts[i].length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+                  ),
+                  temperature: 0.1,
+                  signal,
+                }),
           IDLE_TIMEOUT_SINGLE_MS,
           signal,
         );

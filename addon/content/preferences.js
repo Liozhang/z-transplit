@@ -27,6 +27,11 @@
   var MAX_CHARS_MAX = 50000;
   var MAX_CHARS_DEFAULT = 10000;
 
+  // 与 addon/prefs.js 的 translate.batchMaxTokens 默认值对齐。
+  var BATCH_TOKENS_MIN = 1000;
+  var BATCH_TOKENS_MAX = 65536;
+  var BATCH_TOKENS_DEFAULT = 8192;
+
   /**
    * 字体覆盖目录。与 src/core/pdf/translation/opendataloaderSplitAdapter.ts
    * #translationAssetsDir 保持一字不差：代码读的是 {DataDir}/ztransplit/…，
@@ -145,6 +150,64 @@
     // 不会改写设置”），越界值也不得被夹紧后覆盖设置。
     els.maxCharsInput.value = String(readMaxChars());
     setMaxCharsError(false);
+  }
+
+  // ── batchMaxTokens（合并批量输入上限）────────────────────────────────────
+  // 与 maxChars 同一套路：INT pref 不写半成品值，读 pref → 校验 → 写 pref。
+
+  function readBatchTokens() {
+    var raw = getPref("translate.batchMaxTokens");
+    var n = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+    if (!isFinite(n) || isNaN(n)) return BATCH_TOKENS_DEFAULT;
+    return Math.min(BATCH_TOKENS_MAX, Math.max(BATCH_TOKENS_MIN, Math.round(n)));
+  }
+
+  function setBatchTokensError(visible) {
+    show(els.batchTokensError, visible);
+    if (els.batchTokensInput) {
+      try {
+        if (visible) els.batchTokensInput.setAttribute("aria-invalid", "true");
+        else els.batchTokensInput.removeAttribute("aria-invalid");
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  /** 解析输入框内容；合法返回整数，否则返回 null。 */
+  function parseBatchTokens(raw) {
+    if (raw === null || raw === undefined) return null;
+    var text = String(raw).trim();
+    if (text === "") return null;
+    if (!/^\d+$/.test(text)) return null;
+    var n = parseInt(text, 10);
+    if (!isFinite(n)) return null;
+    if (n < BATCH_TOKENS_MIN || n > BATCH_TOKENS_MAX) return null;
+    return n;
+  }
+
+  function onBatchTokensInput() {
+    if (!els.batchTokensInput) return;
+    var n = parseBatchTokens(els.batchTokensInput.value);
+    if (n === null) {
+      setBatchTokensError(true);
+      return;
+    }
+    setBatchTokensError(false);
+    setPref("translate.batchMaxTokens", n);
+  }
+
+  function onBatchTokensChange() {
+    if (!els.batchTokensInput) return;
+    var n = parseBatchTokens(els.batchTokensInput.value);
+    if (n !== null) {
+      setBatchTokensError(false);
+      setPref("translate.batchMaxTokens", n);
+      return;
+    }
+    // 与 maxChars 同一策略：非法值一律恢复为当前 pref 值且不写 pref。
+    els.batchTokensInput.value = String(readBatchTokens());
+    setBatchTokensError(false);
   }
 
   // ── AI prompt 模板 ────────────────────────────────────────────────────────
@@ -447,6 +510,8 @@
   function cacheElements() {
     els.maxCharsInput = $("ztransplit-pref-maxchars");
     els.maxCharsError = $("ztransplit-pref-maxchars-error");
+    els.batchTokensInput = $("ztransplit-pref-batchtokens");
+    els.batchTokensError = $("ztransplit-pref-batchtokens-error");
     els.timeoutInput = $("ztransplit-pref-odl-timeout");
     els.timeoutError = $("ztransplit-pref-odl-timeout-error");
     els.engineList = $("ztransplit-pref-engine-type");
@@ -474,6 +539,10 @@
       els.maxCharsInput.addEventListener("input", onMaxCharsInput);
       // change 在失焦/回车时触发：合法值写 pref，非法值恢复为当前 pref 值。
       els.maxCharsInput.addEventListener("change", onMaxCharsChange);
+    }
+    if (els.batchTokensInput) {
+      els.batchTokensInput.addEventListener("input", onBatchTokensInput);
+      els.batchTokensInput.addEventListener("change", onBatchTokensChange);
     }
     if (els.timeoutInput) {
       els.timeoutInput.addEventListener("input", onTimeoutInput);
@@ -505,6 +574,12 @@
         els.maxCharsInput.value = String(readMaxChars());
       }
       setMaxCharsError(false);
+
+      if (els.batchTokensInput) {
+        // 同 maxChars：INT pref 由本脚本读 pref、校验后再写。
+        els.batchTokensInput.value = String(readBatchTokens());
+      }
+      setBatchTokensError(false);
 
       if (els.timeoutInput) {
         // 同上：pdfParser.opendataloader.timeout 也是 INT pref。

@@ -29,6 +29,11 @@ pref("extensions.zotero.ztransplit.translate.auto", false);
 // Upper bound of characters sent to the engine per request.
 pref("extensions.zotero.ztransplit.translate.maxChars", 10000);
 
+// 合并批量的输入上限（估算 token）。全文翻译与双语对照把多个段落合并成一次
+// 模型请求，planTranslationChunks 按这个预算打包：下一段会超出预算时提前
+// 收批（该批少带一个段落），而不是超限发送。
+pref("extensions.zotero.ztransplit.translate.batchMaxTokens", 8192);
+
 // Engine selection + per-engine credentials. Defaults mirror the values the
 // translate pipeline is expected to read (single source of truth: this file).
 pref("extensions.zotero.ztransplit.translate.engineType", "google");

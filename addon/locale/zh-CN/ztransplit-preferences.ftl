@@ -52,6 +52,15 @@ preferences-ztransplit-translate-max-chars-desc =
     合法值，不会改写设置。
 preferences-ztransplit-translate-max-chars-range = 请输入 100 到 50000 之间的整数。
 
+preferences-ztransplit-translate-batch-tokens =
+    .value = 合并批量输入上限（token）
+preferences-ztransplit-translate-batch-tokens-desc =
+    全文翻译与双语对照会把多个段落合并成一次模型请求，这里限制合并后的输入
+    规模（按估算 token 计），可填 1000–65536，默认 8192。下一段会超出预算时
+    提前收批（该批少带一个段落），而不是超限发送。调大批次更少、上下文更足，
+    但思考型模型的推理开销随批次增大，超配额返回空结果的风险也更高。
+preferences-ztransplit-translate-batch-tokens-range = 请输入 1000 到 65536 之间的整数。
+
 ## ── 翻译引擎 ───────────────────────────────────────────────────────────────
 preferences-ztransplit-engine-type =
     .value = 引擎
@@ -191,9 +200,11 @@ preferences-ztransplit-pdf-java-desc =
 preferences-ztransplit-pdf-fonts-title =
     .value = 字体覆盖目录
 preferences-ztransplit-pdf-fonts-desc =
-    把自定义字体文件（.ttf / .otf / .ttc）放进下面的目录，即可覆盖 PDF 翻译
-    使用的默认字体，用来改善中文等非拉丁文字的显示效果。目录不存在时会自动
-    创建，放入的字体在下次翻译时生效。
+    把自定义字体文件放进下面的目录即可覆盖 PDF 翻译使用的默认字体：常规字体
+    命名为 translated-regular.ttf，粗体、斜体、粗斜体分别命名为
+    translated-bold.ttf、translated-italic.ttf、translated-bold-italic.ttf
+    （.otf / .ttc 同样接受）。想匹配论文的衬线风格可放入思源宋体。
+    目录不存在时会自动创建，放入的字体在下次翻译时生效。
 preferences-ztransplit-pdf-fonts-path =
     .value = 字体目录
 

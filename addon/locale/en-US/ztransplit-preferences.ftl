@@ -59,6 +59,18 @@ preferences-ztransplit-translate-max-chars-desc =
     the previous valid value; the setting is not overwritten.
 preferences-ztransplit-translate-max-chars-range = Enter an integer between 100 and 50000.
 
+preferences-ztransplit-translate-batch-tokens =
+    .value = Merged batch input cap (tokens)
+preferences-ztransplit-translate-batch-tokens-desc =
+    Full-text translation and bilingual interleave merge several paragraphs
+    into one model request; this caps the merged input size in estimated
+    tokens, 1000–65536, default 8192. When the next paragraph would exceed the
+    budget the batch closes early (one paragraph short) instead of sending an
+    over-budget request. Larger batches mean fewer calls and richer context,
+    but a reasoning model's thinking overhead grows with batch size, and so
+    does the risk of an empty answer from an exhausted output budget.
+preferences-ztransplit-translate-batch-tokens-range = Enter an integer between 1000 and 65536.
+
 ## ── Translation engines ────────────────────────────────────────────────────
 preferences-ztransplit-engine-type =
     .value = Engine
@@ -215,11 +227,13 @@ preferences-ztransplit-pdf-java-desc =
 preferences-ztransplit-pdf-fonts-title =
     .value = Font override directory
 preferences-ztransplit-pdf-fonts-desc =
-    Put custom font files (.ttf / .otf / .ttc) into the directory below to
-    override the default fonts used by PDF translation, e.g. to improve the
-    rendering of Chinese and other non-Latin text. The directory is created
-    automatically when missing; fonts placed there take effect on the next
-    translation.
+    Put custom font files into the directory below to override the default
+    fonts used by PDF translation: name the regular face translated-regular.ttf,
+    and the bold / italic / bold-italic faces translated-bold.ttf,
+    translated-italic.ttf, translated-bold-italic.ttf (.otf / .ttc work too).
+    Noto Serif SC matches the serif look of most papers. The directory is
+    created automatically when missing; fonts placed there take effect on the
+    next translation.
 preferences-ztransplit-pdf-fonts-path =
     .value = Font directory
 

@@ -262,7 +262,7 @@ describe("engine wire contracts", () => {
     expect(call.headers.Authorization).toBe("Bearer ck-1");
     const body = JSON.parse(call.body);
     expect(body.model).toBe("llama3");
-    expect(body.max_tokens).toBe(2048); // reasoning floor > min(len*2, 4000)
+    expect(body.max_tokens).toBe(4096); // reasoning floor > min(len*2, 8192)
     expect(body.temperature).toBe(0.3);
     expect(body.messages[0].role).toBe("system");
     // formula-preserving prompt (the ex-"ai" engine's contract, now on custom)
@@ -494,10 +494,10 @@ describe("custom engine (OpenAI-compatible)", () => {
     );
 
     const handle = await createAIBatchTranslator("zh-CN", "en-US");
-    // 128000 context − 600 system reserve − 4096 output = 123304 tokens × 2.5
-    // chars/token; 4096 × 0.85 × 2.5 (before any usage calibration).
-    expect(handle.inputBudgetChars).toBe(308260);
-    expect(handle.outputBudgetChars).toBe(8702);
+    // INPUT: min(128000 − 600 − 16384, batchMaxTokens 8192) = 8192 tokens × 2.5
+    // chars/token. OUTPUT: 16384 × 0.85 × 2.5 (before any usage calibration).
+    expect(handle.inputBudgetChars).toBe(20480);
+    expect(handle.outputBudgetChars).toBe(34815);
 
     const result = await handle.translate(["x", "y"]);
     expect(result).toEqual({ translations: ["a", "b"], failedIndices: [] });
@@ -569,8 +569,8 @@ describe("custom engine (OpenAI-compatible)", () => {
       translations: ["x", "y"],
       failedIndices: [0, 1],
     });
-    // 2 (chatJson attempts) + 2 (chat attempts) + 2 (per-paragraph)
-    expect(h.fetchCalls).toHaveLength(6);
+    // 2 (chatJson with its built-in retry) + 3 (manual retries) + 2 (per-paragraph)
+    expect(h.fetchCalls).toHaveLength(7);
     // Per-paragraph level uses the single-paragraph formula prompt.
     const last = JSON.parse(h.fetchCalls[h.fetchCalls.length - 1].body);
     expect(last.messages[0].content).toContain("{v0}");
@@ -595,6 +595,53 @@ describe("custom engine (OpenAI-compatible)", () => {
     await expect(createAIBatchTranslator("zh-CN")).rejects.toThrow(
       "translation-error-custom-url-missing",
     );
+  });
+
+  it("batch: a persistent count mismatch retries 3 times before degrading to per-paragraph", async () => {
+    customPrefs();
+    route("chat/completions", (call) => {
+      const body = JSON.parse(call.body);
+      const isBatch = String(body.messages?.[1]?.content || "").startsWith(
+        '{"segments"',
+      );
+      if (isBatch) {
+        // Valid JSON, wrong count — non-compliant, never usable.
+        return jsonResponse({
+          choices: [{ message: { content: '{"translations":["only-one"]}' } }],
+        });
+      }
+      // Per-paragraph fallback calls return empty → original preserved.
+      return jsonResponse({ choices: [{ message: { content: "" } }] });
+    });
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["x", "y"]);
+    expect(result).toEqual({
+      translations: ["x", "y"],
+      failedIndices: [0, 1],
+    });
+    // 1 structured attempt + 3 manual retries + 2 per-paragraph paragraphs,
+    // each of which retries once at the escalated budget on its empty answer
+    // (4 + 2×2 = 8).
+    expect(h.fetchCalls).toHaveLength(8);
+    // Attempt 1 asks for structured output; the three retries do not.
+    expect(JSON.parse(h.fetchCalls[0].body).response_format).toEqual({
+      type: "json_object",
+    });
+    expect(JSON.parse(h.fetchCalls[1].body).response_format).toBeUndefined();
+    expect(JSON.parse(h.fetchCalls[3].body).response_format).toBeUndefined();
+  });
+
+  it("translate.batchMaxTokens caps the merged batch input budget", async () => {
+    customPrefs({ "translate.batchMaxTokens": 2000 });
+    route("chat/completions", () =>
+      jsonResponse({
+        choices: [{ message: { content: '{"translations":["a"]}' } }],
+      }),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    expect(handle.inputBudgetChars).toBe(5000); // 2000 tokens × 2.5 chars/token
   });
 });
 
@@ -678,18 +725,18 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     expect(call.headers.Authorization).toBe("Bearer ak-1");
     const body = JSON.parse(call.body);
     expect(body.model).toBe("qwen-max");
-    expect(body.max_tokens).toBe(2048); // reasoning floor > min(len*2, 4000)
+    expect(body.max_tokens).toBe(4096); // reasoning floor > min(len*2, 8192)
     expect(body.temperature).toBe(0.3);
     expect(call.signal).toBeDefined();
   });
 
-  it("a long selection caps the output budget at 4000 above the reasoning floor", async () => {
+  it("a long selection caps the output budget at 8192 above the reasoning floor", async () => {
     aiPrefs();
     aiRoute();
     const t = createTranslator("zh-CN");
     await t("word ".repeat(1000).trim(), "zh-CN"); // 5000 chars
     const body = JSON.parse(h.fetchCalls[0].body);
-    expect(body.max_tokens).toBe(4000); // max(2048, min(len*2, 4000))
+    expect(body.max_tokens).toBe(8192); // max(4096, min(len*2, 8192))
   });
 
   it("no key configured: no Authorization header is sent", async () => {
@@ -715,7 +762,7 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     aiPrefs();
     route("chat/completions", (call) => {
       const body = JSON.parse(call.body);
-      if ((body.max_tokens ?? 0) < 16384) {
+      if ((body.max_tokens ?? 0) < 32768) {
         // Simulate a reasoning-style model that consumed the whole budget on
         // hidden thinking and returned no visible content.
         return jsonResponse({ choices: [{ message: { content: "" } }] });
@@ -724,8 +771,8 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     });
     const t = createTranslator("zh-CN");
     expect(await t("hello", "zh-CN")).toBe("最终译文");
-    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(2048);
-    expect(JSON.parse(h.fetchCalls[1].body).max_tokens).toBe(16384);
+    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(4096);
+    expect(JSON.parse(h.fetchCalls[1].body).max_tokens).toBe(32768);
   });
 
   it("an invalid stored template fails before any request, with the exact reason", async () => {
@@ -746,9 +793,60 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     expect(h.fetchCalls).toHaveLength(0);
   });
 
-  it("supportsBatching stays false — the ai engine translates per paragraph", () => {
+  it("supportsBatching covers both model-backed engines, not the MT ones", () => {
     aiPrefs();
+    expect(supportsBatching()).toBe(true);
+    setPrefs({ "translate.engineType": "custom" });
+    expect(supportsBatching()).toBe(true);
+    setPrefs({ "translate.engineType": "google" });
     expect(supportsBatching()).toBe(false);
+  });
+
+  it("ai engine batches through its own endpoint with a template-derived prompt", async () => {
+    aiPrefs();
+    route("chat/completions", () =>
+      jsonResponse({
+        choices: [{ message: { content: '{"translations":["甲","乙"]}' } }],
+      }),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["x", "y"]);
+    expect(result).toEqual({ translations: ["甲", "乙"], failedIndices: [] });
+
+    const call = h.fetchCalls[0];
+    expect(call.url).toBe("https://gw.example/v1/chat/completions");
+    expect(call.headers.Authorization).toBe("Bearer ak-1");
+    const body = JSON.parse(call.body);
+    expect(body.model).toBe("qwen-max");
+    // The batch system prompt is derived from the user's template: the
+    // template's rendered opening and the language substitution both show up.
+    expect(body.messages[0].content).toContain(
+      "Translate the following text from English to Simplified Chinese",
+    );
+    expect(body.messages[0].content).toContain('{"segments"');
+    expect(body.messages[1]).toEqual({
+      role: "user",
+      content: '{"segments":["x","y"]}',
+    });
+  });
+
+  it("ai engine batch fallback renders the user template per paragraph", async () => {
+    aiPrefs();
+    route("chat/completions", () =>
+      jsonResponse({ error: "boom" }, false, 500, "Internal Server Error"),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["x"]);
+    expect(result).toEqual({ translations: ["x"], failedIndices: [0] });
+    // Last call: the per-paragraph fallback carrying the rendered template.
+    const last = JSON.parse(h.fetchCalls[h.fetchCalls.length - 1].body);
+    expect(last.messages[0].role).toBe("user");
+    expect(last.messages[0].content).toContain("x");
+    expect(last.messages[0].content).toContain(
+      "from English to Simplified Chinese",
+    );
   });
 
   it("HTTP failures surface with status and body", async () => {
