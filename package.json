@@ -1,7 +1,7 @@
 {
   "name": "z-transplit",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Zotero 7 plugin: text translation and layout-preserving PDF translation with split-screen reading.",
   "config": {
     "addonName": "Z-Transplit",
@@ -12,10 +12,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/example/z-transplit.git"
+    "url": "git+https://github.com/Liozhang/z-transplit.git"
   },
   "author": "z-transplit contributors",
-  "homepage": "https://github.com/example/z-transplit#readme",
+  "homepage": "https://github.com/Liozhang/z-transplit#readme",
   "license": "MIT",
   "scripts": {
     "dev": "zotero-plugin serve",

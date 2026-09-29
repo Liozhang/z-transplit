@@ -17,6 +17,9 @@ dist/
 coverage/
 *.log
 
+# Local QA profile (real-device testing)
+zt-qa/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

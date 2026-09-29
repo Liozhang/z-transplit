@@ -25,10 +25,6 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 2. Zotero ▸ 工具 ▸ 附加组件（插件）▸ 右上角齿轮 ▸ 从文件安装附加组件，选择下载的 xpi；
 3. 打开一篇 PDF，右侧「翻译」面板与右键菜单即出现。
 
-> 发布前需把 `package.json` 的 `repository` / `homepage` 和 `zotero-plugin.config.ts` 的
-> `updateURL` / `xpiDownloadLink` 从 `example.com` 占位改为真实仓库地址，否则自动升级
-> 与下载链接不可用。
-
 ## 功能
 
 ### 1. 划词翻译

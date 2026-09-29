@@ -29,11 +29,6 @@ All UI is built with Zotero's native XUL/HTML. No React, no iframe bridge.
    downloaded xpi;
 3. Open a PDF — the "Translate" section and the context-menu entries appear.
 
-> Before publishing, replace the `example.com` placeholders in `package.json`
-> (`repository`, `homepage`) and `zotero-plugin.config.ts` (`updateURL`,
-> `xpiDownloadLink`) with the real repository URL, or auto-update and the download
-> link will not work.
-
 ## Features
 
 ### 1. Selection Translation
