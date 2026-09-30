@@ -29,6 +29,15 @@ pref("extensions.zotero.ztransplit.translate.auto", false);
 // Upper bound of characters sent to the engine per request.
 pref("extensions.zotero.ztransplit.translate.maxChars", 10000);
 
+// 网络区域声明（src/utils/region.ts）：auto = 未声明（沿用出厂默认，不做任何
+// 推断）| global | cn。声明后在设置面板套用该区域的推荐值（只覆盖仍为出厂
+// 默认的键，用户显式选过的引擎不被推翻）。
+pref("extensions.zotero.ztransplit.region", "auto");
+
+// 偏好结构版本号（src/utils/prefMigrations.ts）：记录已执行的最新迁移步骤。
+// 出厂 0，首次启动由迁移机制写入已完成步骤号；之后每次追加迁移时随之递增。
+pref("extensions.zotero.ztransplit.prefSchemaVersion", 0);
+
 // 合并批量的输入上限（估算 token）。全文翻译与双语对照把多个段落合并成一次
 // 模型请求，planTranslationChunks 按这个预算打包：下一段会超出预算时提前
 // 收批（该批少带一个段落），而不是超限发送。

@@ -79,10 +79,35 @@ preferences-ztransplit-engine-type-desc =
     credentials entered for the other engines, so you can switch back at any
     time; only the currently selected engine is used.
 
+## ── Network region ─────────────────────────────────────────────────────────
+preferences-ztransplit-region =
+    .value = Network region
+preferences-ztransplit-region-auto =
+    .label = Automatic (undeclared)
+preferences-ztransplit-region-global =
+    .label = Global
+preferences-ztransplit-region-cn =
+    .label = Mainland China
+preferences-ztransplit-region-desc =
+    Declare your network environment and the plugin writes that region's
+    recommended values into settings still at their factory defaults (for
+    example, mainland China defaults to the keyless Bing web engine). Engines
+    you picked explicitly are never overridden by the region choice; keeping
+    "Automatic" changes nothing.
+preferences-ztransplit-region-note-applied =
+    Recommendations applied for the selected region: settings still at their
+    factory defaults were rewritten; engines you picked explicitly were left
+    untouched.
+preferences-ztransplit-region-note-nochange =
+    Nothing changed: the relevant settings already match the selected region's
+    recommendations, or you customized them.
+
 preferences-ztransplit-engine-google =
     .label = Google Translate
 preferences-ztransplit-engine-bing =
     .label = Bing Translator
+preferences-ztransplit-engine-bingweb =
+    .label = Bing web (keyless)
 preferences-ztransplit-engine-deepl =
     .label = DeepL
 preferences-ztransplit-engine-ai =
@@ -122,6 +147,14 @@ preferences-ztransplit-bing-region-desc =
     Optional. Multi-region resources (e.g. chinaeast2) must match the region
     you signed up with; global resources just use "global". A wrong value
     returns an authentication error.
+
+## Bing web translation (keyless)
+preferences-ztransplit-engine-bingweb-desc =
+    Keyless and configuration-free. Uses the Bing Translator web endpoint — the
+    only engine reachable in mainland China without a key. A good pick when you
+    know Google is blocked and don't want to pay its timeout on every
+    paragraph. The session token refreshes automatically and a failed request
+    is retried once.
 
 ## DeepL
 preferences-ztransplit-deepl-api-key =
@@ -236,6 +269,10 @@ preferences-ztransplit-pdf-fonts-desc =
     next translation.
 preferences-ztransplit-pdf-fonts-path =
     .value = Font directory
+
+# Fallback label for the font directory when the data directory is unknown
+# (braces escaped per Fluent syntax)
+preferences-ztransplit-data-dir-placeholder = {"{"}Data directory{"}"}
 
 preferences-ztransplit-pdf-lang-title =
     .value = Translation language

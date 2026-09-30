@@ -166,6 +166,60 @@
         >翻译引擎</html:h2>
       </label>
 
+      <!-- 网络区域：声明后套用该区域的推荐值（只覆盖仍为出厂默认的键） -->
+      <hbox class="ztransplit-row" align="center">
+        <label
+          value="网络区域"
+          control="ztransplit-pref-region"
+          data-l10n-id="preferences-ztransplit-region"
+        />
+        <menulist
+          id="ztransplit-pref-region"
+          native="true"
+          preference="extensions.zotero.ztransplit.region"
+        >
+          <menupopup id="ztransplit-pref-region-popup">
+            <menuitem
+              value="auto"
+              label="自动（不声明）"
+              data-l10n-id="preferences-ztransplit-region-auto"
+            />
+            <menuitem
+              value="global"
+              label="全球"
+              data-l10n-id="preferences-ztransplit-region-global"
+            />
+            <menuitem
+              value="cn"
+              label="中国大陆"
+              data-l10n-id="preferences-ztransplit-region-cn"
+            />
+          </menupopup>
+        </menulist>
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-region-desc"
+        >选择你所在的网络环境后，插件会把该区域的推荐值写入仍处于出厂默认状态的设置（例如中国大陆默认使用免密钥可达的 Bing 网页引擎）。你显式选择过的引擎永远不会被区域选择覆盖；保持「自动」则一切维持现状。</description>
+        <description
+          id="ztransplit-pref-region-note"
+          class="ztransplit-desc"
+          hidden="true"
+        ></description>
+        <!-- 应用提示的分段文案：隐藏的本地化节点，JS 只做搬运不写死字符串 -->
+        <description
+          id="ztransplit-pref-region-note-applied"
+          hidden="true"
+          data-l10n-id="preferences-ztransplit-region-note-applied"
+        >已按所选网络区域应用推荐值：仍为出厂默认的相关设置被改写，你显式选择过的引擎未被覆盖。</description>
+        <description
+          id="ztransplit-pref-region-note-nochange"
+          hidden="true"
+          data-l10n-id="preferences-ztransplit-region-note-nochange"
+        >未改动任何设置：相关设置已符合所选区域的推荐值，或已被你手动修改。</description>
+      </vbox>
+
       <hbox class="ztransplit-row" align="center">
         <label
           id="ztransplit-pref-engine-type-label"
@@ -188,6 +242,11 @@
               value="bing"
               label="Bing 翻译"
               data-l10n-id="preferences-ztransplit-engine-bing"
+            />
+            <menuitem
+              value="bing-web"
+              label="Bing 网页翻译（免密钥）"
+              data-l10n-id="preferences-ztransplit-engine-bingweb"
             />
             <menuitem
               value="deepl"
@@ -305,6 +364,16 @@
             class="ztransplit-desc"
             data-l10n-id="preferences-ztransplit-bing-region-desc"
           >可留空。多区域资源（如 chinaeast2）要与申请时保持一致，全球资源填 global 即可。填错会返回鉴权错误。</description>
+        </vbox>
+      </vbox>
+
+      <!-- bing-web：免密钥，无需任何配置 -->
+      <vbox id="ztransplit-pref-engine-bingweb" class="ztransplit-engine">
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-engine-bingweb-desc"
+          >免密钥，无需任何配置。使用必应翻译网页版接口，是中国大陆网络下无需密钥即可直接使用的引擎；适合明知 Google 不可达、不想每次翻译先等待其超时的场景。内置令牌自动刷新，失败会自动重试一次。</description>
         </vbox>
       </vbox>
 
@@ -795,6 +864,11 @@
       id="ztransplit-pref-string-pdftranslate-missing"
       data-l10n-id="preferences-ztransplit-engine-zotero-pdf-translate-missing"
     >zotero-pdf-translate 插件（未安装）</label>
+    <!-- 字体目录回退显示的数据目录占位（读不到 Zotero.DataDirectory.dir 时） -->
+    <label
+      id="ztransplit-pref-string-datadir"
+      data-l10n-id="preferences-ztransplit-data-dir-placeholder"
+    >{数据目录}</label>
     <!-- AI prompt 模板的七种非法原因。正文里只放一个错误节点，由脚本按校验
          结果把对应本地化文案搬过去（与 pdftranslate 标签同一套路：JS 不写死
          任何字符串，只搬文本）。 -->

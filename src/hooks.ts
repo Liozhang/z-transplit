@@ -1,6 +1,7 @@
 import { initLocale } from "./utils/locale";
 import { safeDebug } from "./utils/logger";
 import { toErrorMessage } from "./utils/error";
+import { migratePrefs } from "./utils/prefMigrations";
 
 /**
  * Plugin startup.
@@ -18,6 +19,11 @@ async function onStartup() {
   ]);
 
   initLocale();
+
+  // 偏好结构迁移（src/utils/prefMigrations.ts）：Zotero 已在此前应用完
+  // prefs.js 默认值，是执行迁移的正确时机；迁移内部自防御，失败只记录，
+  // 绝不阻断后续 UI 注册。
+  migratePrefs();
 
   // Re-entrancy latch: some hosts fire onStartup more than once per process
   // (main-window reload), and re-running the UI registration would double

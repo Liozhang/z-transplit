@@ -22,6 +22,7 @@ import { z } from "zod";
 import { parseJsonFromMarkdown } from "../../utils/json";
 import { getString } from "../../utils/locale";
 import { abortSignalTimeout } from "../../utils/abort";
+import { retryAfterFromHeaders } from "../../utils/rateLimit";
 
 export interface OpenAICompatMessage {
   role: "system" | "user" | "assistant";
@@ -170,7 +171,13 @@ export function createOpenAICompatClient(
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
-      throw new Error(`HTTP ${resp.status}: ${text || resp.statusText}`);
+      // status 与 retryAfterSec 供引擎层的限流退避识别 429（utils/rateLimit.ts）。
+      const e = new Error(
+        `HTTP ${resp.status}: ${text || resp.statusText}`,
+      ) as Error & { status?: number; retryAfterSec?: number | null };
+      e.status = resp.status;
+      e.retryAfterSec = retryAfterFromHeaders(resp.headers);
+      throw e;
     }
     const data = (await resp.json()) as any;
     const content = data?.choices?.[0]?.message?.content;

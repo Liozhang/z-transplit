@@ -10,6 +10,8 @@ declare namespace _ZoteroTypes {
       "translate.enabled": boolean;
       "translate.auto": boolean;
       "translate.maxChars": number;
+      "region": string;
+      "prefSchemaVersion": number;
       "translate.batchMaxTokens": number;
       "translate.engineType": string;
       "translate.google.apiKey": string;

@@ -380,9 +380,12 @@ describe("engine wire contracts", () => {
     // Body carries only the translation payload — auth never rides in the body.
     const body = new URLSearchParams(h.fetchCalls[2].body);
     expect(body.get("to")).toBe("zh-Hans"); // zh-CN mapped to Bing web id
-    // Live endpoint rejects fromLang=auto ({"statusCode":400}); auto-detect
-    // must be requested as "auto-detect" (verified against cn.bing.com).
-    expect(body.get("fromLang")).toBe("auto-detect");
+    // Live endpoint rejects fromLang=auto ({"statusCode":400}); an EXPLICIT
+    // "auto" is mapped to "auto-detect" by toBingWebLang. This fallback chain
+    // passes NO source language at all — since 2026-09-30 that path is handled
+    // by the local script-range detection (detectBingWebSourceLang), which
+    // classifies the Latin-script sample as "en".
+    expect(body.get("fromLang")).toBe("en");
     expect(body.get("text")).toBe("hello");
     expect(body.get("token")).toBeNull();
     expect(body.get("key")).toBeNull();
@@ -849,13 +852,19 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     );
   });
 
-  it("HTTP failures surface with status and body", async () => {
+  it("429 is retried once with backoff, then fails with the rate-limit message", async () => {
     aiPrefs();
     route("chat/completions", () =>
       jsonResponse({ error: "quota" }, false, 429, "Too Many Requests"),
     );
     const t = createTranslator("zh-CN");
-    await expect(t("hello", "zh-CN")).rejects.toThrow("HTTP 429");
+    // 两次 429 后以限流专门文案终态（Node 环境无 Fluent，getString 回落键名），
+    // 不再以原始 HTTP 429 冒充普通失败。
+    await expect(t("hello", "zh-CN")).rejects.toThrow(
+      "translation-error-rate-limited",
+    );
+    // 恰好两次请求：一次初试 + 一次退避重试。
+    expect(h.fetchCalls).toHaveLength(2);
   });
 
   it("cache: repeat translations of the same text hit the endpoint once", async () => {

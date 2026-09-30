@@ -15,7 +15,6 @@
 ## 缺失的文件会回落到 en-US。
 
 ## 面板外壳
-pane-title = 翻译
 pane-translate = 翻译
 pane-translate-sidenav = 翻译选中文本
 

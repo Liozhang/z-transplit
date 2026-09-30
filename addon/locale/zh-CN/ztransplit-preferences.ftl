@@ -68,10 +68,31 @@ preferences-ztransplit-engine-type-desc =
     选择文本翻译使用的引擎。切换引擎不会清除其它引擎已经填写的密钥，随时可以
     切回；只有当前选中的引擎会被使用。
 
+## ── 网络区域 ───────────────────────────────────────────────────────────────
+preferences-ztransplit-region =
+    .value = 网络区域
+preferences-ztransplit-region-auto =
+    .label = 自动（不声明）
+preferences-ztransplit-region-global =
+    .label = 全球
+preferences-ztransplit-region-cn =
+    .label = 中国大陆
+preferences-ztransplit-region-desc =
+    选择你所在的网络环境后，插件会把该区域的推荐值写入仍处于出厂默认状态的
+    设置（例如中国大陆默认使用免密钥可达的 Bing 网页引擎）。你显式选择过的
+    引擎永远不会被区域选择覆盖；保持「自动」则一切维持现状。
+preferences-ztransplit-region-note-applied =
+    已按所选网络区域应用推荐值：仍为出厂默认的相关设置被改写，你显式选择过的
+    引擎未被覆盖。
+preferences-ztransplit-region-note-nochange =
+    未改动任何设置：相关设置已符合所选区域的推荐值，或已被你手动修改。
+
 preferences-ztransplit-engine-google =
     .label = Google 翻译
 preferences-ztransplit-engine-bing =
     .label = Bing 翻译
+preferences-ztransplit-engine-bingweb =
+    .label = Bing 网页翻译（免密钥）
 preferences-ztransplit-engine-deepl =
     .label = DeepL
 preferences-ztransplit-engine-ai =
@@ -106,6 +127,12 @@ preferences-ztransplit-bing-region =
 preferences-ztransplit-bing-region-desc =
     可留空。多区域资源（如 chinaeast2）要与申请时保持一致，全球资源填 global
     即可。填错会返回鉴权错误。
+
+## Bing 网页翻译（免密钥）
+preferences-ztransplit-engine-bingweb-desc =
+    免密钥，无需任何配置。使用必应翻译网页版接口，是中国大陆网络下无需密钥
+    即可直接使用的引擎；适合明知 Google 不可达、不想每次翻译先等待其超时的
+    场景。内置令牌自动刷新，失败会自动重试一次。
 
 ## DeepL
 preferences-ztransplit-deepl-api-key =
@@ -207,6 +234,9 @@ preferences-ztransplit-pdf-fonts-desc =
     目录不存在时会自动创建，放入的字体在下次翻译时生效。
 preferences-ztransplit-pdf-fonts-path =
     .value = 字体目录
+
+# 字体目录在拿不到数据目录时的回退显示（花括号按 Fluent 语法转义）
+preferences-ztransplit-data-dir-placeholder = {"{"}数据目录{"}"}
 
 preferences-ztransplit-pdf-lang-title =
     .value = 译文语言

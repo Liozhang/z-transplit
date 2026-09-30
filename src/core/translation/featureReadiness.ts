@@ -9,6 +9,8 @@
  *   - google               → always ready (keyless free endpoint + keyless
  *                            Bing web fallback need no configuration; the
  *                            optional API key only upgrades it)
+ *   - bing-web             → always ready (keyless by contract; nothing to
+ *                            configure)
  *   - bing / deepl         → need translate.<engine>.apiKey
  *   - custom               → needs translate.custom.apiUrl AND
  *                            translate.custom.apiKey
@@ -72,6 +74,9 @@ export function checkTranslationReadiness(
     case "google":
       // Default engine: the keyless free endpoint (with keyless Bing web
       // fallback) needs no configuration; the optional API key only upgrades it.
+      return { ready: true, missing: [] };
+    case "bing-web":
+      // Keyless by contract — same readiness shape as Google's keyless path.
       return { ready: true, missing: [] };
     case "bing":
     case "deepl": {

@@ -1,7 +1,7 @@
 /**
  * translationEngines — Unified translation engine dispatcher.
  *
- * Supports six engine types:
+ * Supports seven engine types:
  *   - "ai"      → OpenAI-compatible chat-completions endpoint driven by a
  *                 user-owned, validated prompt template (translate.ai.*) via
  *                 src/core/translation/promptTemplate.ts. This is the port of
@@ -15,6 +15,10 @@
  *                 model) via src/core/ai/openaiCompat.ts. Also the only engine
  *                 with batch JSON ability — see supportsBatching().
  *   - "bing"    → Azure Cognitive Services Translator
+ *   - "bing-web" → keyless Bing web translator. Selectable since 2026-09-30:
+ *                 it is the only keyless engine reachable in mainland China,
+ *                 so it has to be a user choice, not just a hardcoded fallback
+ *                 (ported from z-search's 2026-09-28 change).
  *   - "deepl"   → DeepL API
  *   - "zotero-pdf-translate" → external plugin bridge
  *
@@ -41,6 +45,7 @@ import type {
   ParagraphTranslator,
 } from "./types";
 import { createOpenAICompatClient } from "../ai/openaiCompat";
+import { resolveModelBudgets } from "../ai/modelCatalog";
 import { getPrefDynamic } from "../../utils/prefs";
 import { parseJsonFromMarkdown } from "../../utils/json";
 import { toErrorMessage } from "../../utils/error";
@@ -59,11 +64,18 @@ import {
   resolvePromptTemplate,
   validatePromptTemplate,
 } from "./promptTemplate";
+import {
+  isRateLimitError,
+  rateLimitDelayMs,
+  retryAfterFromHeaders,
+  retryAfterOfError,
+} from "../../utils/rateLimit";
 
 export type TranslationEngineType =
   | "ai"
   | "google"
   | "bing"
+  | "bing-web"
   | "deepl"
   | "custom"
   | "zotero-pdf-translate";
@@ -182,6 +194,20 @@ const DEFAULT_BATCH_MAX_TOKENS = 8192;
  */
 const MAX_BATCH_RETRIES = 3;
 
+/**
+ * 非 2xx 响应 → 统一抛错。错误上附着 `status` 与 `retryAfterSec`（读自
+ * Retry-After 响应头），供限流退避（utils/rateLimit.ts）识别与计迟。
+ */
+function httpStatusError(resp: Response, text: string): Error {
+  const e = new Error(`HTTP ${resp.status}: ${text || resp.statusText}`) as Error & {
+    status?: number;
+    retryAfterSec?: number | null;
+  };
+  e.status = resp.status;
+  e.retryAfterSec = retryAfterFromHeaders(resp.headers);
+  return e;
+}
+
 async function httpPost(
   url: string,
   headers: Record<string, string>,
@@ -199,7 +225,7 @@ async function httpPost(
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`HTTP ${resp.status}: ${text || resp.statusText}`);
+    throw httpStatusError(resp, text);
   }
   return resp;
 }
@@ -221,7 +247,7 @@ async function httpPostForm(
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`HTTP ${resp.status}: ${text || resp.statusText}`);
+    throw httpStatusError(resp, text);
   }
   return resp;
 }
@@ -232,9 +258,37 @@ async function httpGet(url: string, timeoutMs?: number): Promise<Response> {
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`HTTP ${resp.status}: ${text || resp.statusText}`);
+    throw httpStatusError(resp, text);
   }
   return resp;
+}
+
+/**
+ * 限流退避包装（429 一次重试；自 leadero 的 requestWithRateLimit 思想移植）。
+ *
+ * 首次 429 → 按 Retry-After 头等待（超过 120 秒视为「等太久」，直接终态），
+ * 无头时按 5 秒 × 2^(n-1) 指数退避；重试仍 429 → 以限流专门文案终态，不再
+ * 冒充普通失败。非 429 异常原样上抛，调用方的既有语义不变。
+ */
+async function withRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isRateLimitError(e)) throw e;
+    const delayMs = rateLimitDelayMs(retryAfterOfError(e), 1);
+    if (delayMs == null) throw e;
+    await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      return await fn();
+    } catch (retryError) {
+      if (isRateLimitError(retryError)) {
+        throw new Error(getString("translation-error-rate-limited"), {
+          cause: retryError,
+        });
+      }
+      throw retryError;
+    }
+  }
 }
 
 /**
@@ -343,8 +397,10 @@ async function translateWithBing(
 /**
  * Keyless Bing web translator (the Bing Translator web app endpoint, same
  * engine behind bing.com/translator). Reachable in regions where Google is not
- * (e.g. mainland China), which is why it backs the default Google engine. Not
- * exposed as a selectable engine — it only serves as fallback.
+ * (e.g. mainland China), which is why it backs the default Google engine —
+ * and, since 2026-09-30, why it is also selectable as its own engine
+ * ("bing-web"): a user who knows Google is blocked should be able to pick the
+ * reachable engine up front instead of paying the 10s timeout per paragraph.
  *
  * Request shape reverse-engineered from the live page (2026-08-29):
  *   GET  https://www.bing.com/translator            (redirects to cn.bing.com in CN)
@@ -386,6 +442,28 @@ function toBingWebLang(code: string): string {
   if (code === "zh-CN") return "zh-Hans";
   if (code === "zh-TW" || code === "zh-HK") return "zh-Hant";
   return code.split("-")[0];
+}
+
+/**
+ * Script-based source-language guess for the Bing web engine (ported from
+ * z-search's detectBingSourceLang, 2026-09-30).
+ *
+ * Bing 的 ttranslatev3 对源语言参数的容错远高于被参数缺失直接拒绝，但调用方
+ * 完全不传源语言时（部分批量与摘要路径），本地按 Unicode 区段先判一次比把
+ * 判定全部交给服务端更稳：常见文种（中日韩/西里尔/阿拉伯/泰/希伯来）按区段
+ * 即可高置信区分，拉丁文种默认 en。返回 Zotero 风格代码，沿用 toBingWebLang
+ * 的映射（zh-CN → zh-Hans）。
+ */
+function detectBingWebSourceLang(text: string): string {
+  const sample = String(text ?? "").slice(0, 2000);
+  if (/[\uac00-\ud7af]/.test(sample)) return "ko";
+  if (/[\u3040-\u30ff]/.test(sample)) return "ja";
+  if (/[\u4e00-\u9fff]/.test(sample)) return "zh-CN";
+  if (/[\u0400-\u04ff]/.test(sample)) return "ru";
+  if (/[\u0600-\u06ff]/.test(sample)) return "ar";
+  if (/[\u0e00-\u0e7f]/.test(sample)) return "th";
+  if (/[\u0590-\u05ff]/.test(sample)) return "he";
+  return "en";
 }
 
 async function fetchBingWebSession(): Promise<BingWebSession> {
@@ -495,7 +573,13 @@ async function translateWithBingWeb(
   targetLanguage: string,
   sourceLanguage?: string,
 ): Promise<{ success: boolean; translatedText?: string; error?: string }> {
-  const src = toApiSourceLang(sourceLanguage);
+  // 源语言二分（与 z-search 的区段判定互补）：调用方显式给了语言（含显式
+  // "auto"）→ 走既有映射（auto → auto-detect，由 Bing 服务端判定）；完全没传
+  // → 本地按 Unicode 区段判定，避免无依据的参数落在服务端。
+  const src =
+    sourceLanguage === undefined || sourceLanguage === ""
+      ? detectBingWebSourceLang(text)
+      : toApiSourceLang(sourceLanguage);
   try {
     let result = await postBingWebTranslate(
       text,
@@ -551,10 +635,14 @@ async function translateWithDeepL(
       params.set("source_lang", toApiTargetLang(src).toUpperCase());
     params.set("text", text);
 
-    const resp = await httpPostForm(
-      `https://${host}/v2/translate`,
-      { Authorization: `DeepL-Auth-Key ${opts.apiKey}` },
-      params,
+    // DeepL 免费版并发与配额受限，是批量全文翻译最容易触发 429 的端点：
+    // 包一层限流退避（Retry-After 优先），重试仍拒绝才以限流文案失败。
+    const resp = await withRateLimitRetry(() =>
+      httpPostForm(
+        `https://${host}/v2/translate`,
+        { Authorization: `DeepL-Auth-Key ${opts.apiKey}` },
+        params,
+      ),
     );
     const data = (await resp.json()) as any;
     const translated = data?.translations?.[0]?.text;
@@ -609,24 +697,28 @@ async function translateWithAI(
       emptyResultErrorKey: "translation-error-ai-empty",
     });
 
-    const result = await client.chat({
-      messages: [
-        {
-          role: "user",
-          content: renderPrompt(check.template, {
-            text,
-            sourceLang: sourceDesc,
-            targetLang: targetDesc,
-          }),
-        },
-      ],
-      maxTokens: Math.max(
-        MODEL_OUTPUT_FLOOR_TOKENS,
-        Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
-      ),
-      temperature: 0.3,
-      timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
-    });
+    // AI 端点同样有配额与并发限流；单段路径包一次限流退避，避免批量并发
+    // 下的 429 直接变成段落失败。
+    const result = await withRateLimitRetry(() =>
+      client.chat({
+        messages: [
+          {
+            role: "user",
+            content: renderPrompt(check.template, {
+              text,
+              sourceLang: sourceDesc,
+              targetLang: targetDesc,
+            }),
+          },
+        ],
+        maxTokens: Math.max(
+          MODEL_OUTPUT_FLOOR_TOKENS,
+          Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+        ),
+        temperature: 0.3,
+        timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
+      }),
+    );
 
     return { success: true, translatedText: result.content };
   } catch (e: any) {
@@ -660,20 +752,24 @@ async function translateWithCustom(
       defaultModel: opts.model,
     });
 
-    const result = await client.chat({
-      messages: [
-        {
-          role: "system",
-          content: formulaPreservingPrompt(targetDesc, sourceDesc),
-        },
-        { role: "user", content: text },
-      ],
-      maxTokens: Math.max(
-        MODEL_OUTPUT_FLOOR_TOKENS,
-        Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
-      ),
-      temperature: 0.3,
-    });
+    // 与 AI 引擎同源的自定义端点也走限流退避（同一个 openaiCompat 客户端，
+    // 同一种 429 形态）。
+    const result = await withRateLimitRetry(() =>
+      client.chat({
+        messages: [
+          {
+            role: "system",
+            content: formulaPreservingPrompt(targetDesc, sourceDesc),
+          },
+          { role: "user", content: text },
+        ],
+        maxTokens: Math.max(
+          MODEL_OUTPUT_FLOOR_TOKENS,
+          Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+        ),
+        temperature: 0.3,
+      }),
+    );
 
     return { success: true, translatedText: result.content };
   } catch (e: any) {
@@ -992,6 +1088,19 @@ function createTranslatorUncached(
           );
         return result.translatedText!;
       };
+    case "bing-web":
+      return async (text: string) => {
+        const result = await translateWithBingWeb(
+          text,
+          targetLanguage,
+          sourceLanguage,
+        );
+        if (!result.success)
+          throw new Error(
+            result.error || getString("translation-error-bing-failed"),
+          );
+        return result.translatedText!;
+      };
     case "deepl":
       return async (text: string) => {
         if (!cfg.deeplApiKey)
@@ -1086,9 +1195,9 @@ export function supportsBatching(): boolean {
 
 /**
  * Token budgets. leadero read these off the resolved provider
- * (getContextWindow/getMaxOutputTokens); the OpenAI-compatible client has no
- * such introspection, so the port starts from the same constants it defaulted
- * to and refines the ratio from real usage via calibrateCharsPerToken.
+ * (getContextWindow/getMaxOutputTokens); this port now mirrors that via the
+ * model-name lookup in core/ai/modelCatalog.ts (unknown models keep the
+ * original constants below — see FALLBACK_MODEL_BUDGETS).
  */
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 // Batch output cap. Reasoning models burn completion tokens on hidden thinking
@@ -1284,13 +1393,16 @@ export async function createAIBatchTranslator(
   // ── Token budgets ──
   // Two hard constraints: contextWindow (input + output must fit) and
   // maxOutputTokens (output cap). Output is usually the tighter bottleneck.
+  // 供应商内省：按模型名查表取上下文窗口与输出上限（unknown 沿用常量兜底），
+  // 取代原先写死的 128000 / 16384。
   // The user-set translate.batchMaxTokens caps one merged batch's INPUT —
   // planTranslationChunks closes a batch before the paragraph that would
   // overflow it, so an over-budget batch ships one paragraph short. The
   // context-window remainder is a ceiling the pref can only lower.
   // `||` (not `??`) on both: a 0 return means "unknown", not "zero".
-  const contextWindow = DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
+  const modelBudgets = resolveModelBudgets(model);
+  const contextWindow = modelBudgets.contextWindowTokens || DEFAULT_CONTEXT_WINDOW_TOKENS;
+  const maxOutput = modelBudgets.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS;
 
   const outputBudgetTokens = Math.floor(maxOutput * (1 - SAFETY_MARGIN));
   const outputBudgetChars = Math.max(
@@ -1402,7 +1514,21 @@ export async function createAIBatchTranslator(
         if (isCancelled(e)) throw e;
         lastError = e;
       }
-      if (attempt < MAX_BATCH_RETRIES) await backoff();
+      if (attempt < MAX_BATCH_RETRIES) {
+        // 限流感知的批间间隔：上一轮因 429 失败时按 Retry-After / 指数退避
+        // 等待，而不是固定 500ms 连发；Retry-After 超长则放弃批处理重试，
+        // 直接落逐段兜底。
+        if (isRateLimitError(lastError)) {
+          const delayMs = rateLimitDelayMs(
+            retryAfterOfError(lastError),
+            attempt + 1,
+          );
+          if (delayMs == null) break;
+          await new Promise((r) => setTimeout(r, delayMs));
+        } else {
+          await backoff();
+        }
+      }
     }
 
     // Per-paragraph last resort: the batch contract never came back compliant

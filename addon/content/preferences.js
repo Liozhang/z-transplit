@@ -43,6 +43,7 @@
   var ENGINE_GROUPS = [
     ["google", "ztransplit-pref-engine-google"],
     ["bing", "ztransplit-pref-engine-bing"],
+    ["bing-web", "ztransplit-pref-engine-bingweb"],
     ["deepl", "ztransplit-pref-engine-deepl"],
     ["ai", "ztransplit-pref-engine-ai"],
     ["custom", "ztransplit-pref-engine-custom"],
@@ -438,6 +439,84 @@
     });
   }
 
+  // ── 网络区域 ────────────────────────────────────────────────────────────
+
+  // 推荐值表必须与 src/utils/region.ts 保持一字不差：面板脚本运行在独立
+  // 沙箱里，无法 import 主包，只能镜像这份小表（与 ASSETS_SUBDIR 同一约定）。
+  var REGION_PROFILES = {
+    global: { engine: "google", bingRegion: "global" },
+    cn: { engine: "bing-web", bingRegion: "chinanorth" },
+  };
+  // 出厂默认值（addon/prefs.js 的镜像）。推荐值只覆盖仍等于这些值的键。
+  var REGION_SHIPPED_DEFAULTS = {
+    "translate.engineType": "google",
+    "translate.bing.region": "",
+  };
+  var REGION_RECOMMENDED_KEYS = [
+    "translate.engineType",
+    "translate.bing.region",
+  ];
+
+  function regionRecommendation(region, key) {
+    var profile = REGION_PROFILES[region];
+    if (!profile) return REGION_SHIPPED_DEFAULTS[key];
+    return key === "translate.engineType" ? profile.engine : profile.bingRegion;
+  }
+
+  /**
+   * 套用区域推荐值，返回实际写入的键。守门与 src/utils/region.ts 一致：
+   * 只有当前值仍等于出厂默认的键才会被改写——用户显式选过的引擎不被推翻。
+   */
+  function applyRegionRecommendations(region) {
+    var written = [];
+    if (!REGION_PROFILES[region]) return written;
+    REGION_RECOMMENDED_KEYS.forEach(function (key) {
+      var current = getPref(key);
+      var currentText =
+        current === undefined || current === null ? "" : String(current);
+      if (currentText !== REGION_SHIPPED_DEFAULTS[key]) return;
+      var next = regionRecommendation(region, key);
+      if (currentText === next) return;
+      setPref(key, next);
+      written.push(key);
+    });
+    return written;
+  }
+
+  /** 应用提示：文案从 xhtml 里隐藏的本地化节点搬运，JS 不写死任何字符串。 */
+  function showRegionNote(written) {
+    var note = els.regionNote;
+    if (!note) return;
+    var source = $(written.length
+      ? "ztransplit-pref-region-note-applied"
+      : "ztransplit-pref-region-note-nochange");
+    if (source && source.textContent) note.textContent = source.textContent;
+    show(note, Boolean(source && source.textContent));
+  }
+
+  function onRegionPicked() {
+    var region = "auto";
+    if (els.regionList) {
+      try {
+        region = String(els.regionList.value || "auto");
+      } catch (e) {
+        region = "auto";
+      }
+    }
+    var written = applyRegionRecommendations(region);
+    // 推荐值可能改写了引擎：让引擎下拉与字段分组立即跟上（Zotero 的
+    // preference 反向同步时机不保证，这里显式回读 pref）。
+    if (written.indexOf("translate.engineType") !== -1 && els.engineList) {
+      try {
+        els.engineList.value = String(getPref("translate.engineType") || "");
+      } catch (e) {
+        /* 忽略：下拉值同步失败只影响回显，不影响已写入的 pref */
+      }
+    }
+    syncEngineFields();
+    showRegionNote(written);
+  }
+
   // ── zotero-pdf-translate 探测 ───────────────────────────────────────────
 
   /**
@@ -471,6 +550,10 @@
 
   // ── 字体覆盖目录 ────────────────────────────────────────────────────────
 
+  // 数据目录占位文案：来自 xhtml 里隐藏的本地化节点（英文界面显示英文），
+  // JS 不写死任何字符串。
+  var dataDirPlaceholder = "{Data directory}";
+
   function assetsDir() {
     var dir = "";
     try {
@@ -478,7 +561,7 @@
     } catch (e) {
       dir = "";
     }
-    if (!dir) return "{数据目录}/" + ASSETS_SUBDIR;
+    if (!dir) return dataDirPlaceholder + "/" + ASSETS_SUBDIR;
     // 统一成正斜杠：Windows 上 DataDirectory.dir 带反斜杠，混排很难读。
     return String(dir).replace(/\\/g, "/") + "/" + ASSETS_SUBDIR;
   }
@@ -515,6 +598,8 @@
     els.timeoutInput = $("ztransplit-pref-odl-timeout");
     els.timeoutError = $("ztransplit-pref-odl-timeout-error");
     els.engineList = $("ztransplit-pref-engine-type");
+    els.regionList = $("ztransplit-pref-region");
+    els.regionNote = $("ztransplit-pref-region-note");
     els.pdfTranslateItem = $("ztransplit-pref-engine-item-pdftranslate");
     els.aiPromptInput = $("ztransplit-pref-ai-prompt");
     els.aiPromptError = $("ztransplit-pref-ai-prompt-error");
@@ -531,6 +616,10 @@
     if (!pdfTranslateLabels.missing) {
       // Fluent 没生效时退回 menuitem 自身的静态标签，至少不会出现空项。
       pdfTranslateLabels.missing = pdfTranslateLabels.base;
+    }
+    var dataDirLabel = $("ztransplit-pref-string-datadir");
+    if (dataDirLabel && dataDirLabel.textContent) {
+      dataDirPlaceholder = String(dataDirLabel.textContent).trim();
     }
   }
 
@@ -557,6 +646,12 @@
       // 两个都听，syncEngineFields 是幂等的，重复执行没有副作用。
       els.engineList.addEventListener("select", syncEngineFields);
       els.engineList.addEventListener("command", syncEngineFields);
+    }
+    if (els.regionList) {
+      // 与引擎下拉同理两个事件都听；onRegionPicked 幂等（重复套用第二次
+      // 起不再有键可写）。
+      els.regionList.addEventListener("select", onRegionPicked);
+      els.regionList.addEventListener("command", onRegionPicked);
     }
     // 面板每次显示时重新探测：用户可能开着设置窗口去装了 zotero-pdf-translate。
     var root = $("zotero-prefpane-ztransplit");

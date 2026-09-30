@@ -27,6 +27,19 @@ function readPref(key: string): PrefValue | undefined {
   }
 }
 
+function writePref(key: string, value: PrefValue | undefined, action: string): boolean {
+  const branch = prefs();
+  if (!branch) return false;
+  try {
+    if (action === "clear") branch.clear(`${PREFS_PREFIX}.${key}`, true);
+    else branch.set(`${PREFS_PREFIX}.${key}`, value as PrefValue, true);
+    return true;
+  } catch (e) {
+    safeDebug(`[Z-Transplit] ${action}Pref('${key}') failed: ${String(e)}`);
+    return false;
+  }
+}
+
 /**
  * Read a preference declared in addon/prefs.js.
  *
@@ -48,4 +61,23 @@ export function getPref(key: string): PrefValue | undefined {
 export function getPrefDynamic(key: string): PrefValue | undefined {
   if (!prefs()) return undefined;
   return readPref(key);
+}
+
+/**
+ * Write a preference declared in addon/prefs.js。与 {@link getPref} 对偶：
+ * 同名分支、同一前缀、失败不抛。网络区域选择与偏好迁移使用。
+ */
+export function setPref(key: string, value: PrefValue): boolean {
+  return writePref(key, value, "set");
+}
+
+export function setPrefDynamic(key: string, value: PrefValue): boolean {
+  if (!prefs()) return false;
+  return writePref(key, value, "set");
+}
+
+/** Clear a dynamic preference（偏好迁移清理退役键用）。 */
+export function clearPrefDynamic(key: string): boolean {
+  if (!prefs()) return false;
+  return writePref(key, undefined, "clear");
 }

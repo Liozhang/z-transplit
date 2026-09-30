@@ -34,6 +34,7 @@ translation-error-pdf-translate-missing = 未安装或未启用 zotero-pdf-trans
 translation-error-ai-empty = AI 翻译返回了空结果
 translation-error-ai-failed = AI 翻译失败
 translation-error-ai-url-missing = AI 翻译接口地址未配置
+translation-error-rate-limited = 翻译服务触发限流：已按服务器指示等待并重试一次，仍被拒绝。请稍后再试，或降低批量翻译的并发规模。
 
 ## AI 引擎提示词模板的拒绝原因（src/core/translation/promptTemplate.ts）
 translation-error-ai-prompt-too-long = AI 提示词模板过长（最多 4000 个字符）。

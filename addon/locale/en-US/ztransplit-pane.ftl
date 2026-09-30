@@ -16,7 +16,6 @@
 ## Zotero picks a plugin locale per file and falls back to en-US.
 
 ## Pane shell
-pane-title = Translate
 pane-translate = Translate
 pane-translate-sidenav = Translate selected text
 
