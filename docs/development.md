@@ -101,9 +101,37 @@ npm run check:jar                            # 对账（同时校验 ODL jar 与
 
 | 层 | 位置 | 说明 |
 | --- | --- | --- |
-| 单元 | `tests/unit/` | 引擎分发、缓存、面板 DOM 行为、设置 pane 显隐与校验、朗读控制、JRE 托管安装中断安全（假宿主驱动真实 `JavaRuntimeManager`） |
+| 单元 | `tests/unit/` | 引擎分发、缓存、面板 DOM 行为、设置 pane 显隐与校验、朗读控制、JRE 托管安装中断安全（假宿主驱动真实 `JavaRuntimeManager`）、外部进程 runner 双分支（假 Subprocess/nsIProcess 驱动真实 `runProcess`）、Unicode 探针 fail-closed 判定逻辑（假进程库存/命令执行器驱动 `windows-unicode-probe-gates.mjs`） |
 | Node 集成 | `tests/node/` | ODL JSON 适配、版式渲染往返、分屏同步、真实 fixture |
 | 真机 | `scripts/qa/real-machine.mjs` | 在真实 Zotero（隔离 profile + 数据目录）里装载构建产物，驱动真实 DOM / 菜单 / 网络 / Java 流水线 |
+| 真机（进程 runner） | `scripts/qa/windows-unicode-probe.mjs` | 隔离诊断插件把生产 `runProcess`/`execJar`/`parsePdfToJson` 打包进真实 Zotero（GUI/headless），验证 Windows Unicode 参数、双流捕获、超时/取消进程树终止与失败诊断 |
+
+### Windows Unicode 进程 runner 回归
+
+`scripts/qa/windows-unicode-probe.mjs` 是可复用启动器：它把
+`scripts/qa/windows-unicode-probe-entry.ts`（import 生产 `runProcess` 等导出，
+不复制 runner）用 esbuild 打成探针 bundle，装进隔离 profile/data 的诊断插件，
+在真实 Zotero 中自动执行场景并写 `<out>/runs/<mode>-<ts>/results.json`。
+fixture 源码与编译产物、PDF 副本、profile、日志一律落在输出根
+（默认 `D:\Develop\Misc Workspace\archive\z-transplit-issue-1-regression\`）。
+
+清理与汇总的判定逻辑集中在 `scripts/qa/windows-unicode-probe-gates.mjs`
+（无副作用、可注入假进程库存/时钟），失败一律 fail-closed：清理前必须按
+当前 executable + 命令行中 `-profile` 参数的完整值（非子串）核对进程身份，
+规范化后精确比较（观测失败不杀、历史 root PID 单独不足以开杀）；结果集必须
+完整覆盖权威场景列表、匹配本 run/mode，且 deadline、probe-fatal、启动失败、
+观测失败都会使顶层非零退出。PID 查询仅「成功且结构合法的空结果」可判消失，
+单次查询带终止边界（超时杀掉并回收自有查询进程）。`MOZ_HEADLESS` 按模式显式
+设置/清除，过滤后的启动参数与相关环境键记录在 run-manifest。判定逻辑的永久
+自测在 `tests/unit/qa/windows-unicode-probe-gates.test.ts`，只用假进程库存，
+不触碰真实进程。
+
+```bash
+node scripts/qa/windows-unicode-probe.mjs --mode gui        # 有界面 GUI（验收项）
+node scripts/qa/windows-unicode-probe.mjs --mode headless   # headless 补充回归
+node scripts/qa/windows-unicode-probe.mjs --mode both       # 顺序执行两种模式
+# 可选：--zotero / --java / --jar / --remover-jar / --out / --javac
+```
 
 ### 真机测试（实机）
 

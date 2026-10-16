@@ -1214,9 +1214,99 @@ export async function installOdlJar(
   return path;
 }
 
+// ─── External process runner ────────────────────────────────────────────────
+//
+// Windows: Zotero's Subprocess.sys.mjs (CreateProcessW + Job Object) launches
+//   the JVM directly from a raw argv — no .bat, no cmd.exe, no capture files —
+//   so Unicode paths and shell metacharacters survive whatever the console
+//   code page is. Both output streams are piped and drained in parallel.
+// Unix: unchanged `/bin/sh -c 'exec … > out 2> err'` via nsIProcess.runwAsync
+//   with capture files; only failure diagnostics and cleanup were fixed.
+
+/** Result ownership: the first terminal intent (exit / timeout / abort / launch
+ *  failure) wins; later kill-caused exit events never rewrite it. */
+type RunOutcome =
+  | { kind: "exit"; exitCode: number }
+  | { kind: "timeout" }
+  | { kind: "abort" }
+  | { kind: "launch-failure"; message: string };
+
+/** Windows-only: pin the JVM's default charset and stdio stream encodings to
+ *  UTF-8 so Chinese paths/messages round-trip under a CP936 host. Prepended to
+ *  the caller's argv — every runProcess caller invokes Java, and JVM options
+ *  must precede the main class / -jar. */
+const WINDOWS_JVM_ENCODING_ARGS = [
+  "-Dfile.encoding=UTF-8",
+  "-Dstdout.encoding=UTF-8",
+  "-Dstderr.encoding=UTF-8",
+];
+
+function isWindowsHost(): boolean {
+  const Services = (globalThis as any).Services as any;
+  return (
+    Services?.appinfo?.OS?.toUpperCase?.() ||
+    (globalThis as any).navigator?.platform ||
+    ""
+  ).startsWith("WIN");
+}
+
+function getSubprocess(): any {
+  const { Subprocess } = (globalThis as any).ChromeUtils.importESModule(
+    "resource://gre/modules/Subprocess.sys.mjs",
+  );
+  return Subprocess;
+}
+
+/** Assemble the final ExecResult from the owning outcome plus whatever output
+ *  was captured. Control hints ("Process timed out" / "aborted") lead the
+ *  stderr so they stay recognizable after UI truncation; capture failures are
+ *  appended and never replace the original cause or the real exit code. */
+function buildRunResult(
+  outcome: RunOutcome,
+  stdout: string,
+  stderr: string,
+  captureErrors: string[],
+): ExecResult {
+  const extras = captureErrors.filter(Boolean);
+  const join = (...parts: string[]) => parts.filter(Boolean).join("\n");
+  switch (outcome.kind) {
+    case "timeout":
+      return {
+        exitCode: -1,
+        stdout,
+        stderr: join("Process timed out", stderr, ...extras),
+        timedOut: true,
+      };
+    case "abort":
+      return {
+        exitCode: -1,
+        stdout,
+        stderr: join("aborted", stderr, ...extras),
+        timedOut: false,
+        aborted: true,
+      };
+    case "launch-failure":
+      return {
+        exitCode: -1,
+        stdout,
+        stderr: join(outcome.message, stderr, ...extras),
+        timedOut: false,
+      };
+    case "exit":
+      return {
+        exitCode: outcome.exitCode,
+        stdout,
+        stderr: join(stderr, ...extras),
+        timedOut: false,
+      };
+  }
+}
+
 /**
- * Run an external process via nsIProcess.runwAsync + observer pattern.
- * Simplified for single-shot Java calls.
+ * Run an external process and capture both output streams. See the runner
+ * notes above for the per-platform launch mechanisms. Shared contract:
+ * `runProcess(resolvedExe, args, timeoutMs, signal?)` → real exit code plus
+ * full stdout/stderr; timeout and cancellation stay distinguishable sentinels.
  */
 export function runProcess(
   resolvedExe: string,
@@ -1224,274 +1314,447 @@ export function runProcess(
   timeoutMs: number,
   signal?: AbortSignal, // M-20: cooperative cancellation
 ): Promise<ExecResult> {
+  // M-20: already cancelled before spawn — don't even start the JVM.
+  if (signal?.aborted) {
+    return Promise.resolve({
+      exitCode: -1,
+      stdout: "",
+      stderr: "aborted",
+      timedOut: false,
+      aborted: true,
+    });
+  }
+  return isWindowsHost()
+    ? runProcessWindows(resolvedExe, args, timeoutMs, signal)
+    : runProcessUnix(resolvedExe, args, timeoutMs, signal);
+}
+
+/** Drain one InputPipe to EOF with the streaming UTF-8 reader. `readString()`
+ *  returns one chunk per call and an empty string at end of stream; an empty
+ *  chunk while the pipe is still open is a partial multi-byte sequence held by
+ *  the decoder, so reading must continue. A read failure keeps what was already
+ *  captured and reports it — it must not throw past the caller. */
+async function drainPipe(
+  pipe: any,
+  sink: string[],
+  label: string,
+  captureErrors: string[],
+  onReadFailure: () => void,
+): Promise<void> {
+  if (!pipe) return;
+  try {
+    for (;;) {
+      const chunk = await pipe.readString();
+      if (chunk) {
+        sink.push(chunk);
+        continue;
+      }
+      if (pipe.closed !== false) break; // EOF
+      // Empty decode with the pipe still open: wait for the rest of the char.
+    }
+  } catch (e) {
+    captureErrors.push(`${label} capture failed: ${toErrorMessage(e)}`);
+    onReadFailure();
+  }
+}
+
+async function runProcessWindows(
+  resolvedExe: string,
+  args: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
+  // Held in a box so async continuation points don't fight TS control-flow
+  // narrowing of a reassigned local.
+  const state: { outcome: RunOutcome | null } = { outcome: null };
+  let proc: any = null;
+  let waitSettled = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  let killPromise: Promise<void> | null = null;
+  const stdoutParts: string[] = [];
+  const stderrParts: string[] = [];
+  const captureErrors: string[] = [];
+
+  const claim = (o: RunOutcome): boolean => {
+    if (state.outcome) return false;
+    state.outcome = o;
+    return true;
+  };
+
+  const clearTimer = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  const detachAbort = () => {
+    if (onAbort && signal) {
+      try {
+        signal.removeEventListener("abort", onAbort);
+      } catch (e) {
+        safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
+      }
+      onAbort = null;
+    }
+  };
+
+  // Subprocess.kill(0) force-terminates the Windows Job Object, so the whole
+  // process tree goes away; it resolves with the real termination code once
+  // the process has exited. Never fire-and-forget: the returned promise is
+  // awaited before this call settles (and thus before execJar releases its
+  // JVM slot). A no handle yet means there is nothing to kill — the stop
+  // intent stays recorded and the spawn path kills the late handle on arrival.
+  const killRunning = (): Promise<void> => {
+    if (!proc) return Promise.resolve();
+    if (!killPromise) {
+      killPromise = (async () => {
+        try {
+          await proc.kill(0);
+        } catch (e) {
+          captureErrors.push("kill failed: " + toErrorMessage(e));
+        }
+      })();
+    }
+    return killPromise;
+  };
+
+  const requestStop = (kind: "timeout" | "abort"): void => {
+    // First terminal intent owns the result; duplicate/late events are no-ops.
+    if (!claim({ kind })) return;
+    if (proc) void killRunning();
+    // With no handle yet the stop intent is recorded and the spawn path below
+    // kills the late handle as soon as it arrives — never return early and
+    // leave the process unmanaged.
+  };
+
+  // Timeout and abort hooks go in BEFORE spawning so they also cover the
+  // async Subprocess.call startup window.
+  timer = setTimeout(() => requestStop("timeout"), timeoutMs);
+  if (signal) {
+    onAbort = () => requestStop("abort");
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Re-check after registering to close the check/register race.
+    if (signal.aborted) requestStop("abort");
+    if (state.outcome?.kind === "abort" && !proc) {
+      // Pre-spawn cancellation: the JVM is never started.
+      clearTimer();
+      detachAbort();
+      return buildRunResult(
+        state.outcome,
+        stdoutParts.join(""),
+        stderrParts.join(""),
+        captureErrors,
+      );
+    }
+  }
+
+  try {
+    const Subprocess = getSubprocess();
+    proc = await Subprocess.call({
+      command: resolvedExe,
+      arguments: [...WINDOWS_JVM_ENCODING_ARGS, ...args],
+      stderr: "pipe",
+    });
+  } catch (e: any) {
+    // Bad executable / worker error: a real launch failure — keep the real
+    // exception text and stay distinguishable from a non-zero JVM exit.
+    clearTimer();
+    detachAbort();
+    const message = toErrorMessage(e);
+    if (!claim({ kind: "launch-failure", message })) {
+      // A stop intent already owns the result; keep the launch error visible
+      // instead of silently swallowing it.
+      captureErrors.push(message);
+    }
+    return buildRunResult(
+      state.outcome!,
+      stdoutParts.join(""),
+      stderrParts.join(""),
+      captureErrors,
+    );
+  }
+
+  // Timeout/abort recorded during the startup window: kill the late handle now.
+  if (state.outcome?.kind === "timeout" || state.outcome?.kind === "abort") {
+    await killRunning();
+  }
+
+  // No stdin input is ever written; close our end immediately.
+  try {
+    await proc.stdin?.close();
+  } catch (e) {
+    captureErrors.push("stdin close failed: " + toErrorMessage(e));
+  }
+
+  // Drain both pipes concurrently from the first moment — a full pipe buffer
+  // must never deadlock the child. A read failure keeps captured content and,
+  // if the process is still running, stops it so the run can finalize and
+  // still report the actual termination code.
+  const onReadFailure = () => {
+    if (!waitSettled) void killRunning();
+  };
+  const readers = [
+    drainPipe(proc.stdout, stdoutParts, "stdout", captureErrors, onReadFailure),
+    drainPipe(proc.stderr, stderrParts, "stderr", captureErrors, onReadFailure),
+  ];
+
+  let exitCode = -1;
+  try {
+    const info = await proc.wait();
+    const code = Number(info?.exitCode);
+    // Unknown exit codes are never reported as success.
+    exitCode = Number.isInteger(code) ? code : -1;
+  } catch (e) {
+    captureErrors.push("wait failed: " + toErrorMessage(e));
+  } finally {
+    waitSettled = true;
+  }
+  // Natural completion claims the result only if no stop intent got there
+  // first — a kill-caused exit code (e.g. -9) must not overwrite timeout/abort.
+  claim({ kind: "exit", exitCode });
+
+  await Promise.all(readers);
+  if (killPromise) await killPromise;
+
+  clearTimer();
+  detachAbort();
+  // Close any pipe still open (stdin was closed at spawn; an EOF'd pipe is
+  // already closed). A close failure is recorded but never overwrites the
+  // captured result.
+  for (const p of [proc?.stdout, proc?.stderr]) {
+    try {
+      if (p && !p.closed) await p.close();
+    } catch (e) {
+      captureErrors.push("pipe close failed: " + toErrorMessage(e));
+    }
+  }
+
+  return buildRunResult(
+    state.outcome ?? { kind: "exit", exitCode: -1 },
+    stdoutParts.join(""),
+    stderrParts.join(""),
+    captureErrors,
+  );
+}
+
+/** Read the nsIProcess exit value defensively: subject (QI'd to nsIProcess)
+ *  first, then the local handle; null when it cannot be read — callers must
+ *  never substitute 0 for "unknown". */
+function readExitValueSafe(subject: any, proc: any): number | null {
+  const Ci = (Components as any)?.interfaces;
+  const tryRead = (obj: any): number | null => {
+    try {
+      if (!obj) return null;
+      let o = obj;
+      if (Ci?.nsIProcess && typeof o.QueryInterface === "function") {
+        try {
+          o = o.QueryInterface(Ci.nsIProcess);
+        } catch {
+          /* keep the raw object */
+        }
+      }
+      const v = o.exitValue;
+      return typeof v === "number" && Number.isFinite(v) ? v : null;
+    } catch {
+      return null;
+    }
+  };
+  return tryRead(subject) ?? tryRead(proc);
+}
+
+function runProcessUnix(
+  resolvedExe: string,
+  args: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
   return new Promise((resolve) => {
-    // Lifted to outer scope so the timeout callback can kill the process,
-    // and the catch block can resolve safely.
+    const Cc = (Components as any).classes;
+    const Ci = (Components as any).interfaces;
+
     let proc: any = null;
+    let outcome: RunOutcome | null = null;
     let settled = false;
-    // M-20: detach the abort listener on every settle path so a never-fired
-    // listener doesn't stay attached to a long-lived caller signal.
     let onAbort: (() => void) | null = null;
-    const safeResolve = (result: ExecResult) => {
-      if (settled) return;
-      settled = true;
+    const captureErrors: string[] = [];
+
+    const claim = (o: RunOutcome): boolean => {
+      if (outcome) return false;
+      outcome = o;
+      return true;
+    };
+
+    const tmpDir =
+      (Zotero as any).getTempDirectory?.() ||
+      Cc["@mozilla.org/file/directory_service;1"]
+        .getService(Ci.nsProperties)
+        .get("TmpD", Ci.nsIFile);
+
+    const ts = Date.now();
+    const makeFile = (suffix: string) => {
+      const f = tmpDir.clone();
+      f.append(`ztransplit-odl-${ts}-${suffix}.txt`);
+      return f.path;
+    };
+    const stdoutPath = makeFile("out");
+    const stderrPath = makeFile("err");
+
+    // L-28: hard-timeout handle, cleared whenever the run settles early.
+    let hardTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const clearHardTimeout = () => {
+      if (hardTimeoutId !== null) {
+        clearTimeout(hardTimeoutId);
+        hardTimeoutId = null;
+      }
+    };
+
+    const removeIfExists = (path: string) => {
+      try {
+        const f = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+        f.initWithPath(path);
+        if (f.exists()) f.remove(false);
+      } catch (e) {
+        safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
+      }
+    };
+
+    const cleanup = () => {
+      clearHardTimeout();
       if (onAbort) {
         try {
           signal?.removeEventListener("abort", onAbort);
         } catch (e) {
           safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
-          /* ignore */
         }
         onAbort = null;
       }
-      resolve(result);
+      // Remove the stdout/stderr capture files — previously these leaked on
+      // every jar invocation, accumulating in the temp dir over time.
+      removeIfExists(stdoutPath);
+      removeIfExists(stderrPath);
     };
 
-    // M-20: already cancelled before spawn — don't even start the JVM.
-    if (signal?.aborted) {
-      resolve({
-        exitCode: -1,
-        stdout: "",
-        stderr: "aborted",
-        timedOut: false,
-        aborted: true,
-      });
+    // Independent reads: one missing/broken capture file must not block the
+    // other stream, and natural exits read before cleanup deletes them.
+    const readCapture = (path: string, label: string): string => {
+      try {
+        const Z = (globalThis as any).Zotero;
+        const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+        file.initWithPath(path);
+        if (!file.exists()) return "";
+        return Z?.File?.getContents?.(file) || "";
+      } catch (e) {
+        captureErrors.push(`${label} capture failed: ${toErrorMessage(e)}`);
+        return "";
+      }
+    };
+
+    const finish = (fallbackHint?: string) => {
+      if (settled) return;
+      settled = true;
+      const stdout = readCapture(stdoutPath, "stdout");
+      const stderr = readCapture(stderrPath, "stderr");
+      cleanup();
+      let o: RunOutcome = outcome ?? { kind: "exit", exitCode: -1 };
+      // process-failed with an unreadable exit value and no output at all is
+      // the one case that still gets the launch-failure hint; any captured
+      // diagnostics take precedence so runtime failures are never rewritten
+      // into "Process failed to launch".
+      if (
+        o.kind === "exit" &&
+        o.exitCode === -1 &&
+        fallbackHint &&
+        !stdout &&
+        !stderr
+      ) {
+        o = { kind: "launch-failure", message: fallbackHint };
+      }
+      resolve(buildRunResult(o, stdout, stderr, captureErrors));
+    };
+
+    const observer = {
+      observe: (subject: any, topic: string) => {
+        if (settled) return;
+        if (topic !== "process-finished" && topic !== "process-failed") {
+          // Unknown topics are not completions at all — and never "success".
+          return;
+        }
+        // Both completion topics share one read-output-then-cleanup path and
+        // propagate the REAL exit value; -1 only when it cannot be read.
+        const code = readExitValueSafe(subject, proc);
+        if (!claim({ kind: "exit", exitCode: code ?? -1 })) return;
+        finish(
+          topic === "process-failed" ? "Process failed to launch" : undefined,
+        );
+      },
+      QueryInterface: (iid: any) => {
+        if (iid.equals(Ci.nsIObserver) || iid.equals(Ci.nsISupports))
+          return observer;
+        throw Components.results.NS_NOINTERFACE;
+      },
+    };
+
+    try {
+      // Unix: shell wrapper with redirection. `exec` makes sh REPLACE itself
+      // with the target process, so proc.pid is the JVM itself and
+      // proc.kill() cannot orphan it.
+      const shPath = "/bin/sh";
+      const cmd = buildUnixCommand(resolvedExe, args, stdoutPath, stderrPath);
+
+      const shellFile = Cc["@mozilla.org/file/local;1"].createInstance(
+        Ci.nsIFile,
+      );
+      shellFile.initWithPath(shPath);
+      proc = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
+      proc.init(shellFile);
+      proc.runwAsync(["-c", cmd], 2, observer);
+    } catch (e: any) {
+      // Sync init/runwAsync failure: clean up anything already created and
+      // keep the real exception as a genuine launch failure.
+      claim({ kind: "launch-failure", message: toErrorMessage(e) });
+      finish();
       return;
     }
 
-    try {
-      const Cc = (Components as any).classes;
-      const Ci = (Components as any).interfaces;
-      const Services = (globalThis as any).Services as any;
+    // Hard timeout: kill the process tree and settle only after the kill has
+    // completed and the capture files were read (no fire-and-forget).
+    hardTimeoutId = setTimeout(() => {
+      if (!claim({ kind: "timeout" })) return;
+      void (async () => {
+        await killProcessTree(proc);
+        finish();
+      })();
+    }, timeoutMs);
 
-      const isWindows = (
-        Services.appinfo?.OS?.toUpperCase?.() ||
-        (navigator as any)?.platform ||
-        ""
-      ).startsWith("WIN");
-
-      // Temp files for stdout/stderr capture
-      const tmpDir =
-        (Zotero as any).getTempDirectory?.() ||
-        Cc["@mozilla.org/file/directory_service;1"]
-          .getService(Ci.nsProperties)
-          .get("TmpD", Ci.nsIFile);
-
-      const ts = Date.now();
-      const makeFile = (suffix: string) => {
-        const f = tmpDir.clone();
-        f.append(`ztransplit-odl-${ts}-${suffix}.txt`);
-        return f.path;
-      };
-
-      const stdoutPath = makeFile("out");
-      const stderrPath = makeFile("err");
-
-      let batPath: string | null = null;
-      // L-28: hard-timeout handle, cleared whenever the run settles early.
-      let hardTimeoutId: ReturnType<typeof setTimeout> | null = null;
-      const clearHardTimeout = () => {
-        if (hardTimeoutId !== null) {
-          clearTimeout(hardTimeoutId);
-          hardTimeoutId = null;
-        }
-      };
-
-      const cleanup = () => {
-        clearHardTimeout();
-        if (batPath) {
-          try {
-            const batFile = Cc["@mozilla.org/file/local;1"].createInstance(
-              Ci.nsIFile,
-            );
-            batFile.initWithPath(batPath);
-            if (batFile.exists()) batFile.remove(false);
-          } catch (e) {
-            safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
-            /* ignore */
-          }
-          batPath = null;
-        }
-        // Also remove the stdout/stderr capture files — previously these leaked
-        // on every jar invocation, accumulating in the temp dir over time.
-        for (const p of [stdoutPath, stderrPath]) {
-          try {
-            const f = Cc["@mozilla.org/file/local;1"].createInstance(
-              Ci.nsIFile,
-            );
-            f.initWithPath(p);
-            if (f.exists()) f.remove(false);
-          } catch (e) {
-            safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
-            /* ignore */
-          }
-        }
-      };
-
-      const finish = (timedOut: boolean, exitValue = 0) => {
-        if (timedOut) {
-          cleanup();
-          safeResolve({
-            exitCode: -1,
-            stdout: "",
-            stderr: "Process timed out",
-            timedOut: true,
-          });
-          return;
-        }
-
-        let stdout = "";
-        let stderr = "";
-        try {
-          const Z = (globalThis as any).Zotero;
-          if (Z?.File?.getContents) {
-            const outFile = Cc["@mozilla.org/file/local;1"].createInstance(
-              Ci.nsIFile,
-            );
-            outFile.initWithPath(stdoutPath);
-            if (outFile.exists()) stdout = Z.File.getContents(outFile) || "";
-
-            const errFile = Cc["@mozilla.org/file/local;1"].createInstance(
-              Ci.nsIFile,
-            );
-            errFile.initWithPath(stderrPath);
-            if (errFile.exists()) stderr = Z.File.getContents(errFile) || "";
-          }
-        } catch (e) {
-          safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
-          // ignore read errors
-        }
-
-        cleanup();
-        // H-1: propagate the REAL exit code. nsIProcess observers receive the
-        // process as `subject`; its `exitValue` reflects the actual exit status
-        // (on Windows, cmd /c forwards the batch child's exit code). Hard-coding
-        // 0 here previously masked JVM crashes (OOM, UnsupportedClassVersion…)
-        // as "success", deferring the failure to a misleading "no output found".
-        safeResolve({ exitCode: exitValue, stdout, stderr, timedOut: false });
-      };
-
-      // Observer
-      const observer = {
-        observe: (subject: any, topic: string) => {
-          if (topic === "process-finished") {
-            finish(false, Number(subject?.exitValue ?? 0));
-          } else {
-            // process-failed
-            cleanup();
-            safeResolve({
-              exitCode: -1,
-              stdout: "",
-              stderr: "Process failed to launch",
-              timedOut: false,
-            });
-          }
-        },
-        QueryInterface: (iid: any) => {
-          if (iid.equals(Ci.nsIObserver) || iid.equals(Ci.nsISupports))
-            return observer;
-          throw Components.results.NS_NOINTERFACE;
-        },
-      };
-
-      if (isWindows) {
-        const batContent = buildBatContent(
-          resolvedExe,
-          args,
-          stdoutPath,
-          stderrPath,
-        );
-        batPath = writeTempFile(batContent, "bat");
-
-        const batFile = Cc["@mozilla.org/file/local;1"].createInstance(
-          Ci.nsIFile,
-        );
-        batFile.initWithPath(batPath);
-        proc = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
-        proc.init(batFile);
-        try {
-          proc.startHidden = true;
-        } catch (e) {
-          safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
-          /* older runtime */
-        }
-        proc.runwAsync([], 0, observer);
-      } else {
-        // Unix: shell wrapper with redirection
-        const shPath = "/bin/sh";
-        const cmd = buildUnixCommand(resolvedExe, args, stdoutPath, stderrPath);
-
-        const shellFile = Cc["@mozilla.org/file/local;1"].createInstance(
-          Ci.nsIFile,
-        );
-        shellFile.initWithPath(shPath);
-        proc = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
-        proc.init(shellFile);
-        proc.runwAsync(["-c", cmd], 2, observer);
-      }
-
-      // Hard timeout: kill the process and resolve after timeoutMs.
-      // Without proc.kill(), orphan JVMs accumulate when the process is
-      // stuck or killed externally (OOM), wasting hundreds of MB each.
-      // L-28: captured so finish()/failure paths can clearTimeout — a
-      // settled promise kept the callback (and its proc/file closures)
-      // alive until the full timeout elapsed.
-      hardTimeoutId = setTimeout(() => {
-        // M-19: await the tree-kill BEFORE resolving — the old fire-and-forget
-        // kill let execJava's finally release the JVM semaphore while the
-        // (orphaned) JVM was still alive, defeating the 2-slot limit.
+    // M-20: cooperative cancellation — mirror the hard-timeout path.
+    if (signal) {
+      onAbort = () => {
+        if (!claim({ kind: "abort" })) return;
         void (async () => {
           await killProcessTree(proc);
-          cleanup();
-          safeResolve({
-            exitCode: -1,
-            stdout: "",
-            stderr: "Process timed out",
-            timedOut: true,
-          });
+          finish();
         })();
-      }, timeoutMs);
-
-      // M-20: cooperative cancellation — mirror the hard-timeout path (tree
-      // kill + cleanup + resolve) when the caller's signal fires. The caller
-      // (runOpenDataLoader) also post-checks signal.aborted as a backstop.
-      if (signal) {
-        onAbort = () => {
-          void (async () => {
-            await killProcessTree(proc);
-            cleanup();
-            safeResolve({
-              exitCode: -1,
-              stdout: "",
-              stderr: "aborted",
-              timedOut: false,
-              aborted: true,
-            });
-          })();
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    } catch (e: any) {
-      safeResolve({
-        exitCode: -1,
-        stdout: "",
-        stderr: toErrorMessage(e),
-        timedOut: false,
-      });
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
     }
   });
 }
 
-function buildBatContent(
-  command: string,
-  args: string[],
-  stdoutPath: string,
-  stderrPath: string,
+/**
+ * Summarize a non-zero JVM exit for the error path. The exit code leads so the
+ * UI's 200-char truncation can never drop it; both streams are kept, labelled,
+ * so upstream errors never silently lose stdout when stderr is present.
+ */
+export function formatJavaExitError(
+  result: Pick<ExecResult, "exitCode" | "stdout" | "stderr">,
 ): string {
-  const q = (s: string) => `"${s}"`;
-  let lines = "@echo off\r\n";
-  lines += `${q(command)} ${args.map((a) => q(a)).join(" ")} > ${q(stdoutPath)} 2> ${q(stderrPath)}\r\n`;
-  return lines;
+  const parts = [`java exited with code ${result.exitCode}`];
+  const stderr = result.stderr.trim();
+  const stdout = result.stdout.trim();
+  if (stderr) parts.push(`stderr: ${stderr}`);
+  if (stdout) parts.push(`stdout: ${stdout}`);
+  return parts.join("\n");
 }
 
 function buildUnixCommand(
@@ -1808,11 +2071,10 @@ async function runOpenDataLoader(
     }
 
     if (result.exitCode !== 0) {
-      const errorMsg =
-        result.stderr.trim() ||
-        result.stdout.trim() ||
-        `java exited with code ${result.exitCode}`;
-      return { success: false, error: errorMsg };
+      // C.3: lead with the real exit code (survives the UI's 200-char
+      // truncation) and keep both streams labelled so the reason is never
+      // dropped upstream.
+      return { success: false, error: formatJavaExitError(result) };
     }
 
     const inputBaseName =
