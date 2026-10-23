@@ -3,6 +3,29 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.12.2] - 2026-10-23
+
+### Fixed
+
+- Native library item context-menu entries no longer lose their text or
+  disappear alongside Z-Transplit's submenu. The plugin used to insert its
+  「Z-Transplit」submenu and separator at the TOP of the `zotero-itemmenu`
+  popup, but Zotero's `buildItemContextMenu` addresses its native entries
+  positionally (`menu.childNodes[i]`, identical on Zotero 7.0.15 and 10) to
+  rewrite labels, rewrite `oncommand`, toggle Fluent `data-l10n-id`
+  bindings, and run its hide/show loop. The two inserted nodes shifted every
+  index by two: label writes landed on neighbouring items ("Remove from
+  Collection" onto "Add to Collection"), `data-l10n-id` was stripped from
+  the wrong node (its label lost for good), entries that should appear
+  stayed hidden, and the plugin's own submenu at index 0 had "Show in
+  Library" written onto it — the native-label corruption previously worked
+  around by re-asserting the label on every popupshowing. The submenu and
+  separator are now APPENDED to the end of the popup (separator first):
+  native entries keep positions 0-28 and every positional write resolves
+  correctly, while the injected nodes sit past the last positional index
+  and are never touched by the host. The label re-assertion stays as free
+  insurance.
+
 ## [1.12.1] - 2026-10-22
 
 ### Fixed
