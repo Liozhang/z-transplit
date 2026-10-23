@@ -20,6 +20,12 @@
  * MenuManager becomes detectable we could migrate, but the injected path is
  * not version-fragile: the popup id exists in both 7 and 10.
  *
+ * Load-bearing constraint: the injected menu and separator must be APPENDED
+ * to the popup, never inserted before its existing children. The host builds
+ * that menu with positional childNodes indexes (labels, oncommand, hidden),
+ * so any top-insertion corrupts every native entry's text and visibility —
+ * see injectIntoWindow.
+ *
  * Loaded dynamically by src/hooks.ts (onMainWindowLoad / onStartup), tracked
  * and revoked by onShutdown.
  *
@@ -312,13 +318,14 @@ function injectIntoWindow(win: any): boolean {
         const items: any[] = zp?.itemsView?.getSelectedItems?.() || [];
         const show = selectionHasPdf(items);
         menu.setAttribute("hidden", show ? "false" : "true");
-        // The leading separator must follow the menu — otherwise an orphan
-        // divider stays visible whenever the submenu hides.
+        // The divider's visibility must track the submenu's — otherwise an
+        // orphan divider stays visible whenever the submenu hides.
         separator.setAttribute("hidden", show ? "false" : "true");
-        // Re-assert the label on EVERY showing: on Zotero 10 the item menu's
-        // labels are (re)written around popupshowing, and our injected menu
-        // was observed displaying a native label ("在文献库中显示", found in
-        // the live-install test on a real library) — re-set wins the race.
+        // Re-assert the label on EVERY showing. The native-label corruption
+        // this guards against ("在文献库中显示" observed on this menu in the
+        // live-install test) came from top-insertion shifting the host's
+        // positional childNodes writes onto us — fixed by appending — but the
+        // re-set is free insurance against future host-side rewrites.
         menu.setAttribute("label", getString("itemtree-menu"));
 
         // Checkmark state, recomputed on every showing so it can never go
@@ -457,9 +464,18 @@ function injectIntoWindow(win: any): boolean {
     const separator = doc.createXULElement("menuseparator");
     separator.id = SEP_ID;
 
-    const firstChild = popup.firstElementChild;
-    popup.insertBefore(separator, firstChild);
-    popup.insertBefore(menu, separator);
+    // Append at the END of the popup, separator first. The host's
+    // buildItemContextMenu addresses its native entries POSITIONALLY —
+    // menu.childNodes[i] for i in 0..28, verified identical on Zotero
+    // 7.0.15 and 10 master — to write labels, rewrite oncommand, toggle
+    // data-l10n-id, and run its hide/show loop. A node inserted before
+    // them shifts every index by one: native entries swap or lose labels
+    // and vanish from the menu, and childNodes[0] — this menu — gets
+    // 「在文献库中显示」 written onto it (observed live before the fix).
+    // Appended nodes sit past the last positional index and are never
+    // touched by the host.
+    popup.appendChild(separator);
+    popup.appendChild(menu);
 
     popup.addEventListener("popupshowing", onShowing);
 
