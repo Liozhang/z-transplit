@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   setWordCardDirForTests,
+  setWordCardClockForTests,
   upsertWordCard,
   getWordCard,
   listWordCards,
@@ -34,14 +35,20 @@ function card(word: string, meaning: string) {
 }
 
 let tmp: string;
+/** Monotonic test clock: consecutive upserts land in the same millisecond on
+ *  Linux CI, so ordering assertions must not depend on Date.now() granularity. */
+let tick: number;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ztransplit-wordcards-"));
   installIOUTilsShim();
   setWordCardDirForTests(tmp);
+  tick = 1_700_000_000_000;
+  setWordCardClockForTests(() => (tick += 10));
 });
 
 afterEach(() => {
+  setWordCardClockForTests(null);
   setWordCardDirForTests(null);
   uninstallIOUTilsShim();
   vi.restoreAllMocks();

@@ -55,6 +55,11 @@ export interface WordCardRecord {
 /** Injectable base directory (tests). Undefined = derive from Zotero.DataDirectory. */
 let overrideBaseDir: string | null | undefined;
 
+/** Injectable clock (tests): same-millisecond writes must still sort by write
+ *  order, and Linux CI writes faster than Windows — a fake monotonic clock
+ *  makes ordering deterministic on every platform. */
+let clockForTests: (() => number) | null = null;
+
 /**
  * Override the store directory (tests; pass null to reset to auto-detect).
  * Always drops the in-memory index: a directory change (or a deliberate
@@ -64,6 +69,15 @@ let overrideBaseDir: string | null | undefined;
 export function setWordCardDirForTests(dir: string | null): void {
   overrideBaseDir = dir;
   indexPromise = null;
+}
+
+/** Override the time source used for createdAt/updatedAt/history (tests). */
+export function setWordCardClockForTests(fn: (() => number) | null): void {
+  clockForTests = fn;
+}
+
+function storeNow(): number {
+  return clockForTests ? clockForTests() : Date.now();
 }
 
 function dataRoot(): string | null {
@@ -277,7 +291,7 @@ export async function upsertWordCard(options: UpsertWordCardOptions): Promise<vo
 
     const index = await getIndex();
     const existing = index.get(key);
-    const now = Date.now();
+    const now = storeNow();
     const record: WordCardRecord = existing ?? {
       v: STORE_VERSION,
       key,
