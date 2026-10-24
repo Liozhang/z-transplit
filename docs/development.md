@@ -70,6 +70,13 @@ jar 更新后必须跑 `npm run check:jar`（与 `PROVENANCE.json` 的 sha256 �
   `node scripts/release-notes.mjs`：走 `npx zotero-plugin release`（需要
   GITHUB_TOKEN）时，GitHub Release 说明自动取自 CHANGELOG.md 当前版本段落，
   不会用中文提交信息生成。手工发布时同样以 CHANGELOG.md 对应段落为正文。
+- 推送 `v*` 标签后由 CI（`.github/workflows/ci.yml` 的 release 任务）自动
+  完成发布：门禁通过 → 构建精简版与完整版 XPI → `scripts/make-update-
+  manifests.mjs` 生成自动更新清单 → 创建 GitHub Release 并上传 → 把清单
+  同步到 `release` 标签预发布。手工发布必须手工补做最后一步——Zotero 的
+  updateURL 指向 `release` 标签上的清单，忘了同步就是 1.9.0–1.12.2 自动
+  更新失效五个版本的原因。日常推送与 PR 由同一工作流的 test 任务跑全量
+  门禁，不需要本地先跑一遍再推。
 
 ### 原文删除器 jar（ztransplit-region-text-remover）
 

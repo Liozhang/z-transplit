@@ -67,6 +67,7 @@ import {
   putCachedTranslation,
 } from "../core/translation/translationCache";
 import { checkTranslationReadiness } from "../core/translation/featureReadiness";
+import { isGoogleFallbackActive } from "../core/translation/translationEngines";
 import {
   flattenCardText,
   isSingleWord,
@@ -888,6 +889,13 @@ export function mountTranslatePane(
       actions.appendChild(copy);
       resultArea.appendChild(text);
       resultArea.appendChild(actions);
+      // 降级提示跟结果同屏：Google 本次会话失败过、译文实际来自 Bing 网页
+      // 接口时如实说明，译文来源不应当对用户不可见。
+      if (isGoogleFallbackActive()) {
+        const note = el(doc, "div", `${CLS}-placeholder`);
+        note.textContent = getString("pane-translate-fallback-note");
+        resultArea.appendChild(note);
+      }
       // Copy failure keeps the result on screen; the hint auto-dismisses.
       if (copyError) {
         const note = el(doc, "div", `${CLS}-error`);

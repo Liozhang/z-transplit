@@ -87,7 +87,7 @@ class FakeFs {
 
 let fs: FakeFs;
 let env: Record<string, string>;
-let platform: "win" | "mac";
+let platform: "win" | "mac" | "linux";
 
 function makeFakeFile() {
   return {
@@ -147,7 +147,8 @@ function buildGlobals(): void {
   (globalThis as any).Zotero = {
     isWin: platform === "win",
     isMac: platform === "mac",
-    platform: platform === "win" ? "win32" : "macosx",
+    platform:
+      platform === "win" ? "win32" : platform === "mac" ? "macosx" : "linux",
   };
 }
 
@@ -332,5 +333,45 @@ describe("javaLocator：macOS", () => {
     env.PATH = "/opt/custom/java/bin:/usr/bin";
 
     expect(resolveJavaExecutable()).toBe("/opt/custom/java/bin/java");
+  });
+});
+
+describe("javaLocator：Linux", () => {
+  beforeEach(() => {
+    platform = "linux";
+    // 否则 isWindows()/isMac() 读到的还是旧值。
+    buildGlobals();
+  });
+
+  it("枚举 /usr/lib/jvm 下的发行版 JDK（目录名不可预测，只能枚举）", () => {
+    fs.addFile("/usr/lib/jvm/java-17-openjdk-amd64/bin/java");
+    fs.addFile("/usr/lib/jvm/temurin-17-jdk-aarch64/bin/java");
+
+    const candidates = findJavaCandidates();
+    expect(candidates).toContain("/usr/lib/jvm/java-17-openjdk-amd64/bin/java");
+    expect(candidates).toContain("/usr/lib/jvm/temurin-17-jdk-aarch64/bin/java");
+  });
+
+  it("/usr/bin/java（真实可执行文件）在枚举位置之后兜底", () => {
+    fs.addFile("/usr/lib/jvm/java-17-openjdk/bin/java");
+    fs.addFile("/usr/bin/java");
+
+    const candidates = findJavaCandidates();
+    expect(candidates.indexOf("/usr/lib/jvm/java-17-openjdk/bin/java")).toBeLessThan(
+      candidates.indexOf("/usr/bin/java"),
+    );
+  });
+
+  it("只有 /usr/bin/java 时也能找到（Linux 上它不是存根）", () => {
+    fs.addFile("/usr/bin/java");
+    expect(resolveJavaExecutable()).toBe("/usr/bin/java");
+  });
+
+  it("JAVA_HOME 在 Linux 同样最优先", () => {
+    fs.addFile("/opt/jdk/bin/java");
+    fs.addFile("/usr/bin/java");
+    env.JAVA_HOME = "/opt/jdk";
+
+    expect(resolveJavaExecutable()).toBe("/opt/jdk/bin/java");
   });
 });

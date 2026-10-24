@@ -459,6 +459,58 @@ describe("engine wire contracts", () => {
     expect(h.fetchCalls.filter((c) => c.url.includes("translate_a/single"))).toHaveLength(2);
   });
 
+  it("switching away from the google engine clears the sticky fallback marker", async () => {
+    // 用户切到别的引擎（或改回 google）后，一次旧故障不应把本会话钉死在
+    // Bing 上到重启为止：创建非 google 引擎的翻译器时清除标记。
+    resetBingWebSession();
+    setPrefs({ "translate.engineType": "google" });
+    route("translate_a/single", () =>
+      jsonResponse({ message: "blocked" }, false, 500, "Internal Server Error"),
+    );
+    route("www.bing.com/translator", () => {
+      const html =
+        '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
+        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
+        '<div id="rich_tta" data-iid="translator.5023"></div></html>';
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://cn.bing.com/translator",
+        text: async () => html,
+      } as any;
+    });
+    route("ttranslatev3", () =>
+      jsonResponse([
+        [
+          {
+            detectedLanguage: { language: "en" },
+            translations: [{ text: "你好", to: "zh-Hans" }],
+          },
+        ],
+      ]),
+    );
+
+    const t = createTranslator("zh-CN");
+    expect(await t("hello", "zh-CN")).toBe("你好");
+    expect(isGoogleFallbackActive()).toBe(true);
+    const bingHits = h.fetchCalls.filter((c) => c.url.includes("ttranslatev3")).length;
+    expect(bingHits).toBeGreaterThan(0);
+
+    // 切到 bing-web 再切回来：标记已清，google 端点重新被探测（仍然失败，
+    // 于是再走一次 Bing——但 google 不再被跳过）。
+    setPrefs({ "translate.engineType": "bing-web" });
+    createTranslator("zh-CN");
+    expect(isGoogleFallbackActive()).toBe(false);
+
+    setPrefs({ "translate.engineType": "google" });
+    const t2 = createTranslator("zh-CN");
+    const before = h.fetchCalls.filter((c) => c.url.includes("translate_a/single")).length;
+    await t2("world", "zh-CN");
+    const after = h.fetchCalls.filter((c) => c.url.includes("translate_a/single")).length;
+    expect(after).toBe(before + 1); // google 端点被重新探测
+  });
+
   it("bing web rejection (statusCode 400) refreshes the session and retries once", async () => {
     resetBingWebSession();
     setPrefs({ "translate.engineType": "google" });

@@ -953,6 +953,11 @@ export function createTranslator(
   sourceLanguage?: string,
 ): ParagraphTranslator {
   const cfg = getEngineConfig();
+  // 切走 Google 引擎即清除会话降级标记：回来时重新探测，不被一次旧故障
+  // 困在 Bing 里到重启为止。降级只在 google 引擎自身的失败处置里置位。
+  if (cfg.engineType !== "google") {
+    googleDirectUnavailable = false;
+  }
   const inner = createTranslatorUncached(targetLanguage, sourceLanguage);
 
   return async (text: string, tgt: string, src?: string) => {

@@ -31,6 +31,12 @@ All UI is built with Zotero's native XUL/HTML. No React, no iframe bridge.
    downloaded xpi;
 3. Open a PDF — the "Translate" section and the context-menu entries appear.
 
+> The slim installer (the default download) does not bundle the ~24 MB layout-parsing
+> component or the ~43 MB Java runtime: on first use they are downloaded automatically
+> by racing several mirrors concurrently, and the bytes must pass the official SHA-256
+> checksum before anything is installed — no administrator rights needed. For offline
+> environments, grab the `*-full.xpi` from the release page instead.
+
 ## Features
 
 ### 1. Selection Translation
@@ -136,6 +142,19 @@ reused verbatim by every other entry point.
 | AI | endpoint required, key optional | OpenAI-compatible chat/completions with a user-owned prompt template |
 | Custom | required | OpenAI-compatible chat/completions |
 | zotero-pdf-translate | — | Delegates to the plugin when detected |
+
+### Configuring the AI engine
+
+With the "AI" engine selected, the settings pane gains a "Provider" dropdown at the
+top of the engine section. Picking DeepSeek, Qwen, Zhipu GLM, Kimi, StepFun, OpenAI,
+Ollama or LM Studio fills in the endpoint and a recommended model name automatically,
+usually leaving only the API key to paste — local providers (Ollama, LM Studio) need
+no key at all. "Custom" remains for self-hosted gateways and vLLM. When you are not
+sure what to fill in, start by picking a provider here. Then press "Test connection":
+the plugin sends one minimal request with the values currently in the form and turns
+the outcome into something actionable — key rejected, endpoint not found, unreachable,
+rate limited — so a misconfiguration no longer has to be discovered by running a
+translation first. A model name you edited by hand is never overwritten by a preset.
 
 ![AI engine settings](docs/screenshots/ai-engine.png)
 

@@ -24,6 +24,7 @@ import { mountTranslatePane } from "../../../src/ui/translatePane";
 import {
   clearTranslationCache,
   engineCacheIdentity,
+  resetGoogleFallbackForTests,
 } from "../../../src/core/translation/translationEngines";
 import {
   cacheKey,
@@ -215,6 +216,48 @@ describe("B16 阅读器翻译面板：选区与自动翻译", () => {
     expect(ctx.fm.calls.length).toBe(1);
     expect(ctx.text(ctx.body)).toContain("译文");
     expect(ctx.buttons(K.copy).length).toBe(1);
+  });
+
+  it("Google 降级激活时，成功译文下方附来源提示", async () => {
+    // google 引擎端点失败 → 会话内自动走 Bing 网页接口。译文照常渲染，
+    // 但来源要对用户可见：降级激活期间成功结果下方附一行提示。
+    resetGoogleFallbackForTests();
+    const GOOGLE_PREFS = {
+      ...ENGINE_PREFS,
+      "translate.engineType": "google",
+    };
+    delete (GOOGLE_PREFS as any)["translate.custom.apiUrl"];
+    delete (GOOGLE_PREFS as any)["translate.custom.apiKey"];
+    delete (GOOGLE_PREFS as any)["translate.custom.model"];
+    ctx = setup(GOOGLE_PREFS, ["hello"]);
+    ctx.fm.route("**/translate_a/single**").reply(500, { message: "blocked" });
+    ctx.fm.route("**/www.bing.com/translator**").reply(
+      200,
+      '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
+        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
+        '<div id="rich_tta" data-iid="translator.5023"></div></html>',
+      { "content-type": "text/html" },
+    );
+    ctx.fm.route("**/ttranslatev3**").reply(200, [
+      [
+        {
+          detectedLanguage: { language: "en" },
+          translations: [{ text: "你好", to: "zh-Hans" }],
+        },
+      ],
+    ]);
+
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.action);
+    const deadline = Date.now() + 3000;
+    while (ctx.fm.calls.length < 3 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    await flush();
+
+    expect(ctx.text(ctx.body)).toContain("你好");
+    expect(ctx.text(ctx.body)).toContain("ztransplit-pane-translate-fallback-note");
+    resetGoogleFallbackForTests();
   });
 });
 

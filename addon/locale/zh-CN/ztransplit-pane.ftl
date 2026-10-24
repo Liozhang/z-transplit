@@ -39,6 +39,7 @@ pane-translate-target-placeholder =
 pane-translate-action = 翻译
 pane-translate-result-placeholder = 翻译结果将显示在这里。
 pane-translate-translating = 正在翻译…
+pane-translate-fallback-note = Google 端点本次会话不可达，译文由 Bing 网页接口提供。
 pane-translate-copy = 复制
 pane-translate-copied = 已复制
 pane-translate-retry = 重试

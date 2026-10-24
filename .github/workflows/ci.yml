@@ -1,0 +1,121 @@
+# 持续集成与发布流水线。
+#
+# 背景：2026-10 发现 release 标签上的自动更新清单从 1.9.0 起一直停在 1.8.1
+# （手工发布时忘了更新），且仓库此前没有任何 CI——702 项测试只在本地跑。
+# 本文件把两件事固化下来：
+#
+#   ci      — 每次推送 / PR：安装依赖 → 全量单元测试 → 构建 → 结构/jar 溯源/
+#             QA 门禁。任何一个环节失败都挡住合并。
+#   release — 推送 v* 标签：同一套门禁通过后，构建精简版与完整版 XPI、生成
+#             自动更新清单（scripts/make-update-manifests.mjs）、创建 GitHub
+#             Release（发布说明取自 CHANGELOG.md 对应段落），并把清单同步到
+#             `release` 标签预发布（Zotero 的 updateURL 指向那里）。
+#
+# 权限：release 任务需要 contents: write（创建 Release 与上传资产）。使用
+# 内置 GITHUB_TOKEN，无需额外密钥。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 测试与门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 单元测试（702 项；真实网络端到端默认跳过）
+        run: npm run test:unit
+
+      - name: 构建
+        run: npm run build
+
+      - name: 结构检查
+        run: npm run check:structure
+
+      - name: jar 溯源检查
+        run: npm run check:jar
+
+      - name: QA 测试（门禁自检）
+        run: npm run test:qa
+
+  release:
+    name: 发布（仅 v* 标签）
+    runs-on: ubuntu-latest
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建两个变体并归集产物
+        # 两个变体输出同名文件（.scaffold/build/z-transplit.xpi），必须先归集
+        # 精简版再构建完整版；顺序反了会把完整版当成精简版上传。
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist/update
+          npm run build
+          cp .scaffold/build/z-transplit.xpi "dist/z-transplit.xpi"
+          ZTRANSPLIT_FULL_XPI=1 npm run build
+          cp .scaffold/build/z-transplit.xpi "dist/z-transplit-${VERSION}-full.xpi"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: 生成自动更新清单
+        run: node scripts/make-update-manifests.mjs dist/z-transplit.xpi dist/update
+
+      - name: 发布说明（取自 CHANGELOG.md）
+        run: node scripts/release-notes.mjs > dist/notes.md
+
+      - name: 创建 Release 并上传产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "Release ${TAG}" --notes-file dist/notes.md
+          gh release upload "$TAG" \
+            "dist/z-transplit.xpi" \
+            "dist/z-transplit-${VERSION}-full.xpi" \
+            "dist/update/update.json" \
+            "dist/update/update-beta.json" \
+            --clobber
+
+      # Zotero 的 updateURL 指向 `release` 标签预发布上的清单；每次发布都要
+      # 把它刷到最新版本，否则自动更新停在旧版（1.9.0–1.12.2 曾因此失效）。
+      - name: 同步自动更新清单到 release 标签
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view release >/dev/null 2>&1 || \
+            gh release create release --prerelease --title "Update manifests" --notes "Automatic update manifests only."
+          gh release upload release \
+            "dist/update/update.json" \
+            "dist/update/update-beta.json" \
+            --clobber

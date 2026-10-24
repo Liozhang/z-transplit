@@ -88,6 +88,17 @@ function isMac(): boolean {
 
 /** Apple Silicon (arm64) vs Intel (x64) on macOS. */
 function isMacArm64(): boolean {
+  return isArm64();
+}
+
+/**
+ * ARM64（含 Apple Silicon 与 aarch64 Linux）vs x64。
+ * Adoptium 在 Linux 上同样发布 aarch64 的 JRE——固定下载 x64 会让 ARM 设备
+ * （能跑 Zotero 的 ARM 笔记本、开发板等）装出跑不起来的运行时。
+ * 探测顺序：系统信息服务 → XPCOM ABI（Linux 上最可靠的来源，形如
+ * "aarch64-gnueabi-linux"）→ navigator.platform → Zotero.isARM。
+ */
+function isArm64(): boolean {
   try {
     const sysinfo = (Components as any).classes[
       "@mozilla.org/system-info;1"
@@ -97,6 +108,22 @@ function isMacArm64(): boolean {
     if (/aarch64|arm64/i.test(arch)) return true;
   } catch (e) {
     safeDebug("[Z-Transplit] JavaRuntimeManager: " + e);
+    /* ignore */
+  }
+  try {
+    const appinfo = (Components as any).classes[
+      "@mozilla.org/xre/app-info;1"
+    ]?.getService?.((Components as any).interfaces?.nsIXULRuntime);
+    const abi = ((appinfo as any)?.XPCOMABI as string) || "";
+    if (/aarch64|arm64/i.test(abi)) return true;
+    if (/x86_64|amd64/i.test(abi)) return false;
+  } catch (e) {
+    safeDebug("[Z-Transplit] JavaRuntimeManager: " + e);
+    /* ignore */
+  }
+  try {
+    if (/aarch64|arm64/i.test(navigator?.platform || "")) return true;
+  } catch (e) {
     /* ignore */
   }
   // Fallback: Zotero 7+ may expose isARM
@@ -450,7 +477,11 @@ interface AdoptiumAsset {
 }
 
 /** Adoptium os/arch/archive triple for the current machine. */
-function platformDescriptor(): {
+/**
+ * 当前平台的 Adoptium 取件描述符。导出仅供测试（javaRuntimeManager.test.ts
+ * 在假宿主上覆盖 win/mac/linux × x64/aarch64 的判定分支）。
+ */
+export function platformDescriptor(): {
   os: string;
   arch: string;
   archive: "zip" | "tar.gz";
@@ -459,7 +490,8 @@ function platformDescriptor(): {
   if (isMac()) {
     return { os: "mac", arch: isMacArm64() ? "aarch64" : "x64", archive: "tar.gz" };
   }
-  return { os: "linux", arch: "x64", archive: "tar.gz" };
+  // Linux：Adoptium 同样发布 aarch64 的 JRE，按机器实际架构取件。
+  return { os: "linux", arch: isArm64() ? "aarch64" : "x64", archive: "tar.gz" };
 }
 
 /**

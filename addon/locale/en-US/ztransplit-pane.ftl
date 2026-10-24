@@ -40,6 +40,7 @@ pane-translate-target-placeholder =
 pane-translate-action = Translate
 pane-translate-result-placeholder = Translation will appear here.
 pane-translate-translating = Translating…
+pane-translate-fallback-note = Google was unreachable this session; this translation came from the Bing web endpoint.
 pane-translate-copy = Copy
 pane-translate-copied = Copied
 pane-translate-retry = Retry

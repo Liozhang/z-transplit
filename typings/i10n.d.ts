@@ -136,6 +136,7 @@ export type FluentMessageId =
   | 'pane-translate-error-not-ready'
   | 'pane-translate-error-service'
   | 'pane-translate-error-too-long'
+  | 'pane-translate-fallback-note'
   | 'pane-translate-lang-auto'
   | 'pane-translate-looking-up'
   | 'pane-translate-lookup-action'

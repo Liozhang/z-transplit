@@ -3,6 +3,47 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- A continuous-integration workflow (`.github/workflows/ci.yml`). Every push
+  and pull request now runs the full unit suite, the build, and the
+  structure / jar-provenance / QA gates on GitHub instead of relying on local
+  runs. Pushing a `v*` tag additionally builds both XPI variants (slim and
+  full), generates the Zotero auto-update manifests
+  (`scripts/make-update-manifests.mjs`), creates the GitHub Release with notes
+  taken from CHANGELOG.md, and syncs the manifests onto the `release` tag that
+  the plugin's updateURL polls — the step manual releases kept forgetting (the
+  manifests sat at 1.8.1 from 1.9.0 through 1.12.2, silently disabling
+  auto-update for five releases).
+
+### Fixed
+
+- ARM64 Linux devices (ARM laptops and boards that run Zotero) downloaded an
+  x64 Java runtime that could not execute. The platform descriptor treated
+  Linux as x64 unconditionally; it now detects the machine architecture
+  (system info service, then the XPCOM ABI string, then `navigator.platform`,
+  then `Zotero.isARM`) and fetches Adoptium's aarch64 build, exactly like the
+  existing Apple Silicon path.
+- The Linux java locator only tried `/usr/bin/java` and `/usr/local/bin/java`.
+  It now enumerates `/usr/lib/jvm/*` first — where apt, dnf and pacman all
+  install JDKs under unpredictable directory names — so an installed JDK is
+  found even when PATH was never configured.
+- When the Google engine fell back to the Bing web endpoint, the translation
+  appeared with no indication of where it came from. The selection pane now
+  shows a note under the result for the rest of the session ("Google was
+  unreachable this session; this translation came from the Bing web
+  endpoint"), so the provenance of the text is never invisible.
+- The session-sticky Google fallback never cleared until a Zotero restart:
+  after one failure, switching engines and back still went straight to Bing.
+  Creating a translator for any non-Google engine now clears the marker, so
+  returning to Google re-probes the real endpoint.
+- The English README was missing the 1.13.0 features (the AI provider
+  presets, the "Test connection" button and the mirror-racing downloads) that
+  the Chinese README documented, and neither README explained that the slim
+  installer downloads the parsing component and Java runtime on first use.
+
 ## [1.13.0] - 2026-10-23
 
 ### Added

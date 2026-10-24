@@ -88,8 +88,23 @@ function absoluteCandidates(): string[] {
   } else if (isMac()) {
     out.push(...macCandidates());
   } else {
-    out.push("/usr/bin/java", "/usr/local/bin/java");
+    out.push(...linuxCandidates());
   }
+  return out;
+}
+
+/**
+ * Linux 候选：发行版包管理器（apt/dnf/pacman…）统一把 JDK 装在
+ * /usr/lib/jvm/<名称>，目录名不可预测，只能枚举。/usr/bin/java 在 Linux 上
+ * 是真实可执行文件（通常由 alternatives 指向当前 JDK），不是 macOS 那种
+ * 存根，但 PATH 没配好时它也可能缺失，枚举是兜底。
+ */
+function linuxCandidates(): string[] {
+  const out: string[] = [];
+  for (const jvm of childDirs("/usr/lib/jvm")) {
+    out.push(`/usr/lib/jvm/${jvm}/bin/java`);
+  }
+  out.push("/usr/bin/java", "/usr/local/bin/java");
   return out;
 }
 
