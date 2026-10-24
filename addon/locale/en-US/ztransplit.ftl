@@ -51,6 +51,7 @@ translation-error-ai-prompt-unbalanced-braces = The AI prompt template has unbal
 ## Translation feature readiness (src/core/translation/featureReadiness.ts)
 readiness-reason-engine-key = Translation engine API key is missing
 readiness-reason-engine-url = Custom translation endpoint URL is missing
+readiness-reason-ai-url = Missing AI translation endpoint (pick a provider in the settings to fill it in automatically)
 readiness-reason-engine-plugin = The zotero-pdf-translate plugin is not installed or not enabled
 readiness-reason-ai-prompt = The AI engine's prompt template is invalid — fix it in the settings pane
 readiness-reason-unknown = Unknown reason
@@ -130,15 +131,28 @@ java-install-failed =
 java-progress-already-installed = The Java runtime is already installed.
 java-progress-self-heal = The managed Java runtime is broken — reinstalling automatically…
 java-progress-download-start = Downloading Java { $version } JRE ({ $archive })…
+java-progress-probe = Selecting a download source…
+err-java-not-found = No usable Java runtime was found. Install JDK 11 or later, or let the plugin download a portable JRE for you (Settings → PDF split translation → Java runtime; no administrator rights needed).
 java-progress-downloading = Downloading… { $percent }%
 java-progress-reuse-archive = Reusing the previously downloaded archive (checksum verified) — skipping the download…
 java-error-download-failed = Download failed: { $detail }
-java-error-download-http = Download failed: HTTP { $status }
 java-error-checksum-mismatch = Installer archive failed checksum verification (SHA-256 mismatch) and was discarded. Please retry.
 java-progress-extracting = Extracting…
 java-progress-verifying = Verifying the installation…
 java-error-extract-failed = Extraction failed: { $detail }
 java-error-exe-not-found = No java executable found after extraction (in { $dir }). Please install Java manually from https://adoptium.net.
+
+## AI engine "Test connection" result classes (src/core/ai/connectionTest.ts)
+ai-test-ok = Connection succeeded: model { $model } responded ({ $ms } ms).
+ai-test-auth = Key rejected (401/403). Check the API key; local providers (Ollama, etc.) may leave it empty. Detail: { $detail }
+ai-test-not-found = Endpoint not found (404). Check the provider selection or the URL. Detail: { $detail }
+ai-test-rate-limit = Rate limited (429), please retry later. Detail: { $detail }
+ai-test-network = Cannot reach the endpoint: { $detail }. It may be unreachable, or a proxy may be required.
+ai-test-timeout = Connection timed out ({ $ms } ms). The endpoint is unreachable, or a proxy is required.
+ai-test-http = Server returned an error (HTTP { $status }): { $detail }
+ai-test-empty = The endpoint responded, but the model returned no content. Try a different model name.
+ai-test-invalid = Fill in the endpoint URL first, then test.
+ai-test-server-default = server default
 java-error-probe-failed = The downloaded Java failed to run: { $detail }
 java-progress-done = Java installation complete
 

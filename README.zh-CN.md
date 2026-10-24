@@ -103,9 +103,19 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 | Google | 可留空 | 免费端点，失败自动切 Bing 网页接口兜底 |
 | Bing | 必填 | Azure 翻译器 REST API |
 | DeepL | 必填 | free / pro 端点可选 |
-| AI 翻译 | 接口地址必填，密钥可留空 | OpenAI 兼容 chat/completions，提示词模板可自定义 |
+| AI 翻译 | 视服务商而定 | OpenAI 兼容 chat/completions，提示词模板可自定义 |
 | 自定义接口 | 必填 | OpenAI 兼容 chat/completions |
 | zotero-pdf-translate | — | 检测到该插件时可直接转交 |
+
+### 配置 AI 翻译
+
+选「AI 翻译」引擎后，设置面板顶部多出一个「服务商」下拉：选中
+DeepSeek、通义千问、智谱 GLM、Kimi、StepFun、OpenAI、Ollama、LM Studio
+中的任何一个，接口地址和模型名都会自动填好，通常只需再粘贴 API 密钥
+（本地服务商连密钥都不需要）。不知道填什么，就先在这里选一个服务商；
+「自定义」留给自建网关、vLLM 等高级用法。填完后点「测试连接」：插件用
+当前表单值发一个最小请求，成功或失败（密钥错、地址错、连不上、被限流）
+都会给出能直接行动的提示，不必先点翻译试错。
 
 ![AI 翻译引擎设置](docs/screenshots/zh-CN/ai-engine.png)
 

@@ -81,6 +81,8 @@ preferences-ztransplit-region-desc =
     选择你所在的网络环境后，插件会把该区域的推荐值写入仍处于出厂默认状态的
     设置（例如中国大陆默认使用免密钥可达的 Bing 网页引擎）。你显式选择过的
     引擎永远不会被区域选择覆盖；保持「自动」则一切维持现状。
+    如果你在中国大陆：Google 翻译端点不可达，保持「自动」时每段翻译要先等
+    一次超时才自动改走 Bing 网页端，选「中国大陆」可免去这份等待。
 preferences-ztransplit-region-note-applied =
     已按所选网络区域应用推荐值：仍为出厂默认的相关设置被改写，你显式选择过的
     引擎未被覆盖。
@@ -146,6 +148,40 @@ preferences-ztransplit-deepl-use-free-desc =
     鉴权错误。
 
 ## AI 翻译（OpenAI 兼容 + 用户自建提示词模板）
+## AI 服务商预设（选中即填入端点与推荐模型，只需粘密钥）
+preferences-ztransplit-ai-provider =
+    .value = 服务商
+preferences-ztransplit-ai-provider-desc =
+    选择服务商后，接口地址和模型名会自动填好，通常只需再粘贴 API 密钥。
+    不知道填什么时，先在这里选一个服务商。「自定义」留给自建网关、vLLM 等
+    高级用法；选「不预设」则保留当前已填内容、不做任何改动。
+preferences-ztransplit-ai-provider-none =
+    .label = 不预设（保留当前填写）
+preferences-ztransplit-ai-provider-deepseek =
+    .label = DeepSeek
+preferences-ztransplit-ai-provider-qwen =
+    .label = 通义千问（阿里云百炼）
+preferences-ztransplit-ai-provider-glm =
+    .label = 智谱 GLM
+preferences-ztransplit-ai-provider-kimi =
+    .label = Kimi（月之暗面）
+preferences-ztransplit-ai-provider-stepfun =
+    .label = StepFun（阶跃星辰）
+preferences-ztransplit-ai-provider-openai =
+    .label = OpenAI（国际网络）
+preferences-ztransplit-ai-provider-ollama =
+    .label = Ollama（本机，无需密钥）
+preferences-ztransplit-ai-provider-lmstudio =
+    .label = LM Studio（本机，无需密钥）
+preferences-ztransplit-ai-provider-custom =
+    .label = 自定义
+preferences-ztransplit-ai-test-button =
+    .label = 测试连接
+    .tooltiptext = 用当前填写的地址、密钥和模型发送一个最小请求，验证配置是否正确。
+preferences-ztransplit-ai-test-checking = 正在测试…
+preferences-ztransplit-ai-test-nobundle =
+    插件主模块尚未加载，无法测试。请重启 Zotero 后重试。
+
 preferences-ztransplit-ai-api-url =
     .value = 接口地址
 preferences-ztransplit-ai-api-url-desc =

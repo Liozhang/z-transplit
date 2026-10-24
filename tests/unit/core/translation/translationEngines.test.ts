@@ -33,6 +33,8 @@ import {
   getEngineConfig,
   clearTranslationCache,
   resetBingWebSession,
+  resetGoogleFallbackForTests,
+  isGoogleFallbackActive,
   createTranslator,
   createAIBatchTranslator,
   supportsBatching,
@@ -80,6 +82,7 @@ beforeEach(() => {
   setPrefs({});
   clearTranslationCache();
   resetBingWebSession();
+  resetGoogleFallbackForTests();
   delete Z.PDFTranslate;
 
   vi.stubGlobal("fetch", (url: string, init: any = {}) => {
@@ -389,6 +392,71 @@ describe("engine wire contracts", () => {
     expect(body.get("text")).toBe("hello");
     expect(body.get("token")).toBeNull();
     expect(body.get("key")).toBeNull();
+  });
+
+  it("google failure is sticky for the session: later paragraphs skip the dead endpoint", async () => {
+    // 大陆默认配置的真实形态：Google 端点不可达，兜底链路每段都要先付一次
+    // 10 秒超时。第一次失败后标记置上，本会话后续请求直连 Bing 网页端——
+    // 50 段的全文翻译因此从 500 秒纯等待降到 1 次。
+    resetBingWebSession();
+    setPrefs({ "translate.engineType": "google" });
+    route("translate_a/single", () =>
+      jsonResponse({ message: "blocked" }, false, 500, "Internal Server Error"),
+    );
+    route("www.bing.com/translator", () => {
+      const html =
+        '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
+        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
+        '<div id="rich_tta" data-iid="translator.5023"></div></html>';
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://cn.bing.com/translator",
+        text: async () => html,
+      } as any;
+    });
+    route("ttranslatev3", () =>
+      jsonResponse([
+        [
+          {
+            detectedLanguage: { language: "en" },
+            translations: [{ text: "你好", to: "zh-Hans" }],
+          },
+        ],
+      ]),
+    );
+
+    const t = createTranslator("zh-CN");
+
+    // 第一段：Google 失败 → 拿令牌 → 翻译（3 次请求）
+    expect(await t("hello", "zh-CN")).toBe("你好");
+    expect(isGoogleFallbackActive()).toBe(true);
+    const afterFirst = h.fetchCalls.length;
+
+    // 第二段：不再试探 Google，Bing 会话已缓存，直接一发翻译请求
+    expect(await t("world", "zh-CN")).toBe("你好");
+    const secondRound = h.fetchCalls.slice(afterFirst);
+    expect(secondRound.some((c) => c.url.includes("translate_a/single"))).toBe(
+      false,
+    );
+    expect(secondRound).toHaveLength(1);
+    expect(secondRound[0].url).toContain("ttranslatev3");
+  });
+
+  it("a successful google round keeps probing google on every paragraph", async () => {
+    // 反向护栏：Google 可用时绝不能变得黏滞——否则 outage 恢复后本会话再也
+    // 不回官方端点。每次调用都应重新打 Google。
+    setPrefs({ "translate.engineType": "google" });
+    route("translate_a/single", () =>
+      jsonResponse([[["你好", "hello", null, null, 1]], null, "en"]),
+    );
+
+    const t = createTranslator("zh-CN");
+    expect(await t("hello", "zh-CN")).toBe("你好");
+    expect(await t("world", "zh-CN")).toBe("你好");
+    expect(isGoogleFallbackActive()).toBe(false);
+    expect(h.fetchCalls.filter((c) => c.url.includes("translate_a/single"))).toHaveLength(2);
   });
 
   it("bing web rejection (statusCode 400) refreshes the session and retries once", async () => {

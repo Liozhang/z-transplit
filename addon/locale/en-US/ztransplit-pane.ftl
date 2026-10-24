@@ -47,7 +47,7 @@ pane-translate-copy-failed = Copy failed: { $error }
 pane-translate-error = Translation failed: { $error }
 pane-translate-error-empty = Empty translation: the service returned nothing usable. Try again, or pick a different target language.
 pane-translate-error-service = Translation service unavailable: could not load the engine module ({ $error }). Restart Zotero and try again; if it still fails, check Zotero's debug output.
-pane-translate-error-not-ready = Translation is not ready: { $reason }. Complete the setup in the settings and try again.
+pane-translate-error-not-ready = Translation is not ready: { $reason }. Complete it under Edit ▸ Settings ▸ Z-Transplit ▸ Engine and try again.
 pane-translate-error-too-long = The selection is { $count } characters, above the { $max }-character limit per request. Narrow the selection and try again.
 
 ## Single-word lookup (dictionary card) and the recent-words chip strip

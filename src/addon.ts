@@ -6,6 +6,11 @@ import {
   getOdlJarStatus,
   installOdlJar,
 } from "./core/pdf/OpenDataLoaderPdfClient";
+import {
+  testAiConnection,
+  type AiConnectionConfig,
+  type AiTestResult,
+} from "./core/ai/connectionTest";
 
 /**
  * Addon singleton, published as `Zotero.ZTransplit` by src/index.ts (the name
@@ -46,6 +51,17 @@ class Addon {
     getStatus: typeof getOdlJarStatus;
     install: typeof installOdlJar;
   };
+  /**
+   * AI 引擎配置的编程入口，供设置面板脚本（addon/content/preferences.js）
+   * 使用，与 java/odlJar 同一约定：testConnection 用面板当前表单值发一个
+   * 最小请求（参数由面板显式传入，不读偏好——测的就是用户眼前的值），把
+   * 结果分类成用户能行动的种类（密钥错 / 地址错 / 不可达 / 限流 / 成功）。
+   */
+  public ai: {
+    testConnection: (
+      config: AiConnectionConfig,
+    ) => Promise<AiTestResult>;
+  };
 
   constructor() {
     this.data = {
@@ -63,6 +79,9 @@ class Addon {
     this.odlJar = {
       getStatus: getOdlJarStatus,
       install: installOdlJar,
+    };
+    this.ai = {
+      testConnection: testAiConnection,
     };
   }
 }

@@ -137,6 +137,12 @@ const STAGING_DIR = ZTSPLIT + SEP + "java-runtime.staging";
 const ARCHIVE_ZIP = ZTSPLIT + SEP + "java-runtime.download.zip";
 const META_JSON = ZTSPLIT + SEP + "java-runtime.download.json";
 
+/** 与 JavaRuntimeManager 的 JRE_MIRRORS 一致：南京大学在前（实测最快）。 */
+const MIRROR_BASES = [
+  "https://mirrors.nju.edu.cn/adoptium",
+  "https://mirrors.tuna.tsinghua.edu.cn/Adoptium",
+];
+const MIRROR_BASE = MIRROR_BASES[0];
 const RELEASE_1 = {
   link: "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jre_x64_windows_hotspot_17.0.20.1_1.zip",
   name: "OpenJDK17U-jre_x64_windows_hotspot_17.0.20.1_1.zip",
@@ -155,6 +161,16 @@ interface HostState {
   mode: "win" | "mac";
   /** 元数据接口是否不可达（断网场景）。 */
   assetsUnreachable: boolean;
+  /** 国内镜像状态：不可达时探测返回 502；bytes 是镜像实际服务的字节。 */
+  mirror: { reachable: boolean; bytes: Uint8Array };
+  /** 按 URL 子串注入的响应延迟（毫秒），用于模拟「谁快谁胜出」的排序。 */
+  latencyMs: Record<string, number>;
+  /** URL 含其中任一子串时直接连接失败（模拟某个源整体不可达）。 */
+  down: string[];
+  /** 官方二进制地址是否连接失败（模拟 GitHub 完全不可达）。 */
+  officialDown: boolean;
+  /** 整包下载（responseType=arraybuffer）的 URL——探测是 text，不计入。 */
+  downloads: string[];
   /** 当前「上游最新版本」的下载地址与官方校验和。 */
   remote: { link: string; name: string; checksum: string };
   /** java -version 退出码队列（每次探测消耗一个，空则取 0）。 */
@@ -293,8 +309,17 @@ function buildGlobals(): void {
       },
     }),
     HTTP: {
-      async request(_method: string, url: string) {
+      async request(_method: string, url: string, options?: { responseType?: string }) {
         h.httpCalls.push(url);
+        const latency = Object.entries(h.latencyMs).reduce(
+          (acc, [needle, ms]) => (url.includes(needle) ? Math.max(acc, ms) : acc),
+          0,
+        );
+        if (latency > 0) await new Promise((r) => setTimeout(r, latency));
+        if (h.down.some((needle) => url.includes(needle))) {
+          throw new Error("NetworkError: cannot connect");
+        }
+        if (options?.responseType === "arraybuffer") h.downloads.push(url);
         if (url.includes("/v3/assets/latest/")) {
           if (h.assetsUnreachable) throw new Error("NetworkError: offline");
           return {
@@ -313,13 +338,22 @@ function buildGlobals(): void {
             ],
           };
         }
-        if (url === RELEASE_1.link) {
-          return { status: 200, response: Uint8Array.from(ARCHIVE_1_BYTES).buffer };
+        // 国内镜像（多个）：路径由官方 API 返回的包名推导，与 buildJreSources
+        // 一致；任一基址命中都走同一套可达性/字节控制。
+        if (MIRROR_BASES.some((base) => url.startsWith(base))) {
+          if (!h.mirror.reachable) return { status: 502, response: null };
+          return {
+            status: 200,
+            response: Uint8Array.from(h.mirror.bytes).buffer,
+          };
         }
-        if (url === RELEASE_2.link) {
-          return { status: 200, response: Uint8Array.from(ARCHIVE_2_BYTES).buffer };
+        if (url === RELEASE_1.link || url === RELEASE_2.link) {
+          if (h.officialDown) throw new Error("NetworkError: cannot connect");
+          const bytes = url === RELEASE_1.link ? ARCHIVE_1_BYTES : ARCHIVE_2_BYTES;
+          return { status: 200, response: Uint8Array.from(bytes).buffer };
         }
         if (url.includes("/v3/binary/latest/")) {
+          if (h.officialDown) throw new Error("NetworkError: cannot connect");
           return { status: 200, response: Uint8Array.from(ARCHIVE_1_BYTES).buffer };
         }
         return { status: 404, response: null };
@@ -395,6 +429,11 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
       fs: new FakeFS(),
       mode: "win",
       assetsUnreachable: false,
+      mirror: { reachable: false, bytes: ARCHIVE_1_BYTES },
+      latencyMs: {},
+      down: [],
+      officialDown: false,
+      downloads: [],
       remote: { link: RELEASE_1.link, name: RELEASE_1.name, checksum: sha256(ARCHIVE_1_BYTES) },
       versionExits: [],
       tarExits: [],
@@ -424,8 +463,8 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
     expect(host.fs.exists(STAGING_DIR)).toBe(false);
     expect(host.fs.exists(ARCHIVE_ZIP)).toBe(false);
     expect(host.fs.exists(META_JSON)).toBe(false);
-    // 安装包只下载了一次
-    expect(host.httpCalls.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+    // 安装包只下载了一次（探测是区间请求，不计入下载）
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
   });
 
   it("解压中断后重试：校验通过的安装包被保留，重试不再下载（中断继续）", async () => {
@@ -448,7 +487,7 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
 
     expect(javaPath).toBe(winJavaPath());
     // GitHub 安装包自始至终只下载过一次
-    expect(host.httpCalls.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
     expect(
       progressPhases.some((s) => s.includes("java-progress-reuse-archive")),
     ).toBe(true);
@@ -476,7 +515,7 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
     // 先制造一次「下载成功、解压失败」的缓存（对应 17.0.20.1）
     host.tarExits = [1, 1];
     await expect(downloadJRE(17)).rejects.toThrow(/java-error-extract-failed/);
-    expect(host.httpCalls.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
 
     // 上游滚动到 17.0.21+7（校验和变了）
     host.remote = {
@@ -488,8 +527,8 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
 
     expect(javaPath).toBe(winJavaPath());
     // 旧包作废重下：两个版本的包各下载一次
-    expect(host.httpCalls.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
-    expect(host.httpCalls.filter((u) => u === RELEASE_2.link)).toHaveLength(1);
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+    expect(host.downloads.filter((u) => u === RELEASE_2.link)).toHaveLength(1);
     expect(host.fs.exists(ARCHIVE_ZIP)).toBe(false);
   });
 
@@ -504,7 +543,7 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
 
     expect(javaPath).toBe(winJavaPath());
     // 没有再次下载安装包，也没有走 binary 兜底接口
-    expect(host.httpCalls.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
     expect(host.httpCalls.some((u) => u.includes("/v3/binary/"))).toBe(false);
   });
 
@@ -545,6 +584,124 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
     // 坏目录已删除，缓存已清空
     expect(host.fs.exists(RUNTIME_DIR)).toBe(false);
     expect(await getManagedJavaExe()).toBeNull();
+  });
+
+  // ─── 国内镜像取件（大陆网络）──────────────────────────────────
+
+  /** 镜像 URL 与 buildJreSources 的推导规则一致：{base}/{feature}/jre/{arch}/{os}/{包名} */
+  function mirrorUrl(name: string): string {
+    return `${MIRROR_BASES[0]}/17/jre/x64/windows/${name}`;
+  }
+  function tunaMirrorUrl(name: string): string {
+    return `${MIRROR_BASES[1]}/17/jre/x64/windows/${name}`;
+  }
+
+  it("大陆网络：多个镜像可达时从最快的取件，官方地址不被整包下载", async () => {
+    host.mirror = { reachable: true, bytes: ARCHIVE_1_BYTES };
+    // 南京大学探测更快 → 排序胜出（耗时打平时按源表顺序，南京大学在前）
+    host.latencyMs = {
+      "mirrors.nju.edu.cn": 10,
+      "mirrors.tuna.tsinghua.edu.cn": 900,
+      "github.com": 900,
+    };
+
+    const javaPath = await downloadJRE(17);
+
+    expect(javaPath).toBe(winJavaPath());
+    // 整包来自最快的那个镜像；官方地址最多被探测，没有被整包下载
+    expect(host.downloads).toContain(mirrorUrl(RELEASE_1.name));
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(0);
+    // 两个镜像都被探测过（并发探测择优），去重后恰为两个镜像地址
+    const mirrorCalls = new Set(
+      host.httpCalls.filter((u) => MIRROR_BASES.some((b) => u.startsWith(b))),
+    );
+    expect(mirrorCalls.size).toBe(2);
+    expect(host.fs.exists(winJavaPath())).toBe(true);
+  });
+
+  it("最快的镜像不可达：自动降级到下一个国内镜像", async () => {
+    host.mirror = { reachable: true, bytes: ARCHIVE_1_BYTES };
+    host.down = ["mirrors.nju.edu.cn"]; // 首选镜像探测失败
+    host.latencyMs = { "github.com": 500 }; // 官方地址也慢，清华镜像胜出
+
+    const javaPath = await downloadJRE(17);
+
+    expect(javaPath).toBe(winJavaPath());
+    expect(host.downloads).toContain(tunaMirrorUrl(RELEASE_1.name));
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(0);
+  });
+
+  it("镜像字节与官方校验和不符：自动换源到官方地址", async () => {
+    // 镜像被污染/同步错版本：服务的是另一个发布的字节
+    host.mirror = { reachable: true, bytes: ARCHIVE_2_BYTES };
+
+    const javaPath = await downloadJRE(17);
+
+    expect(javaPath).toBe(winJavaPath());
+    // 官方兜底整包下载成功，安装完成
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+  });
+
+  it("镜像不可达：回落到官方地址（境外网络不受影响）", async () => {
+    host.mirror = { reachable: false, bytes: ARCHIVE_1_BYTES };
+
+    const javaPath = await downloadJRE(17);
+
+    expect(javaPath).toBe(winJavaPath());
+    expect(host.downloads.filter((u) => u === RELEASE_1.link)).toHaveLength(1);
+  });
+
+  it("镜像与官方都连接失败：报错列出全部来源，不进入解压", async () => {
+    host.mirror = { reachable: false, bytes: ARCHIVE_1_BYTES };
+    host.officialDown = true;
+
+    await expect(downloadJRE(17)).rejects.toThrow(/java-error-download-failed/);
+    expect(host.fs.exists(STAGING_DIR)).toBe(false);
+    expect(host.fs.exists(RUNTIME_DIR)).toBe(false);
+  });
+
+  it("镜像与官方都可达但字节全部不符：报校验和错误，污染任一来源都装不进来", async () => {
+    host.mirror = { reachable: true, bytes: ARCHIVE_1_BYTES };
+    host.remote = {
+      link: RELEASE_1.link,
+      name: RELEASE_1.name,
+      checksum: "deadbeef".repeat(8), // 与实际内容不符
+    };
+
+    await expect(downloadJRE(17)).rejects.toThrow(/java-error-checksum-mismatch/);
+    expect(host.fs.exists(STAGING_DIR)).toBe(false);
+  });
+
+  it("元数据接口不可达（无官方校验和）时不走镜像：无法验真的字节宁可不要", async () => {
+    host.assetsUnreachable = true;
+    host.mirror = { reachable: true, bytes: ARCHIVE_1_BYTES };
+
+    const javaPath = await downloadJRE(17);
+
+    expect(javaPath).toBe(winJavaPath());
+    // 只有官方 binary 重定向地址被整包下载，镜像一次都没碰
+    expect(host.downloads.some((u) => u.startsWith(MIRROR_BASE))).toBe(false);
+    expect(host.downloads.some((u) => u.includes("/v3/binary/latest/"))).toBe(true);
+  });
+
+  it("Windows 批处理首行切 UTF-8 代码页：中文路径不被 CP936 误解码", async () => {
+    host.mirror = { reachable: true, bytes: ARCHIVE_1_BYTES };
+
+    await downloadJRE(17);
+
+    // 每个派发出去的批处理都以 chcp 65001 开头（实测矩阵：UTF-8 批处理只有
+    // 切了代码页，中文路径才能被 cmd 正确解码；UTF-16LE 在该调用方式下根本
+    // 不被执行）。
+    const bats = host.dispatched.filter((c) => c.includes("ztransplit-jre-"));
+    expect(bats.length).toBeGreaterThan(0);
+    for (const bat of bats) {
+      expect(bat.startsWith("@chcp 65001")).toBe(true);
+    }
+    // 命令行本身完整往返：探测批处理里带 java.exe 全路径与重定向。
+    const probeBat = host.dispatched.find((c) => c.includes("-version"));
+    expect(probeBat).toBeTruthy();
+    expect(probeBat).toContain("java.exe");
+    expect(probeBat).toContain('> "');
   });
 
   it("macOS 布局：Contents/Home/bin/java 也能完成安装（unix 派发分支）", async () => {

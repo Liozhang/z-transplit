@@ -425,6 +425,80 @@
 
       <!-- ai：OpenAI 兼容三件套 + 用户自建 prompt 模板（带校验） -->
       <vbox id="ztransplit-pref-engine-ai" class="ztransplit-engine">
+        <!-- 服务商预设：选中即填端点与推荐模型，把「查文档抄四个值」降成
+             「选一项 + 粘密钥」。选项值与 src/core/ai/providerPresets.ts 的
+             id 一一对应；「不预设」保留用户已填内容。 -->
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="服务商"
+            control="ztransplit-pref-ai-provider"
+            data-l10n-id="preferences-ztransplit-ai-provider"
+          />
+          <menulist
+            id="ztransplit-pref-ai-provider"
+            native="true"
+            value="none"
+          >
+            <menupopup>
+              <menuitem
+                value="none"
+                label="不预设（保留当前填写）"
+                data-l10n-id="preferences-ztransplit-ai-provider-none"
+              />
+              <menuitem
+                value="deepseek"
+                label="DeepSeek"
+                data-l10n-id="preferences-ztransplit-ai-provider-deepseek"
+              />
+              <menuitem
+                value="qwen"
+                label="通义千问（阿里云百炼）"
+                data-l10n-id="preferences-ztransplit-ai-provider-qwen"
+              />
+              <menuitem
+                value="glm"
+                label="智谱 GLM"
+                data-l10n-id="preferences-ztransplit-ai-provider-glm"
+              />
+              <menuitem
+                value="kimi"
+                label="Kimi（月之暗面）"
+                data-l10n-id="preferences-ztransplit-ai-provider-kimi"
+              />
+              <menuitem
+                value="stepfun"
+                label="StepFun（阶跃星辰）"
+                data-l10n-id="preferences-ztransplit-ai-provider-stepfun"
+              />
+              <menuitem
+                value="openai"
+                label="OpenAI（国际网络）"
+                data-l10n-id="preferences-ztransplit-ai-provider-openai"
+              />
+              <menuitem
+                value="ollama"
+                label="Ollama（本机，无需密钥）"
+                data-l10n-id="preferences-ztransplit-ai-provider-ollama"
+              />
+              <menuitem
+                value="lmstudio"
+                label="LM Studio（本机，无需密钥）"
+                data-l10n-id="preferences-ztransplit-ai-provider-lmstudio"
+              />
+              <menuitem
+                value="custom"
+                label="自定义"
+                data-l10n-id="preferences-ztransplit-ai-provider-custom"
+              />
+            </menupopup>
+          </menulist>
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-ai-provider-desc"
+          >选择服务商后，接口地址和模型名会自动填好，通常只需再粘贴 API 密钥。</description>
+        </vbox>
         <hbox class="ztransplit-row" align="center">
           <label
             value="接口地址"
@@ -498,6 +572,23 @@
             data-l10n-id="preferences-ztransplit-ai-model-desc"
           >可留空。要调用的模型名，例如 gpt-4o-mini、qwen-max、glm-4.7。留空时由服务端使用默认模型，翻译质量不受保证。</description>
         </vbox>
+
+        <!-- 测试连接：用当前表单值发一个最小请求。结果文案由主包本地化后
+             原样显示（Zotero.ZTransplit.ai.testConnection），这里只负责按钮
+             与状态行——与 Java/解析组件两节的检测按钮同一套路。 -->
+        <hbox class="ztransplit-row" align="center">
+          <button
+            id="ztransplit-pref-ai-test-btn"
+            class="ztransplit-button"
+            label="测试连接"
+            data-l10n-id="preferences-ztransplit-ai-test-button"
+          />
+          <description
+            id="ztransplit-pref-ai-test-status"
+            class="ztransplit-desc"
+            value=""
+          />
+        </hbox>
 
         <label
           id="ztransplit-pref-ai-prompt-label"
@@ -914,6 +1005,16 @@
       id="ztransplit-pref-string-pdftranslate-missing"
       data-l10n-id="preferences-ztransplit-engine-zotero-pdf-translate-missing"
     >zotero-pdf-translate 插件（未安装）</label>
+    <!-- AI「测试连接」的两段过程文案（正在测试 / 主包未挂载）。结果文案由
+         主包本地化后直接显示，不经过这里。 -->
+    <label
+      id="ztransplit-pref-ai-test-checking-text"
+      data-l10n-id="preferences-ztransplit-ai-test-checking"
+    >正在测试…</label>
+    <label
+      id="ztransplit-pref-ai-test-nobundle-text"
+      data-l10n-id="preferences-ztransplit-ai-test-nobundle"
+    >插件主模块尚未加载，无法测试。请重启 Zotero 后重试。</label>
     <!-- 字体目录回退显示的数据目录占位（读不到 Zotero.DataDirectory.dir 时） -->
     <label
       id="ztransplit-pref-string-datadir"

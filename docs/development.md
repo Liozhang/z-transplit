@@ -14,7 +14,10 @@ src/
 │   ├── translation/                  翻译引擎适配、AI 提示词模板、内容寻址缓存
 │   ├── pdf/                           保排版全文翻译流水线
 │   │   ├── OpenDataLoaderPdfClient.ts  本地 JVM（jar）进程封装
-│   │   ├── JavaRuntimeManager.ts      托管 JRE：缺失时自动下载便携版（SHA-256 校验复用、暂存目录原子安装、损坏自愈）
+│   │   ├── ai/providerPresets.ts   AI 服务商预设表（面板镜像同内容）
+│   │   ├── ai/connectionTest.ts    AI「测试连接」：最小请求 + 结果分类
+│   │   ├── JavaRuntimeManager.ts      托管 JRE：缺失时自动下载便携版（官方 API 取校验和 + 国内镜像取件 + 官方兜底、SHA-256 校验复用、暂存目录原子安装、损坏自愈）
+│   │   ├── javaLocator.ts             跨平台定位 java（JAVA_HOME → 各平台真实安装位置枚举 → PATH）
 │   │   ├── translation/                版式解析 → 逐段翻译 → 重排渲染 → 译文入库
 │   │   └── splitview/                  分屏 Tab：浏览器装载、同步、清理
 │   ├── pdf/sdt/                       Zotero 10 阅读模式（SDT）双语插入视图
@@ -101,7 +104,8 @@ npm run check:jar                            # 对账（同时校验 ODL jar 与
 
 | 层 | 位置 | 说明 |
 | --- | --- | --- |
-| 单元 | `tests/unit/` | 引擎分发、缓存、面板 DOM 行为、设置 pane 显隐与校验、朗读控制、JRE 托管安装中断安全（假宿主驱动真实 `JavaRuntimeManager`）、外部进程 runner 双分支（假 Subprocess/nsIProcess 驱动真实 `runProcess`）、Unicode 探针 fail-closed 判定逻辑（假进程库存/命令执行器驱动 `windows-unicode-probe-gates.mjs`） |
+| 单元 | `tests/unit/` | 引擎分发、缓存、面板 DOM 行为、设置 pane 显隐与校验、朗读控制、JRE 托管安装中断安全（假宿主驱动真实 `JavaRuntimeManager`，含国内镜像取件/换源/兜底分支）、java 跨平台定位（内存虚拟文件系统驱动真实 `javaLocator`）、外部进程 runner 双分支（假 Subprocess/nsIProcess 驱动真实 `runProcess`）、Unicode 探针 fail-closed 判定逻辑（假进程库存/命令执行器驱动 `windows-unicode-probe-gates.mjs`） |
+| 单元（真实网络，默认跳过） | `tests/unit/core/pdf/jreMirrorE2E.test.ts` | `ZT_E2E_NETWORK=1` 启用：真实 fetch/文件系统/子进程桩掉宿主边界，跑完整「官方校验和 → 国内镜像取件 → tar 解压 → java 探测」链路，数据目录用中文路径（覆盖 Windows 代码页问题） |
 | Node 集成 | `tests/node/` | ODL JSON 适配、版式渲染往返、分屏同步、真实 fixture |
 | 真机 | `scripts/qa/real-machine.mjs` | 在真实 Zotero（隔离 profile + 数据目录）里装载构建产物，驱动真实 DOM / 菜单 / 网络 / Java 流水线 |
 | 真机（进程 runner） | `scripts/qa/windows-unicode-probe.mjs` | 隔离诊断插件把生产 `runProcess`/`execJar`/`parsePdfToJson` 打包进真实 Zotero（GUI/headless），验证 Windows Unicode 参数、双流捕获、超时/取消进程树终止与失败诊断 |

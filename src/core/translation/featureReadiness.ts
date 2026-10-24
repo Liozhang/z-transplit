@@ -111,7 +111,10 @@ export function checkTranslationReadiness(
       if (!prefValue(getPref, "translate.ai.apiUrl")) {
         missing.push({
           prefKey: "translate.ai.apiUrl",
-          reasonKey: "readiness-reason-engine-url",
+          // 专用键：与自定义引擎共用一句「缺少自定义翻译接口地址」对选了 AI
+          // 的用户指错了方向——他没选自定义。真实反馈里这是「不知道怎么
+          // 配置 AI」的一环。
+          reasonKey: "readiness-reason-ai-url",
         });
       }
       // An invalid template is a configuration gap the user must close: the

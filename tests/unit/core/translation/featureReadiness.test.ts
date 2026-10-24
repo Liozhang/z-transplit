@@ -106,7 +106,9 @@ describe("checkTranslationReadiness", () => {
       missing: [
         {
           prefKey: "translate.ai.apiUrl",
-          reasonKey: "readiness-reason-engine-url",
+          // AI 引擎专用键：与自定义引擎共用一句「缺少自定义翻译接口地址」
+          // 对选了 AI 的用户指错了方向。
+          reasonKey: "readiness-reason-ai-url",
         },
       ],
     });

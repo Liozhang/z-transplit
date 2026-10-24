@@ -3,6 +3,129 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.0] - 2026-10-23
+
+### Added
+
+- The managed Java runtime now downloads from a domestic mirror when one is
+  reachable. The Adoptium assets API stays the source of the checksum (the
+  trust anchor) and is itself reachable from inside mainland China, but the
+  archive it points at lives on GitHub release assets, where a direct
+  connection effectively never completes — the old code had no fallback, so
+  "install the portable JRE" simply hung or failed. The downloader probes all
+  sources concurrently (1KB range request), ranks them by latency, and takes
+  the fastest, so whichever domestic mirror answers first is the one used.
+  Two Adoptium mirrors are registered, Nanjing University's and Tsinghua's,
+  with the official binary URL last as the global fallback. Mirror bytes are
+  verified against the official SHA-256 before anything is extracted, and a
+  mismatch or an unreachable mirror falls through to the next source, so a
+  polluted or lagging mirror cannot install anything the official checksum
+  does not attest. The mirror path is derived from the package name the API
+  returns (`{base}/{feature}/jre/{arch}/{os}/{packageName}`), so new upstream
+  patch releases need no table update. When the API itself is unreachable
+  there is no checksum to verify against, and mirrors are deliberately
+  skipped in that case rather than installing unverifiable bytes.
+- More sources for the on-demand parsing component (the wheel that carries
+  the OpenDataLoader jar). It previously raced the Aliyun PyPI mirror, the
+  Tsinghua PyPI mirror, official PyPI, and the GitHub Release; three more
+  domestic PyPI mirrors are now registered — Tencent Cloud, Huawei Cloud,
+  and USTC — so six sources race concurrently and the fastest wins. All
+  five domestic mirrors serve a byte-identical wheel (same SHA-256 as
+  official PyPI), which the pinned PROVENANCE fingerprint verifies before
+  anything is extracted; a failing or slow source simply loses the race.
+  Excluded after testing: USTC's Adoptium mirror (stale — it only carries
+  Java 17.0.9 and 404s on current releases) and the Huawei/Tencent/Aliyun
+  Adoptium paths (no such path; they serve a portal page), which is why only
+  Nanjing University and Tsinghua are registered for the Java runtime.
+  Note that Nanjing University's Adoptium mirror has no Apple Silicon
+  (aarch64/mac) build, so macOS ARM installs fall through to Tsinghua or the
+  official URL — the probe mechanism handles this without a special case.
+  Verified end to end on the real network from mainland China
+  (`ZT_E2E_NETWORK=1`): the Nanjing University mirror's Windows x64 zip is
+  byte-identical to the official checksum, and the full
+  download-extract-probe chain completes in about 15 seconds, with the
+  install landing under a Chinese (non-ASCII) data directory path and
+  `java -version` succeeding from it.
+- AI engine provider presets. The engine's three fields (endpoint, key,
+  model) used to be free-text-only, so configuring them meant knowing what
+  an OpenAI-compatible endpoint is, where to get a key, the exact URL shape,
+  and a valid model name — real user feedback was "I don't know how to
+  configure the AI API". The settings pane now has a provider dropdown:
+  picking DeepSeek, Qwen, Zhipu GLM, Kimi, StepFun, OpenAI, Ollama, or LM
+  Studio fills the endpoint and a recommended model name, usually leaving
+  only the key to paste (local providers need no key at all). "Custom"
+  remains for self-hosted gateways and vLLM. A model name the user edited
+  by hand is never overwritten by a preset, and switching to Custom changes
+  nothing. The five mainland providers were verified reachable (401/400 =
+  endpoint alive, key missing); api.openai.com times out from inside
+  mainland China, which is exactly why the presets matter there.
+- A "Test connection" button for the AI engine. It sends one minimal request
+  with the values currently in the form (not the saved prefs) and classifies
+  the outcome into something actionable: key rejected, endpoint not found,
+  rate limited, unreachable (the api.openai.com-from-mainland case), empty
+  completion, or success. Before this, a misconfiguration only surfaced as a
+  raw HTTP error at translation time, with no way to tell which of the three
+  fields was wrong.
+
+### Fixed
+
+- Windows: installing the managed JRE no longer fails when the Zotero data
+  directory contains non-ASCII characters (a Chinese Windows username, for
+  instance). The install path launches its helper commands through a `.bat`
+  file, which `cmd.exe` decodes with the console code page — CP936 on a
+  Simplified Chinese system — so UTF-8-written Chinese paths arrived as
+  mojibake and tar reported "path not found". The batch now starts with
+  `chcp 65001`, switching that cmd session to UTF-8 before the command line
+  is read. Measured on Windows: UTF-8 without the codepage switch fails on
+  Chinese paths and succeeds on ASCII ones; with it, both succeed. (UTF-16LE
+  batch files were tried first and do not work at all under this launch
+  path — they are never executed.) The parse path itself moved to
+  Subprocess/CreateProcessW back in 1.12.0; this covers the install path.
+- "Cannot invoke java" no longer happens when Java is installed but not
+  where the plugin looks. `java` resolution used to be two drifting copies
+  of the same PATH search, each with three hard-coded Windows paths
+  (`...\Eclipse Adoptium\jdk-17`, `jdk-11`) that never match a real Temurin
+  install — the MSI and winget layouts always carry the patch version
+  (`jdk-17.0.20.1-hotspot`). It now lives in one shared module
+  (`src/core/pdf/javaLocator.ts`) that reads `JAVA_HOME` first, then
+  enumerates the real install locations (Eclipse Adoptium / Java / Microsoft
+  / Amazon Corretto / Zulu versioned directories, Android Studio's bundled
+  `jbr`, `/Library/Java/JavaVirtualMachines/*.jdk` on macOS, Homebrew
+  `openjdk@N` for both Apple Silicon and Intel prefixes), and only then
+  falls back to PATH. A `JAVA_HOME` that points at a missing directory is
+  skipped quietly instead of poisoning the result.
+- macOS: `/usr/bin/java` is a system stub that exists and is executable even
+  with no JDK installed, and the old resolver handed it out as if it were a
+  working runtime — the user then got a cryptic "No Java runtime present"
+  from a parse that could never succeed. The stub is now the last candidate,
+  after every real install location.
+- The "no java found" error is now a localized, actionable message naming
+  both options (install a JDK, or let the plugin install its own portable
+  JRE from the settings pane) instead of an English hard-coded string or a
+  raw `spawn java ENOENT`.
+- Mainland China no longer pays a 10-second Google timeout per paragraph.
+  The default engine (Google free endpoint) falls back to the keyless Bing
+  web endpoint when Google fails — but that fallback used to fire per
+  request, so a 50-paragraph paper waited 50 × 10s before the same Bing
+  endpoint that answers in under a second. The failure is now sticky for
+  the session: after the first failure, later paragraphs go straight to
+  Bing. This is reactive (an observed failure), never predictive — it does
+  not guess where the user is, the same stance as region's "auto infers
+  nothing" — and a Zotero restart probes Google again, so a recovered
+  outage is picked up. Measured: translate.googleapis.com times out
+  completely from a mainland connection while www.bing.com answers in
+  0.45s.
+- The readiness error for an unconfigured AI engine no longer says "missing
+  custom endpoint URL" — the message was shared with the custom engine and
+  pointed users who picked AI at a setting they never chose. The AI engine
+  now has its own message, and the not-ready dialog names the exact settings
+  location instead of a vague "complete it in the settings".
+
+### Changed
+
+- `JavaRuntimeManager` and `OpenDataLoaderPdfClient` share one java
+  resolution implementation; the duplicated PATH searches are gone.
+
 ## [1.12.2] - 2026-10-23
 
 ### Fixed

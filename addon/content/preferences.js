@@ -517,6 +517,203 @@
     showRegionNote(written);
   }
 
+  // ── AI 服务商预设 ───────────────────────────────────────────────────────
+
+  // 预设表必须与 src/core/ai/providerPresets.ts 一字不差（面板脚本在独立
+  // 沙箱里无法 import 主包，与 REGION_PROFILES 镜像同一约束）。tests/unit
+  // 下有两侧一致性的对照测试。
+  var AI_PROVIDER_PRESETS = [
+    { id: "deepseek", apiUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+    { id: "qwen", apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+    { id: "glm", apiUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-plus" },
+    { id: "kimi", apiUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
+    { id: "stepfun", apiUrl: "https://api.stepfun.com/v1", model: "step-2-16k" },
+    { id: "openai", apiUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+    { id: "ollama", apiUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b" },
+    { id: "lmstudio", apiUrl: "http://127.0.0.1:1234/v1", model: "" },
+    { id: "custom", apiUrl: "", model: "" },
+  ];
+  var AI_PROVIDER_NONE = "none";
+
+  function findAiPreset(id) {
+    for (var i = 0; i < AI_PROVIDER_PRESETS.length; i++) {
+      if (AI_PROVIDER_PRESETS[i].id === id) return AI_PROVIDER_PRESETS[i];
+    }
+    return null;
+  }
+
+  /**
+   * 把预设写进三个字段。语义与 src/core/ai/providerPresets.ts#applyProviderPreset
+   * 一致：none/custom 不动任何字段；模型名只在当前为空或「另一个预设的值」
+   * 时才覆盖——用户手工改过的模型名不被预设吞掉。
+   */
+  function applyAiProviderPreset(id) {
+    var preset = findAiPreset(id);
+    if (!preset || preset.id === "custom") return;
+    var currentUrl = String(getPref("translate.ai.apiUrl") || "");
+    var currentModel = String(getPref("translate.ai.model") || "");
+    if (preset.apiUrl) setPref("translate.ai.apiUrl", preset.apiUrl);
+    var modelIsPresetOwned =
+      !currentModel ||
+      AI_PROVIDER_PRESETS.some(function (p) {
+        return p.model && p.model === currentModel;
+      });
+    if (preset.model && modelIsPresetOwned) {
+      setPref("translate.ai.model", preset.model);
+    }
+    // 字段被改写即此前的测试结果作废，清掉状态行，避免「连接成功」停在旧
+    // 配置上误导用户。
+    setAiTestStatus("");
+    syncAiProviderEcho(id, currentUrl, currentModel);
+  }
+
+  /** 下拉回显：按当前接口地址反查预设，让老用户的界面状态与配置一致。 */
+  function detectAiPresetId(apiUrl) {
+    var url = String(apiUrl || "").trim().replace(/\/+$/, "").toLowerCase();
+    if (!url) return AI_PROVIDER_NONE;
+    for (var i = 0; i < AI_PROVIDER_PRESETS.length; i++) {
+      var p = AI_PROVIDER_PRESETS[i];
+      if (p.apiUrl && p.apiUrl.replace(/\/+$/, "").toLowerCase() === url) {
+        return p.id;
+      }
+    }
+    return AI_PROVIDER_NONE;
+  }
+
+  function syncAiProviderEcho(id, prevUrl, prevModel) {
+    // XUL 的 preference 绑定只覆盖 xhtml 里声明了 preference 的控件；服务商
+    // 下拉没有绑定 pref（它是动作而非状态），所以地址/模型改写后要显式回填
+    // 三个输入框，否则界面还显示着旧值。
+    if (els.aiUrlInput) {
+      els.aiUrlInput.value = String(getPref("translate.ai.apiUrl") || "");
+    }
+    if (els.aiModelInput) {
+      els.aiModelInput.value = String(getPref("translate.ai.model") || "");
+    }
+    if (els.aiProviderList) {
+      try {
+        els.aiProviderList.value = id;
+      } catch (e) {
+        /* 忽略：下拉值同步失败只影响回显 */
+      }
+    }
+  }
+
+  function onAiProviderPicked() {
+    var id = AI_PROVIDER_NONE;
+    if (els.aiProviderList) {
+      try {
+        id = String(els.aiProviderList.value || AI_PROVIDER_NONE);
+      } catch (e) {
+        id = AI_PROVIDER_NONE;
+      }
+    }
+    applyAiProviderPreset(id);
+  }
+
+  // ── AI 测试连接 ────────────────────────────────────────────────────────
+  // 与 Java/解析组件两节同一套路：面板脚本无法 import 主包，测试逻辑（发一个
+  // 最小请求并按 HTTP status 分类）在主包的 connectionTest.ts 里，经
+  // Zotero.ZTransplit.ai.testConnection 暴露。参数取面板当前表单值——测的
+  // 就是用户眼前看到的配置，不等他先保存。
+
+  var aiTestInFlight = false;
+  var aiTestStrings = {};
+
+  function aiApi() {
+    try {
+      var zt = Zotero && Zotero.ZTransplit;
+      var api = zt && zt.ai;
+      if (api && typeof api.testConnection === "function") return api;
+    } catch (e) {
+      /* 主包未挂载 */
+    }
+    return null;
+  }
+
+  function setAiTestStatus(text, ok) {
+    if (!els.aiTestStatus) return;
+    try {
+      els.aiTestStatus.textContent = text || "";
+      // 成功/失败用颜色区分（class 在 xhtml 的样式表里有定义）；中性态清掉。
+      if (ok === true) {
+        els.aiTestStatus.setAttribute("style", "color: var(--in-content-item-valid-text-color, #2e7d32);");
+      } else if (ok === false) {
+        els.aiTestStatus.setAttribute("style", "color: var(--in-content-item-invalid-text-color, #c62828);");
+      } else {
+        els.aiTestStatus.removeAttribute("style");
+      }
+    } catch (e) {
+      /* 忽略 */
+    }
+  }
+
+  function setAiTestButtonDisabled(disabled) {
+    if (!els.aiTestBtn) return;
+    try {
+      if (disabled) els.aiTestBtn.setAttribute("disabled", "true");
+      else els.aiTestBtn.removeAttribute("disabled");
+    } catch (e) {
+      /* 忽略 */
+    }
+  }
+
+  /** 从隐藏的本地化节点取文案（与 javaStrings 同一约定：JS 不写死字符串）。 */
+  function loadAiTestStrings() {
+    aiTestStrings.checking =
+      ($("ztransplit-pref-ai-test-checking-text") || {}).textContent || "";
+    aiTestStrings.nobundle =
+      ($("ztransplit-pref-ai-test-nobundle-text") || {}).textContent || "";
+  }
+
+  function onAiTest() {
+    if (aiTestInFlight) return;
+    var api = aiApi();
+    if (!api) {
+      setAiTestStatus(aiTestStrings.nobundle || "", false);
+      return;
+    }
+    aiTestInFlight = true;
+    setAiTestButtonDisabled(true);
+    setAiTestStatus(aiTestStrings.checking || "");
+    Promise.resolve()
+      .then(function () {
+        // 表单值优先于 pref：用户可能刚改过还没失焦（XUL preference 绑定在
+        // 部分平台上要等失焦才落盘）。
+        return api.testConnection({
+          apiUrl: String(
+            (els.aiUrlInput && els.aiUrlInput.value) ||
+              getPref("translate.ai.apiUrl") ||
+              "",
+          ),
+          apiKey: String(
+            (els.aiKeyInput && els.aiKeyInput.value) ||
+              getPref("translate.ai.apiKey") ||
+              "",
+          ),
+          model: String(
+            (els.aiModelInput && els.aiModelInput.value) ||
+              getPref("translate.ai.model") ||
+              "",
+          ),
+        });
+      })
+      .then(function (result) {
+        var r = result || {};
+        setAiTestStatus(String(r.message || ""), r.ok === true);
+      })
+      .catch(function (e) {
+        setAiTestStatus(
+          (aiTestStrings.nobundle || "") + " " + String((e && e.message) || e),
+          false,
+        );
+      })
+      .then(function () {
+        aiTestInFlight = false;
+        setAiTestButtonDisabled(false);
+      });
+  }
+
   // ── zotero-pdf-translate 探测 ───────────────────────────────────────────
 
   /**
@@ -964,6 +1161,12 @@
     els.timeoutInput = $("ztransplit-pref-odl-timeout");
     els.timeoutError = $("ztransplit-pref-odl-timeout-error");
     els.engineList = $("ztransplit-pref-engine-type");
+    els.aiProviderList = $("ztransplit-pref-ai-provider");
+    els.aiUrlInput = $("ztransplit-pref-ai-url");
+    els.aiKeyInput = $("ztransplit-pref-ai-key");
+    els.aiModelInput = $("ztransplit-pref-ai-model");
+    els.aiTestBtn = $("ztransplit-pref-ai-test-btn");
+    els.aiTestStatus = $("ztransplit-pref-ai-test-status");
     els.regionList = $("ztransplit-pref-region");
     els.regionNote = $("ztransplit-pref-region-note");
     els.pdfTranslateItem = $("ztransplit-pref-engine-item-pdftranslate");
@@ -1025,6 +1228,15 @@
       els.regionList.addEventListener("select", onRegionPicked);
       els.regionList.addEventListener("command", onRegionPicked);
     }
+    if (els.aiProviderList) {
+      // 服务商下拉是「动作」而非「状态」：没有 preference 绑定，选中即填
+      // 字段。两个事件都听，与引擎/区域同一套路。
+      els.aiProviderList.addEventListener("select", onAiProviderPicked);
+      els.aiProviderList.addEventListener("command", onAiProviderPicked);
+    }
+    if (els.aiTestBtn) {
+      els.aiTestBtn.addEventListener("command", onAiTest);
+    }
     if (els.javaCheckBtn) {
       // XUL button 的激活事件是 command。
       els.javaCheckBtn.addEventListener("command", onJavaCheck);
@@ -1072,6 +1284,19 @@
         writePromptInput(String(getPref("translate.ai.prompt") || ""));
       }
       setAIPromptError("");
+
+      // 服务商下拉按已填地址反查：老用户（或从别处粘贴了地址的用户）打开
+      // 面板时，下拉状态与配置保持一致，不会显示成一个误导性的「不预设」。
+      if (els.aiProviderList) {
+        try {
+          els.aiProviderList.value = detectAiPresetId(
+            String(getPref("translate.ai.apiUrl") || ""),
+          );
+        } catch (e) {
+          /* 忽略：反查失败只影响回显 */
+        }
+      }
+      loadAiTestStrings();
 
       syncEngineFields();
       syncPDFTranslateStatus();

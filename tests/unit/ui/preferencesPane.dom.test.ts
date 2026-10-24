@@ -452,17 +452,18 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 24 = 23 原有 + 解析组件小节的行标签（preferences-ztransplit-pdf-odl-comp）。
-    expect(labels.length).toBe(24);
+    // 25 = 24 原有（23 + 解析组件小节行标签）+ AI 服务商行标签。
+    expect(labels.length).toBe(25);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
     }
   });
 
-  it("12 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
+  it("22 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
     const items = l10nBindings().filter((r) => r.tag === "menuitem");
-    expect(items.length).toBe(12);
+    // 22 = 7 原有引擎项 + 10 个 AI 服务商预设项 + 5 个 Bing 区域项。
+    expect(items.length).toBe(22);
     for (const row of items) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);
@@ -740,6 +741,210 @@ describe("B17 设置 pane：解析组件状态行与按钮", () => {
     const status = h.doc.getElementById("ztransplit-pref-odl-comp-status")!;
     expect(String(status.textContent)).toContain("下载失败");
     expect(String(status.textContent)).toContain("no mirror reachable");
+    h.dom.window.close();
+  });
+});
+
+// ── AI 服务商预设 + 测试连接 ──────────────────────────────────────────────────
+//
+// 修复「用户说不知道怎么配置 AI API」时加入：服务商下拉把配置成本从「查文档
+// 抄四个值」降到「选一项 + 粘密钥」，测试连接给填完即可验证的手段。面板脚本
+// 在独立沙箱里镜像了主包的预设表；这里同时钉两侧一致性与交互行为。
+
+interface AiHarness extends Harness {
+  /** 切换服务商下拉并派发事件。 */
+  selectProvider(value: string): void;
+  /** 点击测试连接并冲刷偏好脚本里的 Promise 链。 */
+  clickAiTest(): Promise<void>;
+  /** 主包收到的最近一次 testConnection 参数。 */
+  seen: { config: any | null };
+}
+
+function setupAiHarness(opts: {
+  prefs?: Record<string, unknown>;
+  ai?: { testConnection?: (config: any) => Promise<any> };
+} = {}): AiHarness {
+  const base = setupHarness({ prefs: opts.prefs });
+  const seen: { config: any | null } = { config: null };
+  (base.window as any).Zotero.ZTransplit = opts.ai
+    ? {
+        ai: {
+          testConnection: (config: any) => {
+            seen.config = config;
+            return opts.ai!.testConnection!(config);
+          },
+        },
+      }
+    : undefined;
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  return {
+    ...base,
+    seen,
+    selectProvider(value: string) {
+      const list = base.doc.getElementById("ztransplit-pref-ai-provider");
+      if (!list) throw new Error("provider menulist not found");
+      list.value = value;
+      for (const type of ["select", "command"]) {
+        list.dispatchEvent(new base.window.Event(type, { bubbles: true }));
+      }
+    },
+    async clickAiTest() {
+      const btn = base.doc.getElementById("ztransplit-pref-ai-test-btn");
+      if (!btn) throw new Error("test button not found");
+      btn.dispatchEvent(new base.window.Event("command", { bubbles: true }));
+      await flush();
+      await flush();
+      await flush();
+    },
+  };
+}
+
+describe("B17 设置 pane：AI 服务商预设", () => {
+  it("面板加载：按已填地址反查预设（老用户的下拉状态与配置一致）", () => {
+    const h = setupAiHarness({
+      prefs: {
+        [`${PREFIX}translate.ai.apiUrl`]: "https://api.deepseek.com/v1",
+        [`${PREFIX}translate.ai.model`]: "deepseek-chat",
+      },
+    });
+    expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("deepseek");
+    h.dom.window.close();
+  });
+
+  it("地址不在预设表里：下拉显示「不预设」", () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "https://my-gateway.internal/v1" },
+    });
+    expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("none");
+    h.dom.window.close();
+  });
+
+  it("选服务商：接口地址与模型名写入偏好并回填输入框", () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "", [`${PREFIX}translate.ai.model`]: "" },
+    });
+    h.selectProvider("glm");
+    expect(h.prefs.get(`${PREFIX}translate.ai.apiUrl`)).toBe(
+      "https://open.bigmodel.cn/api/paas/v4",
+    );
+    expect(h.prefs.get(`${PREFIX}translate.ai.model`)).toBe("glm-4-plus");
+    // 输入框立即回显（XUL preference 绑定的反向同步时机不保证）
+    expect(h.doc.getElementById("ztransplit-pref-ai-url")!.value).toBe(
+      "https://open.bigmodel.cn/api/paas/v4",
+    );
+    expect(h.doc.getElementById("ztransplit-pref-ai-model")!.value).toBe("glm-4-plus");
+    h.dom.window.close();
+  });
+
+  it("选自定义/不预设：一个字段都不动", () => {
+    const h = setupAiHarness({
+      prefs: {
+        [`${PREFIX}translate.ai.apiUrl`]: "https://my-gateway.internal/v1",
+        [`${PREFIX}translate.ai.model`]: "my-model",
+      },
+    });
+    h.selectProvider("custom");
+    expect(h.prefs.get(`${PREFIX}translate.ai.apiUrl`)).toBe("https://my-gateway.internal/v1");
+    expect(h.prefs.get(`${PREFIX}translate.ai.model`)).toBe("my-model");
+    h.selectProvider("none");
+    expect(h.prefs.get(`${PREFIX}translate.ai.apiUrl`)).toBe("https://my-gateway.internal/v1");
+    expect(h.prefs.get(`${PREFIX}translate.ai.model`)).toBe("my-model");
+    h.dom.window.close();
+  });
+
+  it("手工改过的模型名不被预设吞掉", () => {
+    const h = setupAiHarness({
+      prefs: {
+        [`${PREFIX}translate.ai.apiUrl`]: "https://api.deepseek.com/v1",
+        [`${PREFIX}translate.ai.model`]: "deepseek-reasoner",
+      },
+    });
+    h.selectProvider("kimi");
+    expect(h.prefs.get(`${PREFIX}translate.ai.apiUrl`)).toBe("https://api.moonshot.cn/v1");
+    expect(h.prefs.get(`${PREFIX}translate.ai.model`)).toBe("deepseek-reasoner");
+    h.dom.window.close();
+  });
+
+  it("面板镜像的预设表与主包 providerPresets.ts 一致", async () => {
+    const { AI_PROVIDER_PRESETS } = await import("../../../src/core/ai/providerPresets");
+    const h = setupAiHarness({});
+    const ids = [...h.doc.querySelectorAll("#ztransplit-pref-ai-provider menuitem")].map(
+      (el: any) => el.getAttribute("value"),
+    );
+    // 下拉多一个「不预设」占位，其余顺序与 id 完全对应
+    expect(ids[0]).toBe("none");
+    expect(ids.slice(1)).toEqual(AI_PROVIDER_PRESETS.map((p) => p.id));
+    h.dom.window.close();
+  });
+});
+
+describe("B17 设置 pane：AI 测试连接按钮", () => {
+  it("主包未挂载：显示引导文案，不抛错", async () => {
+    const h = setupAiHarness({});
+    await h.clickAiTest();
+    const status = h.doc.getElementById("ztransplit-pref-ai-test-status")!;
+    expect(String(status.textContent)).toContain("插件主模块尚未加载");
+    h.dom.window.close();
+  });
+
+  it("成功：状态行显示主包返回的消息（表单值原样传给主包）", async () => {
+    const h = setupAiHarness({
+      prefs: {
+        [`${PREFIX}translate.ai.apiUrl`]: "https://api.deepseek.com/v1",
+        [`${PREFIX}translate.ai.apiKey`]: "sk-1",
+        [`${PREFIX}translate.ai.model`]: "deepseek-chat",
+      },
+      ai: {
+        testConnection: async () => ({ ok: true, message: "连接成功：模型 deepseek-chat" }),
+      },
+    });
+    await h.clickAiTest();
+    expect(h.seen.config).toEqual({
+      apiUrl: "https://api.deepseek.com/v1",
+      apiKey: "sk-1",
+      model: "deepseek-chat",
+    });
+    const status = h.doc.getElementById("ztransplit-pref-ai-test-status")!;
+    expect(String(status.textContent)).toContain("连接成功");
+    // 按钮恢复可用（in-flight 结束后解除禁用）
+    expect(h.doc.getElementById("ztransplit-pref-ai-test-btn")!.hasAttribute("disabled")).toBe(false);
+    h.dom.window.close();
+  });
+
+  it("失败：状态行显示失败消息", async () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "https://api.deepseek.com/v1" },
+      ai: {
+        testConnection: async () => ({ ok: false, kind: "auth", message: "密钥被拒绝（401）" }),
+      },
+    });
+    await h.clickAiTest();
+    const status = h.doc.getElementById("ztransplit-pref-ai-test-status")!;
+    expect(String(status.textContent)).toContain("密钥被拒绝");
+    h.dom.window.close();
+  });
+
+  it("表单里未失焦的改动优先于偏好（测的就是眼前的值）", async () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "https://old.example.com/v1" },
+      ai: { testConnection: async () => ({ ok: true, message: "ok" }) },
+    });
+    // 用户刚粘贴了新地址，还没失焦（pref 未落盘）
+    h.doc.getElementById("ztransplit-pref-ai-url")!.value = "https://new.example.com/v1";
+    await h.clickAiTest();
+    expect(h.seen.config.apiUrl).toBe("https://new.example.com/v1");
+    h.dom.window.close();
+  });
+
+  it("切服务商后清掉过期的测试结果", async () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "" },
+      ai: { testConnection: async () => ({ ok: true, message: "连接成功" }) },
+    });
+    await h.clickAiTest();
+    expect(String(h.doc.getElementById("ztransplit-pref-ai-test-status")!.textContent)).toContain("连接成功");
+    h.selectProvider("deepseek");
+    expect(String(h.doc.getElementById("ztransplit-pref-ai-test-status")!.textContent)).toBe("");
     h.dom.window.close();
   });
 });

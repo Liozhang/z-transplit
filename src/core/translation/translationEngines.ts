@@ -153,6 +153,24 @@ function toDeepLTargetLang(code: string): string {
 const KEYLESS_ENDPOINT_TIMEOUT_MS = 10000;
 
 /**
+ * Session-sticky "Google direct is unavailable" marker, set the first time the
+ * google engine's request fails. See the use site in createTranslator for why
+ * it exists (per-attempt timeout × every paragraph of a paper). Exported
+ * reset is for tests; the UI reads it through isGoogleFallbackActive().
+ */
+let googleDirectUnavailable = false;
+
+/** True once the google engine has fallen back to Bing web this session. */
+export function isGoogleFallbackActive(): boolean {
+  return googleDirectUnavailable;
+}
+
+/** Test seam: drop the sticky marker so the next translator probes again. */
+export function resetGoogleFallbackForTests(): void {
+  googleDirectUnavailable = false;
+}
+
+/**
  * Per-request timeout for the model-backed engines ("ai"). Generous compared to
  * the MT endpoints above because a chat completion of a long paragraph takes
  * far longer than a translate call, and the failure mode without it is a
@@ -1039,33 +1057,52 @@ function createTranslatorUncached(
           );
         return result.translatedText!;
       };
+      const bingWebOrThrow = async (
+        text: string,
+        googleErr: unknown,
+      ): Promise<string> => {
+        const bing = await translateWithBingWeb(
+          text,
+          targetLanguage,
+          sourceLanguage,
+        );
+        if (!bing.success) {
+          throw new Error(
+            getString("translation-error-google-fallback-failed", {
+              googleError:
+                googleErr instanceof Error
+                  ? googleErr.message
+                  : String(googleErr),
+              bingError:
+                bing.error || getString("translation-error-unknown"),
+            }),
+            { cause: googleErr },
+          );
+        }
+        return bing.translatedText!;
+      };
       // Default-engine resilience: when Google is unreachable (network block,
       // rate limit, outage) fall back to the keyless Bing web endpoint, which
       // is reachable in regions Google is not. Applies to both the keyless and
       // the keyed Google paths — it only ever fires after Google failed.
+      //
+      // The failure is sticky for the session: a blocked endpoint costs
+      // KEYLESS_ENDPOINT_TIMEOUT_MS per attempt, so without the marker a
+      // 50-paragraph paper in mainland China pays 50 × 10s of pure waiting
+      // before the same Bing fallback that answers in under a second. After
+      // the first failure we go straight to Bing. This is reactive (observed
+      // failure), never predictive — it does not guess where the user is, the
+      // same stance as region's "auto infers nothing" — and a Zotero restart
+      // probes Google again, so an outage that ends is picked up.
       return async (text: string) => {
+        if (googleDirectUnavailable) {
+          return bingWebOrThrow(text, new Error("google unavailable"));
+        }
         try {
           return await googleOnly(text);
         } catch (googleErr) {
-          const bing = await translateWithBingWeb(
-            text,
-            targetLanguage,
-            sourceLanguage,
-          );
-          if (!bing.success) {
-            throw new Error(
-              getString("translation-error-google-fallback-failed", {
-                googleError:
-                  googleErr instanceof Error
-                    ? googleErr.message
-                    : String(googleErr),
-                bingError:
-                  bing.error || getString("translation-error-unknown"),
-              }),
-              { cause: googleErr },
-            );
-          }
-          return bing.translatedText!;
+          googleDirectUnavailable = true;
+          return bingWebOrThrow(text, googleErr);
         }
       };
     }

@@ -48,6 +48,7 @@ translation-error-ai-prompt-unbalanced-braces = AI 提示词模板的花括号�
 ## 翻译功能就绪判定（src/core/translation/featureReadiness.ts）
 readiness-reason-engine-key = 缺少翻译引擎 API 密钥
 readiness-reason-engine-url = 缺少自定义翻译接口地址
+readiness-reason-ai-url = 缺少 AI 翻译接口地址（在设置里选一个服务商即可自动填好）
 readiness-reason-engine-plugin = 未安装或未启用 zotero-pdf-translate 插件
 readiness-reason-ai-prompt = AI 引擎的提示词模板不合法，请在设置面板中修正
 readiness-reason-unknown = 未知原因
@@ -124,15 +125,28 @@ java-install-failed =
 java-progress-already-installed = Java 运行时已安装。
 java-progress-self-heal = 检测到已损坏的 Java 运行环境，正在自动重新安装…
 java-progress-download-start = 下载 Java { $version } JRE（{ $archive }）…
+java-progress-probe = 正在选择下载源…
+err-java-not-found = 未找到可用的 Java 运行时。请安装 JDK 11 或更高版本，或在「设置 → PDF 分屏翻译 → Java 运行时」中让插件自动下载安装便携版 JRE（无需管理员权限）。
 java-progress-downloading = 下载中 { $percent }%
 java-progress-reuse-archive = 已有下载完成的安装包（校验通过），跳过下载…
 java-error-download-failed = 下载失败：{ $detail }
-java-error-download-http = 下载失败：HTTP { $status }
 java-error-checksum-mismatch = 安装包校验失败（SHA-256 不匹配），已丢弃，请重试。
 java-progress-extracting = 解压中…
 java-progress-verifying = 验证安装…
 java-error-extract-failed = 解压失败：{ $detail }
 java-error-exe-not-found = 解压后未找到 java 可执行文件（在 { $dir }）。请手动从 https://adoptium.net 安装。
+
+## AI 引擎「测试连接」的结果分类（src/core/ai/connectionTest.ts）
+ai-test-ok = 连接成功：模型 { $model } 有应答（{ $ms } 毫秒）。
+ai-test-auth = 密钥被拒绝（401/403）。请检查 API 密钥是否填写正确；本地服务商（Ollama 等）可留空。详情：{ $detail }
+ai-test-not-found = 接口地址不存在（404）。请确认服务商选择是否正确，或地址是否抄错。详情：{ $detail }
+ai-test-rate-limit = 被限流（429），请稍后重试。详情：{ $detail }
+ai-test-network = 连不上该端点：{ $detail }。该地址可能不可达，或需要代理。
+ai-test-timeout = 连接超时（{ $ms } 毫秒）。端点不可达，或需要代理。
+ai-test-http = 服务端返回错误（HTTP { $status }）：{ $detail }
+ai-test-empty = 端点连通，但模型没有返回任何内容。可换一个模型名再试。
+ai-test-invalid = 请先填写接口地址，再测试。
+ai-test-server-default = 服务端默认
 java-error-probe-failed = 下载的 Java 无法运行：{ $detail }
 java-progress-done = Java 安装完成
 

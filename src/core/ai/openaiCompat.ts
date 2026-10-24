@@ -198,7 +198,15 @@ export function createOpenAICompatClient(
           maxTokens: EMPTY_COMPLETION_RETRY_MAX_TOKENS,
         });
       }
-      throw new Error(getString(emptyErrorKey));
+      // Tagged so callers can classify it deterministically: an empty
+      // completion carries no HTTP status, and without the marker it is
+      // indistinguishable from a fetch-level network failure downstream
+      // (connectionTest reports a different, actionable message for each).
+      const emptyError = new Error(getString(emptyErrorKey)) as Error & {
+        emptyCompletion?: boolean;
+      };
+      emptyError.emptyCompletion = true;
+      throw emptyError;
     }
     return { content: content.trim(), usage: toUsage(data?.usage) };
   }

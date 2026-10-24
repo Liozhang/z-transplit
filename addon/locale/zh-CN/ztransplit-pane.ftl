@@ -46,7 +46,7 @@ pane-translate-copy-failed = 复制失败：{ $error }
 pane-translate-error = 翻译失败：{ $error }
 pane-translate-error-empty = 译文为空：翻译服务没有返回可用内容。请重试，或更换目标语言后再试。
 pane-translate-error-service = 翻译服务不可用：无法加载翻译引擎模块（{ $error }）。请重启 Zotero 后重试；若仍失败，请查看 Zotero 调试输出。
-pane-translate-error-not-ready = 翻译未就绪：{ $reason }。请在设置中补齐后重试。
+pane-translate-error-not-ready = 翻译未就绪：{ $reason }。请在「编辑 ▸ 设置 ▸ Z-Transplit ▸ 引擎」中补齐后重试。
 pane-translate-error-too-long = 选中文本为 { $count } 字符，超过每次请求的 { $max } 字符上限。请缩小选区后重试。
 
 ## 单词查询（词典卡片）与最近查词词块行

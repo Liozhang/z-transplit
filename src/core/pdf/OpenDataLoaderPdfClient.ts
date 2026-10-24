@@ -28,6 +28,7 @@
 
 import { getPref } from "../../utils/prefs";
 import { getCachedManagedJavaExe } from "./JavaRuntimeManager";
+import { resolveJavaExecutable as resolveSystemJavaExecutable } from "./javaLocator";
 import { sha256Hex } from "../../utils/hash";
 import {
   downloadPinnedJar,
@@ -144,8 +145,7 @@ export async function checkHealth(): Promise<HealthResult> {
   if (!javaExe) {
     return {
       healthy: false,
-      error:
-        "Java runtime not found. Please install Java 11+ and add it to PATH.",
+      error: javaNotFoundError(),
     };
   }
 
@@ -210,15 +210,34 @@ export async function checkHealth(): Promise<HealthResult> {
 /**
  * Resolve the `java` executable using a PATH search over standard locations.
  */
-function resolveJavaExecutable(): string | null {
-  const Cc = (Components as any).classes;
-  const Ci = (Components as any).interfaces;
-  const Services = (globalThis as any).Services as any;
+/**
+ * "找不到 java"的统一可操作报错。旧文案是一句英文硬编码
+ * "Java runtime not found. Please install Java 11+ and add it to PATH."——
+ * 用户照做（装好 JDK、加进 PATH）后插件仍可能因为 javaLocator 覆盖不到的
+ * 位置或 macOS 存根而失败，且从未告诉用户可以一键装插件自管的便携 JRE。
+ * 现在两条路径（checkHealth 与 execJar）共用这一句，并指向设置里的安装入口。
+ */
+function javaNotFoundError(): string {
+  return getString("err-java-not-found");
+}
 
-  //    refreshes this cache on each health probe; if a managed JRE exists it
-  //    wins over system PATH so the user never needs to touch PATH/restart.
+/**
+ * Resolve the `java` executable: the managed JRE first (sync cache peek,
+ * refreshed by checkHealth/execJar), then the shared system locator.
+ *
+ * WHY THE SHARED LOCATOR: this function used to carry its own PATH search
+ * plus three hard-coded Windows paths (`...\Eclipse Adoptium\jdk-17`,
+ * `jdk-11`) that never match a real Temurin install (`jdk-17.0.20.1-hotspot`
+ * — the MSI/winget layout always carries the patch version), never read
+ * JAVA_HOME, and returned macOS's /usr/bin/java stub as if it were a working
+ * runtime. All of that now lives in javaLocator, shared with
+ * JavaRuntimeManager so the two copies cannot drift apart again.
+ */
+function resolveJavaExecutable(): string | null {
   const managed = getCachedManagedJavaExe();
   if (managed) {
+    const Cc = (Components as any).classes;
+    const Ci = (Components as any).interfaces;
     const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
     try {
       file.initWithPath(managed);
@@ -228,57 +247,7 @@ function resolveJavaExecutable(): string | null {
       /* bad cached path — fall through */
     }
   }
-
-  const createFile = (path: string) => {
-    try {
-      const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-      file.initWithPath(path);
-      return file;
-    } catch (e) {
-      safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
-      return null;
-    }
-  };
-
-  const isWindows = (
-    Services.appinfo?.OS?.toUpperCase?.() ||
-    (navigator as any)?.platform ||
-    ""
-  ).startsWith("WIN");
-  const extensions = isWindows ? [".exe", ".cmd", ".bat", ""] : [""];
-  const separator = isWindows ? ";" : ":";
-
-  // Only standard install locations are probed — never a developer-machine path.
-  const absoluteCandidates = isWindows
-    ? [
-        "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
-        "C:\\Program Files\\Eclipse Adoptium\\jdk-17\\bin\\java.exe",
-        "C:\\Program Files\\Eclipse Adoptium\\jdk-11\\bin\\java.exe",
-      ]
-    : ["/usr/bin/java", "/usr/local/bin/java", "/opt/homebrew/bin/java"];
-
-  for (const candidate of absoluteCandidates) {
-    const file = createFile(candidate);
-    if (file && file.exists() && file.isExecutable()) return candidate;
-  }
-
-  const env = Cc["@mozilla.org/process/environment;1"]?.getService(
-    Ci.nsIEnvironment,
-  );
-  const pathStr = env?.get("PATH") || "";
-
-  for (const dir of pathStr.split(separator)) {
-    const dirTrimmed = dir.trim();
-    if (!dirTrimmed) continue;
-
-    for (const ext of extensions) {
-      const candidate = dirTrimmed + (isWindows ? "\\" : "/") + "java" + ext;
-      const file = createFile(candidate);
-      if (file && file.exists() && file.isExecutable()) return candidate;
-    }
-  }
-
-  return null;
+  return resolveSystemJavaExecutable();
 }
 
 export interface ExecResult {
@@ -317,7 +286,7 @@ export async function execJar(
     return {
       exitCode: -1,
       stdout: "",
-      stderr: "java executable not found",
+      stderr: javaNotFoundError(),
       timedOut: false,
     };
   }

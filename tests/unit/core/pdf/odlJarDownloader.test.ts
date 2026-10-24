@@ -366,14 +366,23 @@ afterEach(() => {
 describe("buildSources", () => {
   it("已登记版本返回镜像优先的来源表", () => {
     const sources = buildSources(META);
+    // 与 PYPI_MIRRORS 一字不差：五家国内镜像在前，PyPI 官方殿后
     expect(sources.map((s) => s.id)).toEqual([
       "aliyun-pypi",
       "tuna-pypi",
+      "tencent-pypi",
+      "huawei-pypi",
+      "ustc-pypi",
       "pypi",
       "github-release",
     ]);
     expect(sources[0].url).toContain("/packages/b1/78/c2e5aab0ad");
     expect(sources[0].url).toContain("opendataloader_pdf-2.5.0-py3-none-any.whl");
+    // 六家镜像都沿用同一套内容寻址路径（PyPI 同路径布局）
+    for (const s of sources.filter((x) => x.id !== "github-release")) {
+      expect(s.url).toContain("/packages/b1/78/c2e5aab0ad");
+      expect(s.url).toContain("opendataloader_pdf-2.5.0-py3-none-any.whl");
+    }
   });
 
   it("未登记哈希路径的版本只保留 GitHub 来源", () => {
@@ -414,25 +423,52 @@ describe("rankSources", () => {
 describe("downloadPinnedJar", () => {
   const paths = { dir: LIB_DIR, target: LIB_DIR + "\\opendataloader-pdf-cli.jar" };
 
+  /** URL → 来源 id，覆盖 PYPI_MIRRORS 全部六项。 */
+  const MIRROR_URL_MATCHERS: Array<[string, string]> = [
+    ["mirrors.aliyun.com", "aliyun-pypi"],
+    ["tuna.tsinghua.edu.cn", "tuna-pypi"],
+    ["mirrors.cloud.tencent.com", "tencent-pypi"],
+    ["mirrors.huaweicloud.com", "huawei-pypi"],
+    ["mirrors.ustc.edu.cn", "ustc-pypi"],
+    ["files.pythonhosted.org", "pypi"],
+  ];
+  /** 新增三家镜像未显式指定时的默认耗时：慢于阿里云，快于 PyPI 官方。 */
+  const NEW_MIRROR_DEFAULT_MS: Record<string, number> = {
+    "tencent-pypi": 120,
+    "huawei-pypi": 140,
+    "ustc-pypi": 160,
+  };
+
+  function sourceIdOf(url: string): string {
+    for (const [needle, id] of MIRROR_URL_MATCHERS) {
+      if (url.includes(needle)) return id;
+    }
+    return "github-release";
+  }
+
   function installMirrorRoutes(opts: {
     aliyun?: number | null; // 探测耗时毫秒；null = 不可达
     tuna?: number | null;
+    tencent?: number | null;
+    huawei?: number | null;
+    ustc?: number | null;
     pypi?: number | null;
     /** 按来源 id 给出整包下载的字节（缺省 = 正确轮子）。 */
     archiveFor?: (id: string) => Uint8Array | null;
   }): void {
-    const delayOf = (id: string) =>
-      id === "aliyun-pypi" ? opts.aliyun : id === "tuna-pypi" ? opts.tuna : opts.pypi;
+    const delayOf = (id: string): number | null => {
+      const explicit = (opts as Record<string, number | null | undefined>)[
+        id === "pypi"
+          ? "pypi"
+          : id.replace("-pypi", "")
+      ];
+      if (explicit !== undefined) return explicit;
+      return NEW_MIRROR_DEFAULT_MS[id] ?? null;
+    };
     httpRoutes.push({
       match: (_url, kind) => kind === "probe",
       respond: async (url) => {
-        const id = url.includes("aliyun")
-          ? "aliyun-pypi"
-          : url.includes("tuna")
-            ? "tuna-pypi"
-            : url.includes("pythonhosted")
-              ? "pypi"
-              : "github-release";
+        const id = sourceIdOf(url);
         const delay = delayOf(id);
         if (delay == null) throw new Error("unreachable: " + id);
         await sleep(delay);
@@ -442,13 +478,7 @@ describe("downloadPinnedJar", () => {
     httpRoutes.push({
       match: (_url, kind) => kind === "download",
       respond: (url) => {
-        const id = url.includes("aliyun")
-          ? "aliyun-pypi"
-          : url.includes("tuna")
-            ? "tuna-pypi"
-            : url.includes("pythonhosted")
-              ? "pypi"
-              : "github-release";
+        const id = sourceIdOf(url);
         const bytes = opts.archiveFor?.(id) ?? WHEEL_BYTES;
         if (!bytes) throw new Error("download failed: " + id);
         return { status: 200, response: bytes.buffer };
@@ -499,6 +529,54 @@ describe("downloadPinnedJar", () => {
     expect(downloads[0].url).toContain("mirrors.aliyun.com");
   });
 
+  it("阿里云与清华不可达：自动改从腾讯云镜像取件", async () => {
+    // 前两家国内镜像探测失败，第三家（腾讯云）120ms 胜出
+    installMirrorRoutes({ aliyun: null, tuna: null, pypi: 400 });
+    defaultZipRecords = [
+      {
+        entries: new Map([["opendataloader_pdf/jar/opendataloader-pdf-cli.jar", INNER_JAR]]),
+        opens: 0,
+      },
+    ];
+
+    const out = await downloadPinnedJar(META, paths);
+
+    expect(out).toBe(paths.target);
+    expect([...fs.read(paths.target)]).toEqual([...INNER_JAR]);
+    const downloads = httpCalls.filter((c) => c.kind === "download");
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0].url).toContain("mirrors.cloud.tencent.com");
+  });
+
+  it("六家镜像全部可达：按探测延迟排序，最慢的官方 PyPI 不被使用", async () => {
+    installMirrorRoutes({
+      aliyun: 300,
+      tuna: 260,
+      tencent: 200,
+      huawei: 180,
+      ustc: 5, // 中科大最快
+      pypi: 900,
+    });
+    defaultZipRecords = [
+      {
+        entries: new Map([["opendataloader_pdf/jar/opendataloader-pdf-cli.jar", INNER_JAR]]),
+        opens: 0,
+      },
+    ];
+
+    const out = await downloadPinnedJar(META, paths);
+
+    expect(out).toBe(paths.target);
+    const downloads = httpCalls.filter((c) => c.kind === "download");
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0].url).toContain("mirrors.ustc.edu.cn");
+    // 六家镜像与 GitHub Release 都被探测过（并发探测择优）
+    const probed = new Set(
+      httpCalls.filter((c) => c.kind === "probe").map((c) => sourceIdOf(c.url)),
+    );
+    expect(probed.size).toBe(7);
+  });
+
   it("已落地副本指纹相符时零请求复用", async () => {
     fs.write(paths.target, INNER_JAR);
     const out = await downloadPinnedJar(META, paths);
@@ -507,7 +585,14 @@ describe("downloadPinnedJar", () => {
   });
 
   it("全部镜像不可达时拒绝并给出明确错误", async () => {
-    installMirrorRoutes({ aliyun: null, tuna: null, pypi: null });
+    installMirrorRoutes({
+      aliyun: null,
+      tuna: null,
+      tencent: null,
+      huawei: null,
+      ustc: null,
+      pypi: null,
+    });
     await expect(downloadPinnedJar(META, paths)).rejects.toThrow(
       /no mirror reachable/,
     );

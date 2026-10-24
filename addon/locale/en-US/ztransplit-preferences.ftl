@@ -94,6 +94,9 @@ preferences-ztransplit-region-desc =
     example, mainland China defaults to the keyless Bing web engine). Engines
     you picked explicitly are never overridden by the region choice; keeping
     "Automatic" changes nothing.
+    If you are in mainland China: the Google endpoint is unreachable, so with
+    "Automatic" every paragraph waits out one timeout before falling back to
+    the Bing web endpoint — pick "Mainland China" to skip that wait.
 preferences-ztransplit-region-note-applied =
     Recommendations applied for the selected region: settings still at their
     factory defaults were rewritten; engines you picked explicitly were left
@@ -167,6 +170,41 @@ preferences-ztransplit-deepl-use-free =
 preferences-ztransplit-deepl-use-free-desc =
     Free keys (ending in ":fx") must enable this; Pro keys must disable it.
     The wrong choice returns a 401/403 authentication error.
+
+## AI provider presets (picking one fills the endpoint and a recommended model)
+preferences-ztransplit-ai-provider =
+    .value = Provider
+preferences-ztransplit-ai-provider-desc =
+    Picking a provider fills in the endpoint URL and a recommended model name;
+    usually only the API key is left to paste. Start here if you are unsure what
+    to type. "Custom" is for self-hosted gateways, vLLM, and similar advanced
+    setups; "No preset" keeps whatever is already filled in.
+preferences-ztransplit-ai-provider-none =
+    .label = No preset (keep current values)
+preferences-ztransplit-ai-provider-deepseek =
+    .label = DeepSeek
+preferences-ztransplit-ai-provider-qwen =
+    .label = Qwen (Alibaba Cloud DashScope)
+preferences-ztransplit-ai-provider-glm =
+    .label = Zhipu GLM
+preferences-ztransplit-ai-provider-kimi =
+    .label = Kimi (Moonshot)
+preferences-ztransplit-ai-provider-stepfun =
+    .label = StepFun
+preferences-ztransplit-ai-provider-openai =
+    .label = OpenAI (international)
+preferences-ztransplit-ai-provider-ollama =
+    .label = Ollama (local, no key)
+preferences-ztransplit-ai-provider-lmstudio =
+    .label = LM Studio (local, no key)
+preferences-ztransplit-ai-provider-custom =
+    .label = Custom
+preferences-ztransplit-ai-test-button =
+    .label = Test connection
+    .tooltiptext = Send a minimal request with the URL, key, and model currently in the form to verify the configuration.
+preferences-ztransplit-ai-test-checking = Testing…
+preferences-ztransplit-ai-test-nobundle =
+    The plugin main module is not loaded yet, so the test cannot run. Restart Zotero and try again.
 
 ## AI translation (OpenAI-compatible + user-owned prompt template)
 preferences-ztransplit-ai-api-url =

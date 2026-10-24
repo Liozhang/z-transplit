@@ -10,15 +10,13 @@
  * “最佳镜像”的选取：并发向全部来源发 1KB 区间请求（字节 0-0），按响应耗时
  * 排序，从最快者整包下载；下载或校验失败自动降级到下一个来源。
  *
- * 渠道实测（2026-10，境内直连）：
- *   - 阿里云 PyPI 镜像   区间请求约 1.3s，整包可用；
- *   - 清华 PyPI 镜像     区间请求约 3.1s，整包可用；
- *   - PyPI 官方源        整包可用；
- *   - GitHub Release     区间可达，整包境内常超时，仅作全球兜底。
- * Maven Central 没有 opendataloader 构件（search.maven.org 查询 numFound=0），
- * 上游发布渠道是 GitHub Release 与 PyPI 轮子；轮子内嵌
- * opendataloader_pdf/jar/opendataloader-pdf-cli.jar，其 SHA-256 与
- * PROVENANCE.json 的指纹逐字节一致（已实测核对）。
+ * 渠道实测（2026-10，境内直连）：五家国内 PyPI 镜像（阿里云 / 清华 / 腾讯
+ * 云 / 华为云 / 中科大）区间请求均在一秒上下，整包可用，且下载同一轮子的
+ * SHA-256 完全一致；PyPI 官方源整包可用；GitHub Release 区间可达，整包境
+ * 内常超时，仅作全球兜底。Maven Central 没有 opendataloader 构件
+ * （search.maven.org 查询 numFound=0），上游发布渠道是 GitHub Release 与
+ * PyPI 轮子；轮子内嵌 opendataloader_pdf/jar/opendataloader-pdf-cli.jar，
+ * 其 SHA-256 与 PROVENANCE.json 的指纹逐字节一致（已实测核对）。
  *
  * PyPI 轮子的内容寻址路径（/packages/<哈希前缀>/…）无法从版本号推导，因此
  * 固定版本与固定路径成对登记；升级 jar 时与 PROVENANCE.json 一起更新该表
@@ -63,10 +61,21 @@ const WHEEL_PACKAGE_HASH_PATH: Record<string, string> = {
     "b1/78/c2e5aab0ad1076fc9f76234f021c622e2344543a6a3622152d220781f94f",
 };
 
-/** 与 PyPI 官方源保持同路径布局的镜像（基础地址 → /packages/…）。 */
+/**
+ * 与 PyPI 官方源保持同路径布局的镜像（基础地址 → /packages/…）。
+ *
+ * 收录标准（2026-10 实测）：五家国内镜像对同一轮子下载的 SHA-256 完全一致
+ * （阿里云 / 清华 / 腾讯云 / 华为云 / 中科大），且都与 PyPI 官方同路径布局，
+ * 因此用同一套内容寻址路径拼接。顺序只决定耗时打平时的优先级，实际顺序由
+ * 并发探测延迟决定。官方 files.pythonhosted.org 殿后——境内慢，但保障镜像
+ * 全部失效时（含境外网络）仍可取件。
+ */
 const PYPI_MIRRORS = [
   { id: "aliyun-pypi", base: "https://mirrors.aliyun.com/pypi" },
   { id: "tuna-pypi", base: "https://pypi.tuna.tsinghua.edu.cn" },
+  { id: "tencent-pypi", base: "https://mirrors.cloud.tencent.com/pypi" },
+  { id: "huawei-pypi", base: "https://mirrors.huaweicloud.com/repository/pypi" },
+  { id: "ustc-pypi", base: "https://mirrors.ustc.edu.cn/pypi" },
   { id: "pypi", base: "https://files.pythonhosted.org" },
 ];
 
