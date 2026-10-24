@@ -1,7 +1,7 @@
 {
   "name": "z-transplit",
   "type": "module",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "Zotero 10 plugin: text translation and layout-preserving PDF translation with split-screen reading.",
   "config": {
     "addonName": "Z-Transplit",
