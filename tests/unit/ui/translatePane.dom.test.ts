@@ -19,7 +19,7 @@ import { JSDOM } from "jsdom";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mountTranslatePane } from "../../../src/ui/translatePane";
 import {
   clearTranslationCache,
@@ -683,6 +683,7 @@ describe("B16 划词翻译：持久段落缓存（与 PDF 管线 / 双语对照�
     clearAllWordCards();
   });
   afterEach(() => {
+    vi.unstubAllGlobals();
     ctx?.fm.uninstall();
     ctx?.z.uninstall();
     ctx?.dom.window.close();
@@ -712,20 +713,40 @@ describe("B16 划词翻译：持久段落缓存（与 PDF 管线 / 双语对照�
   });
 
   it("同一文本再次翻译命中缓存：不再发网络请求", async () => {
-    // 第一次：真实翻译并落盘（1 次网络请求）
+    // 第一块面板：真实翻译并落盘。选区同步在并行负载下可能对同一选区
+    // 触发多次引擎请求（后续次赶在落盘前查询就 miss），请求条数因此
+    // 不确定——这里只等「磁盘记录已可见」这个确定前提。
     ctx = setup({ ...ENGINE_PREFS, "translate.auto": true }, ["repeat me"]);
     routeOK(ctx.fm, "缓存命中译文");
     mountTranslatePane({ doc: ctx.doc, body: ctx.body });
-    await flush(80);
-    expect(ctx.fm.calls.length).toBe(1);
+
+    const diskKey = await cacheKey(
+      engineCacheIdentity(),
+      "auto",
+      "zh-CN",
+      "repeat me",
+    );
+    let onDisk: string | undefined;
+    for (let waited = 0; waited < 2000; waited += 50) {
+      onDisk = (await getCachedTranslations([diskKey])).get(diskKey);
+      if (onDisk) break;
+      await flush(50);
+    }
+    expect(onDisk).toBe("缓存命中译文");
+
+    // 拔网线：第二块面板必须纯靠缓存出结果。若缓存路径回归（漏读、键
+    // 形状漂移），面板会渲染错误而不是译文——比数请求条数更硬的断言，
+    // 也对第一块面板的在途二次触发免疫。
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("network unplugged — phase 2 must be cache-only");
+    });
 
     // 清掉内存 LRU，强制第二块面板走磁盘层；同一选区文本应直接命中。
     clearTranslationCache();
     const body2 = ctx.doc.createElement("div");
     ctx.doc.body.appendChild(body2);
     mountTranslatePane({ doc: ctx.doc, body: body2 });
-    await flush(80);
+    await flush(300);
     expect(String(body2.textContent)).toContain("缓存命中译文");
-    expect(ctx.fm.calls.length).toBe(1); // 未新增网络请求
   });
 });
