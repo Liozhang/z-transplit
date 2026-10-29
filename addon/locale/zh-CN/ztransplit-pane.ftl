@@ -90,6 +90,7 @@ bilingual-enable = 双语阅读
 bilingual-mode-interleave = 上下对照
 bilingual-mode-trans-only = 仅译文
 bilingual-peek-hint = 点击查看本段原文
+bilingual-translate-selection = 翻译本段
 bilingual-progress = 已译 { $done }/{ $total } 段
 bilingual-progress-failed = 已译 { $done }/{ $total } 段，{ $failed } 段失败：{ $error }（可点击失败段落重试）
 bilingual-placeholder = 翻译中…

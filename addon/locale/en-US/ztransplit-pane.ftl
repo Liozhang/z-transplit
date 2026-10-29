@@ -91,6 +91,7 @@ bilingual-enable = Bilingual reading
 bilingual-mode-interleave = Interleaved (original + translation)
 bilingual-mode-trans-only = Translation only
 bilingual-peek-hint = Click to show the original text of this paragraph
+bilingual-translate-selection = Translate this paragraph
 bilingual-progress = { $done }/{ $total } paragraphs translated
 bilingual-progress-failed = { $done }/{ $total } paragraphs translated, { $failed } failed: { $error } (click a failed paragraph to retry)
 bilingual-placeholder = Translating…

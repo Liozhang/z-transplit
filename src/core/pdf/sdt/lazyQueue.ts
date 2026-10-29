@@ -76,6 +76,8 @@ export class LazyTranslateQueue {
   private failed = 0;
   private pollTimer: number | null = null;
   private stopped = false;
+  /** Refs whose NEXT run must skip the cache lookup (manual retranslation). */
+  private bypassOnce = new Set<string>();
   /** Topmost visible original block (approximate reading position). */
   private topVisible: string | null = null;
 
@@ -185,6 +187,35 @@ export class LazyTranslateQueue {
     this.pump();
   }
 
+  /**
+   * Force one entry to run NOW, regardless of viewport visibility or item
+   * state — the manual-translation trigger in the interleave view.
+   *
+   * Compared to retry(): accepts refs never enqueued before (blocks the
+   * session inventory missed — registered via watch() right before), and
+   * re-runs DONE items when bypassCache is set. The bypass matters: a done
+   * item re-run through the normal pipeline would hit the persistent cache
+   * and return the very translation the user asked to redo.
+   */
+  force(refPath: string, opts?: { bypassCache?: boolean }): void {
+    if (this.stopped) return;
+    const text = this.entries.get(refPath)?.text || "";
+    if (!text) return;
+    const item = this.items.get(refPath);
+    if (item) {
+      // Already in flight — the run will land shortly; ignore the request.
+      if (item.state === "loading") return;
+      item.state = "queued";
+    } else {
+      this.items.set(refPath, { refPath, text, state: "queued" });
+    }
+    if (opts?.bypassCache) this.bypassOnce.add(refPath);
+    this.pending = this.pending.filter((r) => r !== refPath);
+    this.pending.unshift(refPath);
+    this.emitProgress();
+    void this.pump();
+  }
+
   stop(): void {
     this.stopped = true;
     try {
@@ -285,10 +316,18 @@ export class LazyTranslateQueue {
     }
 
     try {
-      // Cache layer first — hits never reach the engine.
-      const cached = this.hooks.lookup
-        ? await this.hooks.lookup(texts)
-        : new Map<string, string>();
+      // Consume the bypass flags up front (per ref, but results are per text:
+      // two refs sharing one text is the rare corner and resolves to whichever
+      // side asked for the cache).
+      const bypass = new Set(refPaths.filter((r) => this.bypassOnce.has(r)));
+      for (const refPath of bypass) this.bypassOnce.delete(refPath);
+      // Cache layer first — hits never reach the engine. Bypassed refs skip
+      // the lookup entirely so their text reaches the engine fresh.
+      const lookupTexts = texts.filter((_, i) => !bypass.has(refPaths[i]));
+      const cached =
+        this.hooks.lookup && lookupTexts.length > 0
+          ? await this.hooks.lookup(lookupTexts)
+          : new Map<string, string>();
 
       const misses: string[] = [];
       const missPositions: number[] = [];

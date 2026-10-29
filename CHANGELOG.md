@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Manual translation in bilingual reading mode (issue #3). Selecting text in
+  the reading view shows a "Translate this paragraph" pill centered below
+  the selection; clicking it translates the block the selection sits in — or
+  retranslates it with the cache bypassed when a translation already exists.
+  Blocks the session inventory missed (paragraphs the reading view rendered
+  late) and containers it skips on purpose (lists, tables) get their
+  translation slot injected on the spot, joining the progress count, the
+  retry flow and read-aloud like any other block. Reference sections stay
+  excluded, exactly like automatic translation.
+
 ## [1.13.1] - 2026-10-24
 
 ### Added

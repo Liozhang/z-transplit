@@ -20,6 +20,14 @@
  * Translation supply is the LazyTranslateQueue; the persistent translation
  * cache (translationCache.ts) sits between the queue and the engine.
  *
+ * Manual translation (issue #3): selecting text anywhere in the reading view
+ * shows a small pill centered below the selection; clicking it translates —
+ * or, for an already translated block, retranslates with the cache bypassed —
+ * the block the selection sits in. Blocks the session inventory missed
+ * (progressive rendering) or skipped on purpose (lists, tables) get their
+ * translation slot injected on the spot; reference sections stay excluded,
+ * exactly like automatic translation.
+ *
  * @module core/pdf/sdt/interleaveView
  */
 
@@ -155,6 +163,24 @@ function ensureStyle(doc: Document): void {
 .ztransplit-bi-mode-trans-only .${BI_CLASS} {
   cursor: pointer;
 }
+/* Manual-translation trigger: a small pill centered below the active
+ * selection. It lives in the SDT document body (outside #sdt-content) and is
+ * positioned fixed — the selection rect is iframe-viewport-relative, fixed
+ * matches. */
+.ztransplit-bi-trigger {
+  position: fixed;
+  z-index: 9999;
+  margin: 0;
+  padding: 2px 12px;
+  border: 1px solid var(--ztransplit-accent, #1f9e8d);
+  border-radius: 12px;
+  background: var(--ztransplit-accent, #1f9e8d);
+  color: #fff;
+  font: inherit;
+  font-size: 0.8em;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
 `;
   (doc.head ?? doc.documentElement)?.appendChild(style);
 }
@@ -177,8 +203,10 @@ export async function buildInterleave(
   const injected = new Map<string, HTMLElement>(); // refPath → our block
   const texts = new Map<string, string>();
   const translations = new Map<string, string>();
+  /** Blocks adopted into the session after start (manual translation). */
+  const manualBlocks: SdtBlock[] = [];
 
-  const makeBlockEl = (block: SdtBlock): HTMLElement => {
+  const makeBlockEl = (block: Pick<SdtBlock, "refPath">): HTMLElement => {
     const el = doc.createElement("div");
     el.className = BI_CLASS;
     el.dataset.refPath = block.refPath;
@@ -264,6 +292,143 @@ export async function buildInterleave(
     }
   };
   session.container.addEventListener("click", onContainerClick);
+
+  // ── manual translation trigger (issue #3) ───────────────────────────────
+  // A non-collapsed selection shows a "translate this paragraph" pill near
+  // the selection; clicking it translates — or retranslates (cache bypassed)
+  // — the block the selection sits in. This is the only path content the
+  // session inventory missed ever gets translated: blocks the SDT view
+  // rendered late and containers (lists, tables) that collectBlocks skips
+  // never received a slot otherwise. Reference sections stay excluded, same
+  // as automatic translation.
+  interface ManualTarget {
+    refPath: string;
+    original: HTMLElement;
+    text: string;
+  }
+
+  const resolveSelectionTarget = (): ManualTarget | null => {
+    try {
+      const sel = doc.defaultView?.getSelection?.() ?? null;
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+      const range = sel.getRangeAt(0);
+      // Resolve from the START of the selection: "translate this paragraph"
+      // means the paragraph where it begins, even for multi-block selections.
+      const start = range.startContainer;
+      const startEl =
+        start.nodeType === 3
+          ? (start.parentElement as Element | null)
+          : (start as Element);
+      // Duck-typed closest: the node is a content-realm object and the
+      // chrome-realm instanceof would lie (same reason as onContainerClick).
+      const el = startEl?.closest?.("[data-ref-path]") as HTMLElement | null;
+      if (!el || !session.container.contains(el)) return null;
+      // The reference section is excluded from automatic translation on
+      // purpose (collectBlocks): a stray selection in the bibliography must
+      // not send the whole section's text to the engine either.
+      if (el.classList?.contains("sdt-reference")) return null;
+      const refPath = el.dataset?.refPath;
+      if (!refPath) return null;
+      // Blocks already in the session use their collected text; anything
+      // else (containers, late renders) is read off the element now.
+      const known = texts.has(refPath);
+      const text = known
+        ? (texts.get(refPath) as string)
+        : (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      return {
+        refPath,
+        original: originals.get(refPath) ?? el,
+        text,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const trigger = doc.createElement("button");
+  trigger.type = "button";
+  trigger.className = "ztransplit-bi-trigger";
+  trigger.textContent = getString("bilingual-translate-selection");
+  trigger.style.display = "none";
+  (doc.body ?? doc.documentElement)?.appendChild(trigger);
+
+  const positionTrigger = (target: ManualTarget | null): void => {
+    if (!target) {
+      trigger.style.display = "none";
+      return;
+    }
+    trigger.style.display = "block";
+    try {
+      const view = doc.defaultView;
+      const rect = view
+        ?.getSelection?.()
+        ?.getRangeAt(0)
+        .getBoundingClientRect();
+      if (rect) {
+        // Center-bottom of the selection: horizontally centered on the
+        // selection rect, hugging its bottom edge — where the eye already
+        // is when the selection ends. offsetWidth forces layout after the
+        // display flip above; jsdom (no layout) falls back to 120.
+        const viewWidth = Number(view?.innerWidth) || 800;
+        const width = trigger.offsetWidth || 120;
+        const center = rect.left + (Number(rect.width) || 0) / 2;
+        trigger.style.left =
+          Math.max(8, Math.min(center - width / 2, viewWidth - width - 8)) +
+          "px";
+        trigger.style.top = Math.max(8, rect.bottom + 6) + "px";
+      }
+    } catch {
+      /* no geometry — the pill lands at its last position */
+    }
+  };
+
+  const onDocMouseUp = (): void => {
+    positionTrigger(resolveSelectionTarget());
+  };
+  const onDocMouseDown = (ev: Event): void => {
+    // Pressing the trigger itself must not dismiss it before its click.
+    const t = ev.target as { closest?: (s: string) => Element | null } | null;
+    if (t?.closest?.(".ztransplit-bi-trigger")) return;
+    trigger.style.display = "none";
+  };
+  doc.addEventListener("mouseup", onDocMouseUp);
+  doc.addEventListener("mousedown", onDocMouseDown);
+
+  const ensureManualBlock = (target: ManualTarget): void => {
+    if (injected.has(target.refPath)) return;
+    const el = makeBlockEl(target);
+    target.original.after(el);
+    injected.set(target.refPath, el);
+    texts.set(target.refPath, target.text);
+    originals.set(target.refPath, target.original);
+    manualBlocks.push({
+      refPath: target.refPath,
+      el: target.original,
+      text: target.text,
+    });
+    queue.watch(target.refPath, { text: target.text, placeholder: el });
+  };
+
+  const onTriggerClick = (): void => {
+    trigger.style.display = "none";
+    const target = resolveSelectionTarget();
+    if (!target) return;
+    ensureManualBlock(target);
+    // Done blocks retranslate with the cache bypassed (a plain re-run would
+    // return the very translation the user asked to redo); failed blocks and
+    // fresh blocks just run — force() covers both, retry() covers neither
+    // for unknown refs.
+    queue.force(target.refPath, {
+      bypassCache: translations.has(target.refPath),
+    });
+    try {
+      injected.get(target.refPath)?.scrollIntoView?.({ block: "nearest" });
+    } catch {
+      /* display state only — a failure here must not break the click */
+    }
+  };
+  trigger.addEventListener("click", onTriggerClick);
 
   // ── cache hooks ────────────────────────────────────────────────────────
   const cacheOn = !!options.cacheIdentity && cacheAvailable();
@@ -401,7 +566,11 @@ export async function buildInterleave(
     translationOf: (refPath: string) => translations.get(refPath) || "",
     translatedReadSegments: () => {
       const out: TranslatedReadSegment[] = [];
-      for (const block of session.blocks) {
+      // Manual blocks join document order at the end — they were injected
+      // after the session inventory was frozen, and reading them at all is
+      // a bonus; exact interleaving by document position is not worth the
+      // re-sort here.
+      for (const block of [...session.blocks, ...manualBlocks]) {
         const text = translations.get(block.refPath);
         if (!text) continue;
         splitSentences(text).forEach((sentence, sentenceIndex) => {
@@ -442,6 +611,13 @@ export async function buildInterleave(
     async dispose() {
       queue.stop();
       session.container.removeEventListener("click", onContainerClick);
+      doc.removeEventListener("mouseup", onDocMouseUp);
+      doc.removeEventListener("mousedown", onDocMouseDown);
+      try {
+        trigger.remove();
+      } catch {
+        /* already gone with the view */
+      }
       // data-peek is the one transient state we ever put on official
       // elements — strip it so exit leaves the view exactly as found.
       clearPeek();
@@ -454,6 +630,7 @@ export async function buildInterleave(
       }
       injected.clear();
       translations.clear();
+      manualBlocks.length = 0;
       session.container.classList.remove(MODE_CLASSES.interleave, MODE_CLASSES.transOnly);
       const style = doc.getElementById("ztransplit-bi-style");
       style?.remove();

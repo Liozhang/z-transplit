@@ -29,6 +29,7 @@ export type FluentMessageId =
   | 'bilingual-sdt-unpack-failed'
   | 'bilingual-section-title'
   | 'bilingual-toolbar-tooltip'
+  | 'bilingual-translate-selection'
   | 'dictionary-error-all-failed'
   | 'dictionary-error-unavailable'
   | 'err-jar-load'

@@ -153,3 +153,95 @@ describe("LazyTranslateQueue (eager path, no IntersectionObserver)", () => {
     expect(last).toMatchObject({ total: 2, done: 2, failed: 0 });
   });
 });
+
+describe("LazyTranslateQueue.force (manual translation, issue #3)", () => {
+  it("runs a never-enqueued entry immediately, without start() or visibility", async () => {
+    const onDone = vi.fn();
+    const { queue, entries } = makeQueue({}, { onDone });
+    // A block the session inventory missed, adopted later via watch() —
+    // exactly what interleaveView does for a manual translation.
+    entries.set("9", { text: "late block", placeholder: fakeEl() });
+    queue.force("9");
+    await vi.waitFor(() => expect(queue.stats().done).toBe(1));
+    expect(onDone).toHaveBeenCalledWith("9", "译(late block)");
+    expect(queue.stats().total).toBe(1);
+  });
+
+  it("without bypassCache a re-run is answered identically by the cache", async () => {
+    const translateBatch = vi.fn(async (list: string[]) => ({
+      translations: list.map((t) => `译(${t})`),
+      failedIndices: [],
+    }));
+    const lookup = vi.fn(async (texts: string[]) =>
+      new Map(texts.map((t) => [t, "缓存"])),
+    );
+    const onDone = vi.fn();
+    const { queue } = makeQueue(
+      { "1": "same text" },
+      { translateBatch, lookup, onDone },
+    );
+    queue.start();
+    await vi.waitFor(() => expect(queue.stats().done).toBe(1));
+    queue.force("1");
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(2));
+    // The point of bypassCache: a plain re-run returns the very translation
+    // the user asked to redo — the engine is never reached at all.
+    expect(onDone.mock.calls[1][1]).toBe("缓存");
+    expect(translateBatch).not.toHaveBeenCalled();
+  });
+
+  it("with bypassCache a done item re-runs through the engine, skipping lookup", async () => {
+    const translateBatch = vi.fn(async (list: string[]) => ({
+      translations: list.map((t) => `新译(${t})`),
+      failedIndices: [],
+    }));
+    const lookup = vi.fn(async (texts: string[]) =>
+      new Map(texts.map((t) => [t, "缓存"])),
+    );
+    const store = vi.fn();
+    const onDone = vi.fn();
+    const { queue } = makeQueue(
+      { "1": "same text" },
+      { translateBatch, lookup, store, onDone },
+    );
+    queue.start();
+    await vi.waitFor(() => expect(queue.stats().done).toBe(1));
+    expect(onDone.mock.calls[0][1]).toBe("缓存");
+
+    queue.force("1", { bypassCache: true });
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(2));
+    expect(onDone.mock.calls[1][1]).toBe("新译(same text)");
+    expect(lookup).toHaveBeenCalledTimes(1);
+    // The fresh value replaces the cached one for future runs.
+    expect(store).toHaveBeenCalledWith("same text", "新译(same text)");
+    // The bypass is consumed by that single run.
+    queue.force("1", { bypassCache: false });
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(3));
+    expect(onDone.mock.calls[2][1]).toBe("缓存");
+  });
+
+  it("ignores an item that is currently loading", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const onLoading = vi.fn();
+    const onDone = vi.fn();
+    const { queue } = makeQueue(
+      { "1": "slow" },
+      {
+        onLoading,
+        onDone,
+        translateBatch: async () => {
+          await gate;
+          return { translations: ["译(slow)"], failedIndices: [] };
+        },
+      },
+      { concurrency: 1 },
+    );
+    queue.start();
+    await vi.waitFor(() => expect(onLoading).toHaveBeenCalled());
+    queue.force("1");
+    release!();
+    await vi.waitFor(() => expect(queue.stats().done).toBe(1));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
