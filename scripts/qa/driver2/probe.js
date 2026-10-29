@@ -1901,6 +1901,12 @@ PROBE_CMDS.pokeSection = async function () {
 
 /** Maximize the main window — the context pane auto-collapses under Zotero's
  *  width threshold, which hides the translate section on small QA windows. */
+PROBE_CMDS.focus = async function () {
+  const win = Zotero.getMainWindow();
+  win.focus();
+  return { focused: true };
+};
+
 PROBE_CMDS.maximize = async function () {
   const win = Zotero.getMainWindow();
   const doc = win.document;
@@ -2588,6 +2594,19 @@ PROBE_CMDS.selectTranslate = async function (arg) {
     }
   }
   await probeScrollSectionIntoView(doc);
+
+  // Remove the staged fake: it is a chrome-realm array on a content-realm
+  // view object, and Zotero 10.0.6+'s selection layer reads _selectionRanges
+  // on reader events — each read throws cross-realm "Permission denied"
+  // (reader.js _isSelectionCollapsed/_pushSelection), which accompanies
+  // frozen first paints in the split view. Restore the property to absent —
+  // exactly what a reader without any selection history looks like.
+  try {
+    delete view._selectionRanges;
+  } catch (e) {
+    /* best effort — the shot is already taken */
+  }
+
   return {
     state,
     source: q(".ztransplit-tp-source-text")?.textContent?.slice(0, 150) ?? null,
@@ -2598,8 +2617,9 @@ PROBE_CMDS.selectTranslate = async function (arg) {
 
 /**
  * bilingualMode — switch an already-running bilingual session's presentation
- * (unlike `bilingual`, which toggles the session on). The mode control is a
- * <select> dropdown (ztransplit-bc-mode) in the current build.
+ * (unlike `bilingual`, which toggles the session on). Current builds expose
+ * two mode BUTTONS ("Interleaved …" / "Translation only"); older builds had a
+ * <select> dropdown (ztransplit-bc-mode), still supported as a fallback.
  *   arg: "only" | "interleave"  (aliases: "transOnly", "translation only")
  */
 PROBE_CMDS.bilingualMode = async function (mode) {
@@ -2612,11 +2632,26 @@ PROBE_CMDS.bilingualMode = async function (mode) {
   const wantOnly = /only|仅译文/i.test(mode || "");
   const sel = section.querySelector("select.ztransplit-bc-mode");
   if (!sel) {
+    const btn = Array.from(section.querySelectorAll("button")).find((b) =>
+      wantOnly
+        ? /translation only|仅译文/i.test(b.textContent || "")
+        : /interleaved|上下对照/i.test(b.textContent || ""),
+    );
+    if (!btn) {
+      return {
+        error: "no mode button or mode select",
+        controls: Array.from(section.querySelectorAll("button, select"), (b) =>
+          b.tagName + ":" + (b.textContent || b.value || ""),
+        ),
+      };
+    }
+    btn.click();
+    await Zotero.Promise.delay(2500);
+    await probeScrollSectionIntoView(doc);
     return {
-      error: "no mode select",
-      controls: Array.from(section.querySelectorAll("button, select"), (b) =>
-        b.tagName + ":" + (b.textContent || b.value || ""),
-      ),
+      via: "button",
+      clicked: btn.textContent,
+      sectionText: (section.textContent || "").slice(0, 300),
     };
   }
   const target = wantOnly ? "transOnly" : "interleave";
@@ -2653,7 +2688,23 @@ PROBE_CMDS.openTranslated = async function () {
     };
   }
   await ZoteroPane.viewAttachment(translated.id);
-  await Zotero.Promise.delay(4000);
+  // A short fixed wait races the reader's first paint: on a slow run the
+  // capture caught a blank frame. Wait until pdf.js has actually rendered
+  // page 1 (or 12 s, whichever comes first) before reporting success.
+  {
+    const view = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID)?._internalReader?._primaryView;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 12000) {
+      await Zotero.Promise.delay(500);
+      try {
+        const w = view?._iframe?.contentWindow?.wrappedJSObject
+          ?? view?._iframe?.contentWindow;
+        const status = w?.PDFViewerApplication?.pdfViewer?._pages?.[0]?.renderingState;
+        if (status === 3 || status === "finished") break;
+      } catch (e) { /* not ready yet — keep polling */ }
+    }
+  }
+  await Zotero.Promise.delay(1500);
   return { opened: translated.getField("title"), tabID: Zotero_Tabs.selectedID };
 };
 
@@ -2745,13 +2796,148 @@ PROBE_CMDS.demoTab = async function () {
   const { Zotero_Tabs } = probeWin();
   const tabID = PROBE_STATE.demoTabID;
   if (!tabID) return { error: "no demo tab recorded — run demoItem first" };
-  Zotero_Tabs.select(tabID);
-  await Zotero.Promise.delay(1500);
+  let via = "recorded";
+  const exists = (Zotero_Tabs._tabs || []).some((t) => t.id === tabID);
+  if (exists) {
+    Zotero_Tabs.select(tabID);
+    await Zotero.Promise.delay(1500);
+  } else {
+    // Pipeline steps can close/replace the original reader tab (observed in
+    // the full-text round: after the translated attachment opened, the
+    // recorded id no longer resolved and Zotero_Tabs.select threw). Select
+    // the tab of the EXISTING reader instance for the attachment first —
+    // opening a second reader for the same item confuses the split view
+    // (readers stall mid-paint). viewAttachment is the last resort only.
+    const attID = PROBE_STATE.demo?.attachmentID;
+    if (attID == null) return { error: "demo attachment missing — run demoItem first" };
+    let readers = [];
+    try {
+      readers = Zotero.Reader.getByItemID(attID) || [];
+    } catch {
+      readers = [];
+    }
+    const reader = readers.find((r) => r.tabID && (Zotero_Tabs._tabs || []).some((t) => t.id === r.tabID));
+    if (reader) {
+      Zotero_Tabs.select(reader.tabID);
+      await Zotero.Promise.delay(1500);
+      via = "reader";
+    } else {
+      const win = Zotero.getMainWindow();
+      await win.ZoteroPane.viewAttachment(attID);
+      await Zotero.Promise.delay(2500);
+      via = "viewAttachment";
+    }
+  }
   return {
     selectedID: Zotero_Tabs.selectedID,
+    via,
     isDemo: Zotero_Tabs.selectedID === tabID,
-    tabs: Zotero_Tabs._tabs.map((t) => [t.id, t.type, t.title]),
+    tabs: (Zotero_Tabs._tabs || []).map((t) => [t.id, t.type, t.title]),
   };
+};
+
+/**
+ * tabReselect — switch away from the selected tab and back, forcing the XUL
+ * deck to recompute panel activation on the CURRENT container nodes.
+ */
+PROBE_CMDS.tabReselect = async function () {
+  const win = Zotero.getMainWindow();
+  const { Zotero_Tabs } = probeWin();
+  const current = Zotero_Tabs.selectedID;
+  const other = (Zotero_Tabs._tabs || []).find((t) => t.id !== current);
+  if (!other) return { error: "no other tab" };
+  Zotero_Tabs.select(other.id);
+  await Zotero.Promise.delay(800);
+  Zotero_Tabs.select(current);
+  await Zotero.Promise.delay(1500);
+  return { reselected: current };
+};
+
+/**
+ * rafCheck — diagnose a stalled split view: for every live reader report
+ * whether requestAnimationFrame fires in the pdf.js iframe (refresh driver
+ * running?), the docShell activation state, and focus. With --force also
+ * flips docShell activation on and asks pdf.js to re-render, so the SAME
+ * command can test the hypothesis end to end.
+ */
+PROBE_CMDS.rafCheck = async function (arg) {
+  const force = arg === true || arg === "force";
+  const readers = Zotero.Reader._readers || [];
+  const out = [];
+  for (const r of readers) {
+    const iw = r._internalReader?._primaryView?._iframeWindow ?? r._iframeWindow;
+    const w = iw?.wrappedJSObject || iw;
+    if (!w) {
+      out.push({ item: r.itemID, err: "no iframe window" });
+      continue;
+    }
+    let browserEl = null;
+    try {
+      browserEl = iw.frameElement ?? w.frameElement;
+    } catch (e) { /* cross-realm — ignore */ }
+    let docShell = null;
+    try {
+      docShell = browserEl?.docShell ?? null;
+    } catch (e) { /* ignore */ }
+    const entry = {
+      item: r.itemID,
+      isActive: (() => { try { return !!docShell?.isActive; } catch (e) { return "err:" + e; } })(),
+      hasBrowser: !!browserEl,
+      hasFocus: (() => { try { return !!w.document.hasFocus(); } catch (e) { return null; } })(),
+    };
+    const fired = await new Promise((res) => {
+      let done = false;
+      try {
+        w.requestAnimationFrame(() => { done = true; res(true); });
+      } catch (e) { res("throw"); return; }
+      setTimeout(() => { if (!done) res(false); }, 2000);
+    });
+    entry.raf = fired;
+    if (force && docShell) {
+      try {
+        docShell.setIsActive(true);
+        entry.forceActive = docShell.isActive;
+      } catch (e) { entry.forceActive = "err:" + e; }
+      try {
+        w.PDFViewerApplication?.pdfViewer?.update?.();
+      } catch (e) { /* ignore */ }
+    }
+    out.push(entry);
+  }
+  await Zotero.Promise.delay(1500);
+  return out;
+};
+
+/**
+ * splitPoke — nudge every live reader so a stalled split view resumes
+ * painting. Observed on Zotero 10.0.6: both split readers freeze after the
+ * first canvas chunk (spinner forever, paint state identical at 6 s and
+ * 18 s) until some interaction happens. pdf.js's pdfViewer.update() forces
+ * re-layout/repaint of the visible pages; a tiny scroll round-trip kicks the
+ * refresh driver the way a user's first movement would.
+ */
+PROBE_CMDS.splitPoke = async function () {
+  const readers = Zotero.Reader._readers || [];
+  const poked = [];
+  for (const r of readers) {
+    try {
+      const view = r._internalReader?._primaryView;
+      const iw = view?._iframeWindow ?? r._iframeWindow;
+      const w = iw?.wrappedJSObject || iw;
+      if (!w) continue;
+      try {
+        w.PDFViewerApplication?.pdfViewer?.update?.();
+      } catch (e) { /* pdf.js not ready in this pane */ }
+      w.scrollBy(0, 40);
+      await Zotero.Promise.delay(250);
+      w.scrollBy(0, -40);
+      poked.push(r.itemID);
+    } catch (e) {
+      /* reader gone — skip */
+    }
+  }
+  await Zotero.Promise.delay(2500);
+  return { poked, readers: readers.length };
 };
 
 /**

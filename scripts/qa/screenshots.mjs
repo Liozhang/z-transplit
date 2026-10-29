@@ -23,7 +23,9 @@ const readyFile = path.join(QA_ROOT, "probe-ready.json");
 const cmdFile = path.join(QA_ROOT, "command.json");
 const resultFile = path.join(QA_ROOT, "result.json");
 const pidFile = path.join(QA_ROOT, "qa-zotero.pid");
-const FIXTURE = path.join(ROOT, "scripts", "qa", "fixtures", "reading-brain.pdf");
+const FIXTURE = arg("fixture", path.join(ROOT, "scripts", "qa", "fixtures", "attention-reading.pdf"));
+const DOC_TITLE = arg("title", "Attention and the Reading Brain");
+const DOC_FILENAME = path.basename(FIXTURE);
 
 function log(...m) {
   console.log("[screenshots]", ...m);
@@ -116,6 +118,9 @@ async function run(action, argValue, { must = true, timeoutMs } = {}) {
 
 async function shot(name) {
   const file = path.join(outDir, name + ".png");
+  // An occluded window throttles pdf.js painting (rAF pauses) — focus first
+  // so every capture sees a fully painted window.
+  await run("focus", undefined, { must: false });
   await run("shot", { file, win: "main" });
   log("  saved", file);
 }
@@ -141,8 +146,8 @@ try {
   await run("maximize");
   await run("demoItem", {
     pdf: FIXTURE,
-    title: "Reading and the Brain",
-    filename: "reading-brain.pdf",
+    title: DOC_TITLE,
+    filename: DOC_FILENAME,
   });
 
   // 1. Selection translation: stage the abstract, translate to zh-CN.
@@ -172,9 +177,12 @@ try {
   //    collections pane and both item panes closed so readers fill the window.
   await run("demoTab");
   await run("menus", "split");
-  await sleep(6000);
+  // Two readers must finish loading AND painting before the capture — a
+  // shorter wait caught them mid-render (blank panes, unpainted text).
+  await sleep(18000);
+  await run("splitPoke", undefined, { must: false, timeoutMs: 60000 });
   await run("frame", { collections: "close", contextPane: "close", itemPane: "close" });
-  await sleep(1200);
+  await sleep(2500);
   await shot("split-view");
 
   // 4/5. Bilingual interleave + translation-only on the source reader tab.
