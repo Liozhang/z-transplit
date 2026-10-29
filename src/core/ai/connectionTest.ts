@@ -25,6 +25,11 @@ export interface AiConnectionConfig {
   apiUrl: string;
   apiKey?: string;
   model?: string;
+  /**
+   * Extra headers from the panel's headers textarea — the test must probe
+   * exactly the configuration the user is looking at, headers included.
+   */
+  headers?: Record<string, string>;
 }
 
 /** 测试结果分类。kind 决定面板显示的文案与行动建议。 */
@@ -73,6 +78,7 @@ export async function testAiConnection(
     apiKey: (config.apiKey || "").trim() || undefined,
     defaultModel: (config.model || "").trim() || undefined,
     emptyResultErrorKey: "ai-test-empty",
+    extraHeaders: config.headers,
   });
 
   const started = Date.now();

@@ -16,6 +16,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../../../../src/core/pdf/sdt/lazyQueue", () => ({
   LazyTranslateQueue: class {
+    /** Hooks captured for direct driving (onDone/onFailed) in tests. */
+    static lastHooks: any = null;
+    constructor(_doc: unknown, _entries: unknown, hooks: any) {
+      (this.constructor as any).lastHooks = hooks;
+    }
     start(): void {}
     stop(): void {}
     stats(): { done: number; total: number } {
@@ -37,6 +42,7 @@ vi.mock("../../../../../src/core/translation/translationCache", () => ({
 
 import { buildInterleave } from "../../../../../src/core/pdf/sdt/interleaveView";
 import { getString } from "../../../../../src/utils/locale";
+import { LazyTranslateQueue } from "../../../../../src/core/pdf/sdt/lazyQueue";
 
 type AnySession = Parameters<typeof buildInterleave>[0];
 
@@ -108,15 +114,26 @@ describe("interleaveView：仅译文点击查看原文", () => {
     fx = undefined;
   });
 
-  it("上下对照模式点击译文块无任何效果", async () => {
+  it("上下对照模式点击译文块：不产生 peek，而是切换该段译文的显隐", async () => {
     const { container, originals } = fx!;
     await build(fx!.session);
     expect(container.classList.contains("ztransplit-bi-mode-interleave")).toBe(
       true,
     );
-    click(biOf(container, "a"));
+    const bi = biOf(container, "a");
+    click(bi);
+    // 显隐状态落在注入块自身，原文不获得 peek
+    expect(bi.hasAttribute("data-hidden")).toBe(true);
     expect(originals[0].hasAttribute("data-peek")).toBe(false);
     expect(originals[1].hasAttribute("data-peek")).toBe(false);
+
+    // 再点同一条恢复显示
+    click(bi);
+    expect(bi.hasAttribute("data-hidden")).toBe(false);
+    // 另一块不受影响
+    click(biOf(container, "b"));
+    expect(bi.hasAttribute("data-hidden")).toBe(false);
+    expect(biOf(container, "b").hasAttribute("data-hidden")).toBe(true);
   });
 
   it("仅译文模式点击译文块显示对应原文，可移动、可取消", async () => {
@@ -205,5 +222,75 @@ describe("interleaveView：仅译文点击查看原文", () => {
     click(originals[0]);
     expect(originals[0].hasAttribute("data-peek")).toBe(false);
     expect(originals[1].hasAttribute("data-peek")).toBe(false);
+  });
+});
+
+describe("interleaveView：段落显隐（上下对照点击折叠译文）", () => {
+  let fx: Fixture | undefined;
+
+  beforeEach(() => {
+    fx = makeSession();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    fx = undefined;
+  });
+
+  it("折叠后带恢复提示（title 来自本地化键），恢复后提示移除", async () => {
+    const { container } = fx!;
+    await build(fx!.session);
+    const bi = biOf(container, "a");
+    click(bi);
+    expect(bi.getAttribute("title")).toBe(getString("bilingual-show-hint"));
+    click(bi);
+    expect(bi.hasAttribute("title")).toBe(false);
+  });
+
+  it("切到仅译文模式清除全部折叠状态（两块都藏会让段落整个消失）", async () => {
+    const { container } = fx!;
+    const handle = await build(fx!.session);
+    click(biOf(container, "a"));
+    click(biOf(container, "b"));
+    expect(container.querySelectorAll("[data-hidden]").length).toBe(2);
+
+    handle.setMode("transOnly");
+    expect(container.querySelectorAll("[data-hidden]").length).toBe(0);
+    // 仅译文的查看原文提示照常就位
+    expect(biOf(container, "a").getAttribute("title")).toBe(
+      getString("bilingual-peek-hint"),
+    );
+  });
+
+  it("有选区时的 click 不折叠（拖选松手不是切换手势）", async () => {
+    const { container } = fx!;
+    await build(fx!.session);
+    const bi = biOf(container, "a");
+    const sel = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(bi);
+    sel.addRange(range);
+    click(bi);
+    expect(bi.hasAttribute("data-hidden")).toBe(false);
+
+    sel.removeAllRanges();
+    click(bi);
+    expect(bi.hasAttribute("data-hidden")).toBe(true);
+  });
+
+  it("失败块的重试按钮点击不触发折叠", async () => {
+    const { container } = fx!;
+    const handle = await build(fx!.session);
+    // 队列假件捕获了 hooks：直接驱动 onFailed 渲染失败态（含重试按钮）
+    ((LazyTranslateQueue as unknown as { lastHooks: any }).lastHooks).onFailed(
+      "a",
+    );
+    const retry = biOf(container, "a").querySelector(
+      ".ztransplit-bi-retry",
+    ) as HTMLElement | null;
+    expect(retry).toBeTruthy();
+    click(retry!);
+    expect(biOf(container, "a").hasAttribute("data-hidden")).toBe(false);
+    await handle.dispose();
   });
 });

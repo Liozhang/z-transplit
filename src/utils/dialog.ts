@@ -25,3 +25,27 @@ export function alertDialog(title: string, text: string, win?: any): void {
     safeDebug("[Z-Transplit] alertDialog failed: " + e);
   }
 }
+
+/**
+ * Modal single-line text input. Returns the entered string, or null when the
+ * user cancelled (or no prompt service is available — same never-throws
+ * contract as alertDialog: a failed dialog must not take the caller down).
+ */
+export function promptDialog(
+  title: string,
+  text: string,
+  initialValue = "",
+  win?: any,
+): string | null {
+  try {
+    const Services = (globalThis as any).Services;
+    const parent =
+      win ?? (globalThis as any).Zotero?.getMainWindow?.() ?? null;
+    const input = { value: String(initialValue ?? "") };
+    const ok = Services?.prompt?.prompt(parent, title, text, input, null, null);
+    return ok ? String(input.value ?? "") : null;
+  } catch (e) {
+    safeDebug("[Z-Transplit] promptDialog failed: " + e);
+    return null;
+  }
+}

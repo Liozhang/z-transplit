@@ -23,14 +23,13 @@
 import type { SplitTabState } from "./types";
 import { safeDebug } from "../../../utils/logger";
 import { stateMap } from "./splitViewSync";
-
-/** Title convention: the adapter produces `Translated (lang)`; legacy `译文 (…)` still matches. */
-const TRANSLATION_TITLE_RE = /^(译文|Translated)\s*\(/i;
+import { isPdfAttachment, translationTitleMatcher } from "../translation/translatedAttachment";
 
 /**
  * Find the best right-pane PDF under `parentItemID`, preferring previously
- * translated attachments (titled `Translated (...)`, or legacy `译文 (...)`).
- * Falls back to the newest PDF sibling when no translation exists.
+ * translated attachments (titled `Translated (...)`, the configured name
+ * template, or legacy `译文 (...)`). Falls back to the newest PDF sibling when
+ * no translation exists.
  */
 export function findLatestTranslation(
   parentItemID: number,
@@ -38,16 +37,17 @@ export function findLatestTranslation(
 ): any {
   const parent = (Zotero as any).Items.get(parentItemID);
   const attachmentIDs = parent?.getAttachments?.() || [];
+  const matchesTranslation = translationTitleMatcher();
   const candidates: any[] = [];
   for (const id of attachmentIDs) {
     if (id === excludeItemID) continue;
     const att = (Zotero as any).Items.get(id);
-    if (att && att.attachmentContentType === "application/pdf") {
+    if (att && isPdfAttachment(att)) {
       candidates.push(att);
     }
   }
   const translations = candidates.filter((c) =>
-    TRANSLATION_TITLE_RE.test(c?.getField?.("title") || ""),
+    matchesTranslation(c?.getField?.("title") || ""),
   );
   const pool = translations.length > 0 ? translations : candidates;
   pool.sort((a, b) => {
@@ -67,6 +67,7 @@ export function findLatestTranslation(
  */
 export function findTranslationByRelation(sourceItem: any): any | null {
   try {
+    const matchesTranslation = translationTitleMatcher();
     const relations = sourceItem?.getRelations?.() || {};
     const raw = relations["dc:relation"];
     const uris: string[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
@@ -79,8 +80,8 @@ export function findTranslationByRelation(sourceItem: any): any | null {
       if (
         att &&
         att.id !== sourceItem?.id &&
-        att.attachmentContentType === "application/pdf" &&
-        TRANSLATION_TITLE_RE.test(att?.getField?.("title") || "")
+        isPdfAttachment(att) &&
+        matchesTranslation(att?.getField?.("title") || "")
       ) {
         candidates.push(att);
       }

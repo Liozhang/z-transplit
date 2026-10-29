@@ -52,6 +52,14 @@ preferences-ztransplit-translate-max-chars-desc =
     合法值，不会改写设置。
 preferences-ztransplit-translate-max-chars-range = 请输入 100 到 50000 之间的整数。
 
+preferences-ztransplit-name-template =
+    .value = 译文附件命名模板
+preferences-ztransplit-name-template-desc =
+    可留空。留空时译文附件标题为默认形状 Translated (语言) · 原文名。支持
+    占位符：{"{"}lang{"}"} 目标语言、{"{"}title{"}"} 原文文件名、{"{"}date{"}"}
+    今天的日期。修改模板后，旧模板生成的附件不再被识别为译文，再次翻译会
+    生成新附件。
+
 preferences-ztransplit-translate-batch-tokens =
     .value = 合并批量输入上限（token）
 preferences-ztransplit-translate-batch-tokens-desc =
@@ -60,6 +68,23 @@ preferences-ztransplit-translate-batch-tokens-desc =
     提前收批（该批少带一个段落），而不是超限发送。调大批次更少、上下文更足，
     但思考型模型的推理开销随批次增大，超配额返回空结果的风险也更高。
 preferences-ztransplit-translate-batch-tokens-range = 请输入 1000 到 65536 之间的整数。
+
+preferences-ztransplit-output-tokens =
+    .value = 单次输出上限（token）
+preferences-ztransplit-output-tokens-desc =
+    单次模型请求最多生成的输出 token 数，可填 0–65536，0 表示自动。思考型
+    模型的隐藏推理会消耗输出配额，自动上限可能中途耗尽并返回空结果；遇到
+    空结果时把这里调大（例如 32768）。显式预算同时约束空结果后的一次加大
+    重试，预算不会被重试悄悄突破。留空或 0 都表示自动。
+preferences-ztransplit-output-tokens-range = 请输入 0 到 65536 之间的整数（0 表示自动）。
+preferences-ztransplit-glossary =
+    .value = 术语表
+preferences-ztransplit-glossary-desc =
+    只对 AI 引擎与自定义（OpenAI 兼容）引擎生效。每行一条「原文=译文」，
+    例如：transformer=变换器。命中术语时模型必须使用给定的译法，未列出的
+    词不受影响。最多 200 条；修改术语表后，相关翻译会重新请求（不再命中
+    旧缓存）。
+preferences-ztransplit-glossary-error-bad = 术语表格式不合法：每行应为「原文=译文」，且最多 200 条。
 
 ## ── 翻译引擎 ───────────────────────────────────────────────────────────────
 preferences-ztransplit-engine-type =
@@ -210,10 +235,21 @@ preferences-ztransplit-ai-prompt-desc =
 preferences-ztransplit-ai-prompt-restore =
     .label = 恢复默认模板
 
+preferences-ztransplit-ai-headers =
+    .value = 自定义请求头
+preferences-ztransplit-ai-headers-desc =
+    可留空。随每个请求额外发送的 HTTP 头，每行一条，格式为「名称: 值」，例如
+    X-Tenant-Id: my-team。与内置头同名时以这里的值为准；非法行不会写入设置。
+    修改后相关翻译会重新请求（不再命中旧缓存）。
+
 ## AI 提示词模板的非法原因（与引擎运行时报错同一套措辞，编辑时就地提示；
 ## 面板脚本只负责把本地化文案搬到错误节点，不写死任何字符串）
 preferences-ztransplit-ai-prompt-error-too-long =
     模板过长：最多 4000 个字符。
+preferences-ztransplit-ai-headers-error-bad-line =
+    请求头格式不合法：每行应为「名称: 值」，名称只能含字母、数字与短横线等。
+preferences-ztransplit-custom-headers-error-bad-line =
+    请求头格式不合法：每行应为「名称: 值」，名称只能含字母、数字与短横线等。
 preferences-ztransplit-ai-prompt-error-unknown-placeholder =
     模板包含未知占位符：只支持 {"{{"}text{"}}"}、{"{{"}sourceLang{"}}"}、{"{{"}targetLang{"}}"}（双花括号）。
 preferences-ztransplit-ai-prompt-error-missing-text =
@@ -241,6 +277,12 @@ preferences-ztransplit-custom-api-key-desc =
 preferences-ztransplit-custom-model =
     .value = 模型
 preferences-ztransplit-custom-model-desc =
+preferences-ztransplit-custom-headers =
+    .value = 自定义请求头
+preferences-ztransplit-custom-headers-desc =
+    可留空。随每个请求额外发送的 HTTP 头，每行一条，格式为「名称: 值」。与
+    内置头同名时以这里的值为准；非法行不会写入设置。修改后相关翻译会重新
+    请求（不再命中旧缓存）。
     可留空。要调用的模型名，例如 gpt-4o-mini。留空时由服务端使用默认模型，
     翻译质量不受保证。
 

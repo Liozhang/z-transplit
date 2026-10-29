@@ -35,7 +35,8 @@
 import { getString } from "../utils/locale";
 import { safeDebug } from "../utils/logger";
 import { toErrorMessage } from "../utils/error";
-import { alertDialog } from "../utils/dialog";
+import { alertDialog, promptDialog } from "../utils/dialog";
+import { parsePageRangeSpec } from "../core/pdf/translation/pageRange";
 import {
   translateAndSplitWithOpenDataLoader,
 } from "../core/pdf/translation/opendataloaderSplitAdapter";
@@ -49,6 +50,10 @@ import {
   findTranslationByRelation,
   findSplitTabForItem,
 } from "../core/pdf/splitview/splitViewCleanup";
+import {
+  isPdfAttachment,
+  translationTitleMatcher,
+} from "../core/pdf/translation/translatedAttachment";
 import {
   getActiveBilingualModeForItem,
   startBilingualSessionByItemID,
@@ -78,7 +83,7 @@ function resolveAllSourcePdfAttachments(items: any[]): any[] {
   for (const item of items || []) {
     if (!item) continue;
     try {
-      if (item.isAttachment?.() && item.attachmentContentType === "application/pdf") {
+      if (item.isAttachment?.() && isPdfAttachment(item)) {
         if (!seen.has(item.id)) {
           seen.add(item.id);
           out.push(item);
@@ -89,7 +94,7 @@ function resolveAllSourcePdfAttachments(items: any[]): any[] {
       for (const id of attIDs) {
         if (seen.has(id)) continue;
         const att = (globalThis as any).Zotero?.Items?.get?.(id);
-        if (att?.attachmentContentType === "application/pdf") {
+        if (att && isPdfAttachment(att)) {
           seen.add(id);
           out.push(att);
         }
@@ -126,8 +131,8 @@ function hasExistingTranslation(sourceItem: any): boolean {
     if (parentID != null) {
       const parent = (globalThis as any).Zotero?.Items?.get?.(parentID);
       const attIDs: number[] = parent?.getAttachments?.() || [];
-      const re = /^(译文|Translated)\s*\(/i;
-      if (attIDs.some((id) => re.test(
+      const matchesTranslation = translationTitleMatcher();
+      if (attIDs.some((id) => matchesTranslation(
         (globalThis as any).Zotero?.Items?.get?.(id)?.getField?.("title") || "",
       ))) {
         return true;
@@ -193,6 +198,7 @@ async function runPipeline(
   sourceItem: any,
   outcome: "attachment" | "split",
   label?: string,
+  pages?: number[],
 ): Promise<void> {
   const Zotero = (globalThis as any).Zotero;
   const progress = new Zotero.ProgressWindow({ window: win });
@@ -223,7 +229,8 @@ async function runPipeline(
     // Attachment flow: open the existing translation instead of re-running;
     // when it can't be resolved (e.g. the dedup hit was a non-PDF) fall
     // through to a fresh translation rather than returning silently.
-    if (outcome === "attachment" && hasExistingTranslation(sourceItem)) {
+    // 页码范围是明确的重新翻译意图，不做查重——用户就是要补译若干页。
+    if (outcome === "attachment" && !pages && hasExistingTranslation(sourceItem)) {
       const existing = findExistingTranslation(sourceItem);
       if (existing && openAttachmentOrAlert(win, existing.id)) {
         progress.addDescription(getString("itemtree-dedup-open"));
@@ -234,6 +241,7 @@ async function runPipeline(
 
     await translateAndSplitWithOpenDataLoader({
       sourceItem,
+      ...(pages ? { pages } : {}),
       // The split outcome opens the side-by-side reader through the same
       // factory the pre-existing ODL menu uses; without it the pipeline
       // aborts with "分屏打开器不可用" (found in the README-shot round —
@@ -363,6 +371,35 @@ function injectIntoWindow(win: any): boolean {
         void runPipelines(win, resolveAllSourcePdfAttachments(items), "attachment");
       },
     );
+    // 翻译指定页：只取第一个选中的 PDF（多选时各文档页数不同，同一份
+    // 范围含义不明）。取消对话框或范围不合法都不启动管线。
+    const translatePages = mkItem(
+      "ztransplit-itemmenu-pages",
+      "itemtree-translate-pages",
+      () => {
+        const zp = win.ZoteroPane || win.wrappedJSObject?.ZoteroPane;
+        const items: any[] = zp?.itemsView?.getSelectedItems?.() || [];
+        const source = resolveSourcePdfAttachment(items);
+        if (!source) return;
+        const raw = promptDialog(
+          getString("itemtree-pages-prompt-title"),
+          getString("itemtree-pages-prompt-text"),
+          "",
+          win,
+        );
+        if (raw == null) return; // 用户取消
+        const pages = parsePageRangeSpec(raw);
+        if (!pages || pages.length === 0) {
+          alertDialog(
+            getString("app-title"),
+            getString("itemtree-pages-invalid"),
+            win,
+          );
+          return;
+        }
+        void runPipeline(win, source, "attachment", undefined, pages);
+      },
+    );
     const translateSplit = mkItem(
       "ztransplit-itemmenu-split",
       "itemtree-translate-split",
@@ -457,6 +494,7 @@ function injectIntoWindow(win: any): boolean {
     );
 
     menupopup.appendChild(translateAttachment);
+    menupopup.appendChild(translatePages);
     menupopup.appendChild(translateSplit);
     menupopup.appendChild(interleaveItem);
     menupopup.appendChild(transOnlyItem);

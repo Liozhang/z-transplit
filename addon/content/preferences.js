@@ -211,6 +211,64 @@
     setBatchTokensError(false);
   }
 
+  // ── 单次输出上限（translate.output.maxTokens）──────────────────────────
+  // 与 batchMaxTokens 同一套路，差别只有两点：0 是合法值（= 自动），空串
+  // 也视作 0（清空输入框就是回到自动，不需要先删再敲 0）。
+  var OUTPUT_TOKENS_MAX = 65536;
+
+  function readOutputTokens() {
+    var raw = getPref("translate.output.maxTokens");
+    var n = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+    if (!isFinite(n) || isNaN(n) || n < 0) return 0;
+    return Math.min(OUTPUT_TOKENS_MAX, Math.round(n));
+  }
+
+  /** 解析输入框内容；合法返回整数（空串 = 0），否则返回 null。 */
+  function parseOutputTokens(raw) {
+    if (raw === null || raw === undefined) return null;
+    var text = String(raw).trim();
+    if (text === "") return 0;
+    if (!/^\d+$/.test(text)) return null;
+    var n = parseInt(text, 10);
+    if (n > OUTPUT_TOKENS_MAX) return null;
+    return n;
+  }
+
+  function setOutputTokensError(visible) {
+    show(els.outputTokensError, visible);
+    if (els.outputTokensInput) {
+      try {
+        if (visible) els.outputTokensInput.setAttribute("aria-invalid", "true");
+        else els.outputTokensInput.removeAttribute("aria-invalid");
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  function onOutputTokensInput() {
+    if (!els.outputTokensInput) return;
+    var n = parseOutputTokens(els.outputTokensInput.value);
+    if (n === null) {
+      setOutputTokensError(true);
+      return;
+    }
+    setOutputTokensError(false);
+    setPref("translate.output.maxTokens", n);
+  }
+
+  function onOutputTokensChange() {
+    if (!els.outputTokensInput) return;
+    var n = parseOutputTokens(els.outputTokensInput.value);
+    if (n !== null) {
+      setOutputTokensError(false);
+      setPref("translate.output.maxTokens", n);
+      return;
+    }
+    els.outputTokensInput.value = String(readOutputTokens());
+    setOutputTokensError(false);
+  }
+
   // ── AI prompt 模板 ────────────────────────────────────────────────────────
   // 规则与 src/core/translation/promptTemplate.ts#validatePromptTemplate 一字
   // 不差（那里是权威实现，这里是设置面板里的即时反馈；tests/unit/ui/
@@ -354,6 +412,228 @@
     setPref("translate.ai.prompt", "");
     writePromptInput("");
     setAIPromptError("");
+  }
+
+  // ── 自定义请求头（AI 与 custom 引擎各一份） ──────────────────────────────
+  // 与 prompt 模板同一套路：不挂 preference 属性，读 pref → 校验 → 写 pref，
+  // 半成品值不落盘；失焦仍非法则恢复当前 pref 值。行格式 `名称: 值`；名称是
+  // RFC 7230 token（与 src/core/ai/openaiCompat.ts#parseCustomHeaders 同判）。
+
+  var HEADER_NAME_RE = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/;
+
+  var HEADERS_STRING_IDS = {
+    ai: "ztransplit-pref-string-ai-headers-bad",
+    custom: "ztransplit-pref-string-custom-headers-bad",
+  };
+
+  /** @returns {{ok: boolean}} 任一非空行不是「名称: 值」即非法。 */
+  function checkHeaderLines(raw) {
+    var text = raw === null || raw === undefined ? "" : String(raw);
+    var lines = text.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/^\s+|\s+$/g, "");
+      if (line === "") continue;
+      var colon = line.indexOf(":");
+      if (colon <= 0) return { ok: false };
+      var name = line.slice(0, colon).replace(/^\s+|\s+$/g, "");
+      var value = line.slice(colon + 1).replace(/^\s+|\s+$/g, "");
+      if (!name || !HEADER_NAME_RE.test(name) || !value) {
+        return { ok: false };
+      }
+    }
+    return { ok: true };
+  }
+
+  /** 宽松解析：只取合法行（测试连接探测当前表单值时用，与 TS 版同判）。 */
+  function parseHeaderLines(raw) {
+    var out = {};
+    var lines = String(raw === null || raw === undefined ? "" : raw).split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/^\s+|\s+$/g, "");
+      var colon = line.indexOf(":");
+      if (colon <= 0) continue;
+      var name = line.slice(0, colon).replace(/^\s+|\s+$/g, "");
+      var value = line.slice(colon + 1).replace(/^\s+|\s+$/g, "");
+      if (name && HEADER_NAME_RE.test(name) && value) out[name] = value;
+    }
+    return out;
+  }
+
+  function setHeadersError(kind, bad) {
+    var errorEl = kind === "ai" ? els.aiHeadersError : els.customHeadersError;
+    var input = kind === "ai" ? els.aiHeadersInput : els.customHeadersInput;
+    if (!errorEl) return;
+    if (!bad) {
+      show(errorEl, false);
+      if (input) {
+        try {
+          input.removeAttribute("aria-invalid");
+        } catch (e) {
+          /* 忽略 */
+        }
+      }
+      return;
+    }
+    var source = $(HEADERS_STRING_IDS[kind]);
+    if (source && source.textContent) errorEl.textContent = source.textContent;
+    show(errorEl, true);
+    if (input) {
+      try {
+        input.setAttribute("aria-invalid", "true");
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  function readHeadersInput(input) {
+    if (!input) return "";
+    var v;
+    try {
+      v = input.value;
+    } catch (e) {
+      v = undefined;
+    }
+    if (v === undefined || v === null) v = input.textContent;
+    return v === undefined || v === null ? "" : String(v);
+  }
+
+  function writeHeadersInput(input, text) {
+    if (!input) return;
+    try {
+      input.value = text;
+    } catch (e) {
+      /* 忽略 */
+    }
+    if (input.value !== text) input.textContent = text;
+  }
+
+  function onHeadersInput(kind) {
+    var input = kind === "ai" ? els.aiHeadersInput : els.customHeadersInput;
+    if (!input) return;
+    var pref = kind === "ai" ? "translate.ai.headers" : "translate.custom.headers";
+    var check = checkHeaderLines(readHeadersInput(input));
+    if (check.ok) {
+      setHeadersError(kind, false);
+      setPref(pref, readHeadersInput(input));
+      return;
+    }
+    setHeadersError(kind, true);
+  }
+
+  function onHeadersChange(kind) {
+    var input = kind === "ai" ? els.aiHeadersInput : els.customHeadersInput;
+    if (!input) return;
+    var pref = kind === "ai" ? "translate.ai.headers" : "translate.custom.headers";
+    var check = checkHeaderLines(readHeadersInput(input));
+    if (check.ok) {
+      setHeadersError(kind, false);
+      setPref(pref, readHeadersInput(input));
+      return;
+    }
+    // 失焦仍非法：恢复为当前 pref 值且不写 pref。
+    writeHeadersInput(input, String(getPref(pref) || ""));
+    setHeadersError(kind, false);
+  }
+
+  function onAIHeadersInput() {
+    onHeadersInput("ai");
+  }
+  function onAIHeadersChange() {
+    onHeadersChange("ai");
+  }
+  // ── 术语表（translate.glossary）────────────────────────────────────────
+  // 与请求头同一套路：行级校验（每行「原文=译文」，兼容全角冒号），半成品
+  // 不落盘，失焦仍非法恢复 pref 值。规则与 src/core/translation/glossary.ts
+  // #validateGlossary 一字不差（含 200 条上限），面板与权威实现同判。
+  var GLOSSARY_MAX_ENTRIES = 200;
+  var GLOSSARY_STRING_ID = "ztransplit-pref-string-glossary-bad";
+
+  function splitGlossaryLine(line) {
+    var raw = String(line || "").replace(/^\s+|\s+$/g, "");
+    if (!raw) return null;
+    var seps = ["=", "：", ":"];
+    for (var i = 0; i < seps.length; i++) {
+      var idx = raw.indexOf(seps[i]);
+      if (idx <= 0) continue;
+      var source = raw.slice(0, idx).replace(/^\s+|\s+$/g, "");
+      var target = raw
+        .slice(idx + seps[i].length)
+        .replace(/^\s+|\s+$/g, "");
+      if (source && target) return { source: source, target: target };
+    }
+    return null;
+  }
+
+  /** @returns {{ok: boolean}} 任一非空行不成对或总数超限即非法。 */
+  function checkGlossaryLines(raw) {
+    var text = raw === null || raw === undefined ? "" : String(raw);
+    var lines = text.split(/\r?\n/);
+    var entries = 0;
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i].replace(/^\s+|\s+$/g, "")) continue;
+      if (!splitGlossaryLine(lines[i])) return { ok: false };
+      entries++;
+    }
+    if (entries > GLOSSARY_MAX_ENTRIES) return { ok: false };
+    return { ok: true };
+  }
+
+  function setGlossaryError(bad) {
+    if (!els.glossaryError) return;
+    if (!bad) {
+      show(els.glossaryError, false);
+      if (els.glossaryInput) {
+        try {
+          els.glossaryInput.removeAttribute("aria-invalid");
+        } catch (e) {
+          /* 忽略 */
+        }
+      }
+      return;
+    }
+    var source = $(GLOSSARY_STRING_ID);
+    if (source && source.textContent) els.glossaryError.textContent = source.textContent;
+    show(els.glossaryError, true);
+    if (els.glossaryInput) {
+      try {
+        els.glossaryInput.setAttribute("aria-invalid", "true");
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  function onGlossaryInput() {
+    var input = els.glossaryInput;
+    if (!input) return;
+    var check = checkGlossaryLines(readHeadersInput(input));
+    if (check.ok) {
+      setGlossaryError(false);
+      setPref("translate.glossary", readHeadersInput(input));
+      return;
+    }
+    setGlossaryError(true);
+  }
+
+  function onGlossaryChange() {
+    var input = els.glossaryInput;
+    if (!input) return;
+    var check = checkGlossaryLines(readHeadersInput(input));
+    if (check.ok) {
+      setGlossaryError(false);
+      setPref("translate.glossary", readHeadersInput(input));
+      return;
+    }
+    writeHeadersInput(input, String(getPref("translate.glossary") || ""));
+    setGlossaryError(false);
+  }
+
+  function onCustomHeadersInput() {
+    onHeadersInput("custom");
+  }
+  function onCustomHeadersChange() {
+    onHeadersChange("custom");
   }
 
   // ── pdfParser.opendataloader.timeout ─────────────────────────────────────
@@ -696,6 +976,9 @@
               getPref("translate.ai.model") ||
               "",
           ),
+          // 测的就是眼前这份配置：请求头取当前表单值的宽松解析（只取合法
+          // 行），半成品的非法行不参与探测。
+          headers: parseHeaderLines(readHeadersInput(els.aiHeadersInput)),
         });
       })
       .then(function (result) {
@@ -1172,6 +1455,14 @@
     els.pdfTranslateItem = $("ztransplit-pref-engine-item-pdftranslate");
     els.aiPromptInput = $("ztransplit-pref-ai-prompt");
     els.aiPromptError = $("ztransplit-pref-ai-prompt-error");
+    els.aiHeadersInput = $("ztransplit-pref-ai-headers");
+    els.aiHeadersError = $("ztransplit-pref-ai-headers-error");
+    els.customHeadersInput = $("ztransplit-pref-custom-headers");
+    els.customHeadersError = $("ztransplit-pref-custom-headers-error");
+    els.outputTokensInput = $("ztransplit-pref-output-tokens");
+    els.outputTokensError = $("ztransplit-pref-output-tokens-error");
+    els.glossaryInput = $("ztransplit-pref-glossary");
+    els.glossaryError = $("ztransplit-pref-glossary-error");
     els.javaCheckBtn = $("ztransplit-pref-pdf-java-check");
     els.javaInstallBtn = $("ztransplit-pref-pdf-java-install");
     els.javaStatus = $("ztransplit-pref-pdf-java-status");
@@ -1215,6 +1506,22 @@
     if (els.aiPromptInput) {
       els.aiPromptInput.addEventListener("input", onAIPromptInput);
       els.aiPromptInput.addEventListener("change", onAIPromptChange);
+    }
+    if (els.aiHeadersInput) {
+      els.aiHeadersInput.addEventListener("input", onAIHeadersInput);
+      els.aiHeadersInput.addEventListener("change", onAIHeadersChange);
+    }
+    if (els.customHeadersInput) {
+      els.customHeadersInput.addEventListener("input", onCustomHeadersInput);
+      els.customHeadersInput.addEventListener("change", onCustomHeadersChange);
+    }
+    if (els.outputTokensInput) {
+      els.outputTokensInput.addEventListener("input", onOutputTokensInput);
+      els.outputTokensInput.addEventListener("change", onOutputTokensChange);
+    }
+    if (els.glossaryInput) {
+      els.glossaryInput.addEventListener("input", onGlossaryInput);
+      els.glossaryInput.addEventListener("change", onGlossaryChange);
     }
     if (els.engineList) {
       // XUL menulist 选中项变化主要抛 select；command 在某些平台上也会抛，
@@ -1284,6 +1591,37 @@
         writePromptInput(String(getPref("translate.ai.prompt") || ""));
       }
       setAIPromptError("");
+
+      // 自定义请求头：空值 = 不发送额外头，留空是合法初始态。
+      if (els.aiHeadersInput) {
+        writeHeadersInput(
+          els.aiHeadersInput,
+          String(getPref("translate.ai.headers") || ""),
+        );
+      }
+      setHeadersError("ai", false);
+      if (els.customHeadersInput) {
+        writeHeadersInput(
+          els.customHeadersInput,
+          String(getPref("translate.custom.headers") || ""),
+        );
+      }
+      setHeadersError("custom", false);
+
+      if (els.outputTokensInput) {
+        // 同 batchTokens：INT pref 由本脚本读 pref、校验后再写。
+        els.outputTokensInput.value = String(readOutputTokens());
+      }
+      setOutputTokensError(false);
+
+      // 术语表：空串 = 不注入术语，输入框留空是合法初始态。
+      if (els.glossaryInput) {
+        writeHeadersInput(
+          els.glossaryInput,
+          String(getPref("translate.glossary") || ""),
+        );
+      }
+      setGlossaryError(false);
 
       // 服务商下拉按已填地址反查：老用户（或从别处粘贴了地址的用户）打开
       // 面板时，下拉状态与配置保持一致，不会显示成一个误导性的「不预设」。

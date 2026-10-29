@@ -20,6 +20,8 @@ import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { validatePromptTemplate } from "../../../src/core/translation/promptTemplate";
+import { parseCustomHeaders } from "../../../src/core/ai/openaiCompat";
+import { validateGlossary } from "../../../src/core/translation/glossary";
 
 const ROOT = join(__dirname, "..", "..", "..");
 const XHTML_FRAGMENT = readFileSync(join(ROOT, "addon/content/preferences.xhtml"), "utf8");
@@ -312,6 +314,291 @@ describe("B17 设置 pane：AI prompt 模板校验（prefs-AI1..AI4）", () => {
   });
 });
 
+describe("B17 设置 pane：自定义请求头校验（AI 与 custom 各一份）", () => {
+  let h: Harness;
+  afterEach(() => {
+    h?.dom.window.close();
+  });
+
+  const AI_HEADERS_KEY = `${PREFIX}translate.ai.headers`;
+  const CUSTOM_HEADERS_KEY = `${PREFIX}translate.custom.headers`;
+  const VALID = "X-Tenant-Id: my-team\nX-Trace: abc";
+  const INVALID = "X-Tenant-Id: my-team\nbroken line";
+
+  /** TS 权威实现的同判口径：每个非空行单独交给 parseCustomHeaders，
+   *  恰好产出一条即为合法行；全部行合法才允许落盘。 */
+  function tsSaysValid(raw: string): boolean {
+    return raw.split(/\r?\n/).every((line) => {
+      if (!line.trim()) return true;
+      return Object.keys(parseCustomHeaders(line)).length === 1;
+    });
+  }
+
+  it("初始值来自偏好写入两个编辑区", () => {
+    h = setupHarness({
+      prefs: {
+        [AI_HEADERS_KEY]: VALID,
+        [CUSTOM_HEADERS_KEY]: "X-Org: 42",
+      },
+    });
+    expect(
+      String(h.doc.getElementById("ztransplit-pref-ai-headers").value),
+    ).toBe(VALID);
+    expect(
+      String(h.doc.getElementById("ztransplit-pref-custom-headers").value),
+    ).toBe("X-Org: 42");
+    expect(isVisible(h.doc, "ztransplit-pref-ai-headers-error")).toBe(false);
+    expect(isVisible(h.doc, "ztransplit-pref-custom-headers-error")).toBe(false);
+  });
+
+  it("合法输入写回各自偏好，错误提示隐藏", () => {
+    h = setupHarness({ prefs: {} });
+    const ai = fireInputAndChange(h, "ztransplit-pref-ai-headers", VALID);
+    expect(h.prefs.get(AI_HEADERS_KEY)).toBe(VALID);
+    expect(isVisible(h.doc, "ztransplit-pref-ai-headers-error")).toBe(false);
+    const custom = fireInputAndChange(
+      h,
+      "ztransplit-pref-custom-headers",
+      "X-Org: 42",
+    );
+    expect(h.prefs.get(CUSTOM_HEADERS_KEY)).toBe("X-Org: 42");
+    expect(isVisible(h.doc, "ztransplit-pref-custom-headers-error")).toBe(false);
+    expect(ai.getAttribute("aria-invalid")).toBeNull();
+    expect(custom.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("非法行：输入即报错且不写偏好，文案来自隐藏本地化节点", () => {
+    h = setupHarness({ prefs: { [AI_HEADERS_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-ai-headers");
+    input.value = INVALID;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-ai-headers-error")).toBe(true);
+    // 半成品值不得落进 pref（与 prompt 模板同一策略）
+    expect(h.prefs.get(AI_HEADERS_KEY)).toBe(VALID);
+    const expected = h.doc
+      .getElementById("ztransplit-pref-string-ai-headers-bad")
+      .textContent.trim();
+    expect(expected.length).toBeGreaterThan(0);
+    expect(
+      h.doc.getElementById("ztransplit-pref-ai-headers-error").textContent.trim(),
+    ).toBe(expected);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("失焦仍非法：恢复当前偏好值且不改写设置（与文案承诺一致）", () => {
+    h = setupHarness({ prefs: { [CUSTOM_HEADERS_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-custom-headers");
+    input.value = INVALID;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new h.window.Event("change", { bubbles: true }));
+    expect(String(input.value)).toBe(VALID);
+    expect(h.prefs.get(CUSTOM_HEADERS_KEY)).toBe(VALID);
+    expect(isVisible(h.doc, "ztransplit-pref-custom-headers-error")).toBe(false);
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("清空是合法操作（= 不发送自定义头）", () => {
+    h = setupHarness({ prefs: { [AI_HEADERS_KEY]: VALID } });
+    fireInputAndChange(h, "ztransplit-pref-ai-headers", "");
+    expect(h.prefs.get(AI_HEADERS_KEY)).toBe("");
+  });
+
+  it("面板 JS 的校验与 TS 权威实现同判（样例矩阵，两个编辑区都验）", () => {
+    // preferences.js 的行规则是 openaiCompat.parseCustomHeaders 的镜像；
+    // 面板说「合法」而解析层丢行的割裂体验会漏到用户面前，必须同判。
+    const samples: Array<[string, string]> = [
+      ["空串", ""],
+      ["纯空白", "   \n "],
+      ["单行合法", "X-Tenant-Id: my-team"],
+      ["多行合法", "X-A: 1\nX-B: 2"],
+      ["值含冒号", "X-Callback: https://a.example/x"],
+      ["CRLF 行尾", "X-A: 1\r\nX-B: 2"],
+      ["无冒号", "no colon here"],
+      ["空名称", ": novalue"],
+      ["名称含空格", "Bad Name: v"],
+      ["空值", "X-Empty:"],
+      ["名称与值两侧空白（合法，会修剪）", "X-A :   v  "],
+    ];
+    h = setupHarness({ prefs: {} });
+    for (const id of [
+      "ztransplit-pref-ai-headers",
+      "ztransplit-pref-custom-headers",
+    ]) {
+      const input = h.doc.getElementById(id);
+      for (const [label, raw] of samples) {
+        input.value = raw;
+        input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+        const paneSaysValid = !isVisible(h.doc, `${id}-error`);
+        expect(
+          paneSaysValid,
+          `样例「${label}」（${id}）两边判定不一致`,
+        ).toBe(tsSaysValid(raw));
+      }
+    }
+  });
+});
+
+describe("B17 设置 pane：单次输出上限校验（0 = 自动）", () => {
+  let h: Harness;
+  afterEach(() => {
+    h?.dom.window.close();
+  });
+
+  const OUTPUT_KEY = `${PREFIX}translate.output.maxTokens`;
+
+  it("初始值来自偏好；未配置时显示 0（自动）", () => {
+    h = setupHarness({ prefs: { [OUTPUT_KEY]: 32768 } });
+    expect(
+      String(h.doc.getElementById("ztransplit-pref-output-tokens").value),
+    ).toBe("32768");
+    h.dom.window.close();
+
+    h = setupHarness({ prefs: {} });
+    expect(
+      String(h.doc.getElementById("ztransplit-pref-output-tokens").value),
+    ).toBe("0");
+  });
+
+  it("合法值写回偏好（含 0 = 自动）", () => {
+    h = setupHarness({ prefs: {} });
+    fireInputAndChange(h, "ztransplit-pref-output-tokens", "2048");
+    expect(h.prefs.get(OUTPUT_KEY)).toBe(2048);
+    expect(isVisible(h.doc, "ztransplit-pref-output-tokens-error")).toBe(false);
+    fireInputAndChange(h, "ztransplit-pref-output-tokens", "0");
+    expect(h.prefs.get(OUTPUT_KEY)).toBe(0);
+  });
+
+  it("清空输入框 = 自动（写 0），不报错", () => {
+    h = setupHarness({ prefs: { [OUTPUT_KEY]: 8192 } });
+    fireInputAndChange(h, "ztransplit-pref-output-tokens", "");
+    expect(h.prefs.get(OUTPUT_KEY)).toBe(0);
+    expect(isVisible(h.doc, "ztransplit-pref-output-tokens-error")).toBe(false);
+  });
+
+  // 数字输入框装不进非数字文本（浏览器把 value 清成空串 = 自动），所以
+  // 非法形态只有越界与负数两种。
+  it.each(["70000", "-1"])("非法值 %s：报错且不写坏值", (raw) => {
+    h = setupHarness({ prefs: { [OUTPUT_KEY]: 8192 } });
+    const input = h.doc.getElementById("ztransplit-pref-output-tokens");
+    input.value = raw;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-output-tokens-error")).toBe(true);
+    expect(h.prefs.get(OUTPUT_KEY)).toBe(8192);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("失焦仍非法：恢复当前偏好值", () => {
+    h = setupHarness({ prefs: { [OUTPUT_KEY]: 8192 } });
+    const input = fireInputAndChange(
+      h,
+      "ztransplit-pref-output-tokens",
+      "99999",
+    );
+    expect(String(input.value)).toBe("8192");
+    expect(isVisible(h.doc, "ztransplit-pref-output-tokens-error")).toBe(false);
+  });
+});
+
+describe("B17 设置 pane：术语表校验", () => {
+  let h: Harness;
+  afterEach(() => {
+    h?.dom.window.close();
+  });
+
+  const GLOSSARY_KEY = `${PREFIX}translate.glossary`;
+  const VALID = "transformer=变换器\nembedding=嵌入";
+  const INVALID = "transformer=变换器\nbroken line";
+
+  /** 与 TS 权威实现同判的口径直接复用 validateGlossary。 */
+
+  it("初始值来自偏好写入编辑区", () => {
+    h = setupHarness({ prefs: { [GLOSSARY_KEY]: VALID } });
+    expect(String(h.doc.getElementById("ztransplit-pref-glossary").value)).toBe(
+      VALID,
+    );
+    expect(isVisible(h.doc, "ztransplit-pref-glossary-error")).toBe(false);
+  });
+
+  it("合法输入写回偏好，错误提示隐藏", () => {
+    h = setupHarness({ prefs: {} });
+    const input = fireInputAndChange(h, "ztransplit-pref-glossary", VALID);
+    expect(h.prefs.get(GLOSSARY_KEY)).toBe(VALID);
+    expect(isVisible(h.doc, "ztransplit-pref-glossary-error")).toBe(false);
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("坏行：输入即报错且不写偏好，文案来自隐藏本地化节点", () => {
+    h = setupHarness({ prefs: { [GLOSSARY_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-glossary");
+    input.value = INVALID;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-glossary-error")).toBe(true);
+    expect(h.prefs.get(GLOSSARY_KEY)).toBe(VALID);
+    const expected = h.doc
+      .getElementById("ztransplit-pref-string-glossary-bad")
+      .textContent.trim();
+    expect(expected.length).toBeGreaterThan(0);
+    expect(
+      h.doc.getElementById("ztransplit-pref-glossary-error").textContent.trim(),
+    ).toBe(expected);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("失焦仍非法：恢复当前偏好值且不改写设置", () => {
+    h = setupHarness({ prefs: { [GLOSSARY_KEY]: VALID } });
+    const input = h.doc.getElementById("ztransplit-pref-glossary");
+    input.value = INVALID;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new h.window.Event("change", { bubbles: true }));
+    expect(String(input.value)).toBe(VALID);
+    expect(h.prefs.get(GLOSSARY_KEY)).toBe(VALID);
+    expect(isVisible(h.doc, "ztransplit-pref-glossary-error")).toBe(false);
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("超过 200 条整体拒绝（与 TS 权威实现同因）", () => {
+    const tooMany = Array.from(
+      { length: 201 },
+      (_, i) => `t${i}=译${i}`,
+    ).join("\n");
+    h = setupHarness({ prefs: {} });
+    const input = h.doc.getElementById("ztransplit-pref-glossary");
+    input.value = tooMany;
+    input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    expect(isVisible(h.doc, "ztransplit-pref-glossary-error")).toBe(
+      !validateGlossary(tooMany).ok,
+    );
+    expect(h.prefs.get(GLOSSARY_KEY)).toBeUndefined();
+  });
+
+  it("面板 JS 的校验与 TS 权威实现同判（样例矩阵）", () => {
+    const samples: Array<[string, string]> = [
+      ["空串", ""],
+      ["纯空白", "   \n "],
+      ["等号成对", "a=甲"],
+      ["全角冒号", "a：甲"],
+      ["半角冒号", "a: 甲"],
+      ["值内等号", "a=b=c"],
+      ["无分隔符", "broken"],
+      ["空原文", "=乙"],
+      ["空译文", "a="],
+      ["混排好坏行", "a=甲\nbroken"],
+      ["多行合法", "a=甲\nb=乙"],
+    ];
+    h = setupHarness({ prefs: {} });
+    const input = h.doc.getElementById("ztransplit-pref-glossary");
+    for (const [label, raw] of samples) {
+      input.value = raw;
+      input.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+      const paneSaysValid = !isVisible(h.doc, "ztransplit-pref-glossary-error");
+      expect(
+        paneSaysValid,
+        `样例「${label}」两边判定不一致`,
+      ).toBe(validateGlossary(raw).ok);
+    }
+  });
+});
+
 describe("B17 设置 pane：zotero-pdf-translate 探测", () => {
   let h: Harness;
   afterEach(() => {
@@ -452,8 +739,8 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 25 = 24 原有（23 + 解析组件小节行标签）+ AI 服务商行标签。
-    expect(labels.length).toBe(25);
+    // 30 = 28 原有 + 输出预算行标签 + 术语表行标签。
+    expect(labels.length).toBe(30);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
@@ -899,15 +1186,29 @@ describe("B17 设置 pane：AI 测试连接按钮", () => {
       },
     });
     await h.clickAiTest();
+    // 无自定义请求头时传空对象（与「不发送额外头」同义）
     expect(h.seen.config).toEqual({
       apiUrl: "https://api.deepseek.com/v1",
       apiKey: "sk-1",
       model: "deepseek-chat",
+      headers: {},
     });
     const status = h.doc.getElementById("ztransplit-pref-ai-test-status")!;
     expect(String(status.textContent)).toContain("连接成功");
     // 按钮恢复可用（in-flight 结束后解除禁用）
     expect(h.doc.getElementById("ztransplit-pref-ai-test-btn")!.hasAttribute("disabled")).toBe(false);
+    h.dom.window.close();
+  });
+
+  it("请求头编辑区的表单值经宽松解析后传给主包（非法行不送测）", async () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "https://api.deepseek.com/v1" },
+      ai: { testConnection: async () => ({ ok: true, message: "ok" }) },
+    });
+    h.doc.getElementById("ztransplit-pref-ai-headers")!.value =
+      "X-Tenant-Id: my-team\nbroken line";
+    await h.clickAiTest();
+    expect(h.seen.config.headers).toEqual({ "X-Tenant-Id": "my-team" });
     h.dom.window.close();
   });
 

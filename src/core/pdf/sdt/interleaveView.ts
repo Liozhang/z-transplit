@@ -15,7 +15,14 @@
  * In trans-only mode a click on a translation block temporarily reveals its
  * original paragraph (data-peek on the original + the CSS overrides in
  * ensureStyle); the peek moves with the next block click and is cleared on
- * mode switches and on dispose. Interleave mode has no click behavior.
+ * mode switches and on dispose.
+ *
+ * In interleave mode a click on a translation block toggles that paragraph's
+ * translation visibility (data-hidden on OUR block): collapsed to a thin bar
+ * so the original can be practiced, click the bar to restore. The state only
+ * exists in interleave mode — a mode switch to trans-only restores every
+ * block, because a hidden block there would blank the paragraph entirely
+ * (originals are hidden by the mode itself).
  *
  * Translation supply is the LazyTranslateQueue; the persistent translation
  * cache (translationCache.ts) sits between the queue and the engine.
@@ -163,6 +170,26 @@ function ensureStyle(doc: Document): void {
 .ztransplit-bi-mode-trans-only .${BI_CLASS} {
   cursor: pointer;
 }
+/* Paragraph show/hide (interleave mode): clicking a translation block
+ * collapses it to a thin accent bar — practice the original, click the bar
+ * to restore. Children stay in the DOM (read-aloud highlighting rebuilds
+ * content) and are merely invisible; mode switches clear the state (in
+ * trans-only a hidden block would blank the paragraph entirely). */
+.${BI_CLASS}[data-hidden] {
+  min-height: 0;
+  height: 8px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--ztransplit-accent, #1f9e8d);
+  opacity: 0.35;
+  border-radius: 4px;
+}
+.${BI_CLASS}[data-hidden] > * {
+  visibility: hidden;
+}
+.ztransplit-bi-mode-interleave .${BI_CLASS} {
+  cursor: pointer;
+}
 /* Manual-translation trigger: a small pill centered below the active
  * selection. It lives in the SDT document body (outside #sdt-content) and is
  * positioned fixed — the selection rect is iframe-viewport-relative, fixed
@@ -246,11 +273,36 @@ export async function buildInterleave(
     }
     peeked = null;
   };
+  /**
+   * Toggle one paragraph's translation between shown and collapsed (上下对照
+   * mode). The bar keeps a hint title so the way back stays discoverable.
+   * Pure display state on OUR block — mode switches and dispose remove it
+   * with the rest of the view.
+   */
+  const toggleBlockHidden = (el: HTMLElement): void => {
+    try {
+      if (el.hasAttribute("data-hidden")) {
+        el.removeAttribute("data-hidden");
+        el.removeAttribute("title");
+      } else {
+        el.setAttribute("data-hidden", "");
+        el.setAttribute("title", getString("bilingual-show-hint"));
+      }
+    } catch {
+      /* display state only — a failure here must not break the click */
+    }
+  };
   const onContainerClick = (ev: Event): void => {
-    if (!session.container.classList.contains(MODE_CLASSES.transOnly)) return;
+    const transOnly = session.container.classList.contains(MODE_CLASSES.transOnly);
+    if (
+      !transOnly &&
+      !session.container.classList.contains(MODE_CLASSES.interleave)
+    ) {
+      return;
+    }
     // A drag-selection that ends on the block still fires click — not a
-    // toggle gesture. getSelection is reached through the content realm's
-    // own window (the blocks live in the SDT iframe document).
+    // toggle gesture (both modes). getSelection is reached through the
+    // content realm's own window (the blocks live in the SDT iframe document).
     try {
       const sel = doc.defaultView?.getSelection?.() ?? null;
       if (sel && !sel.isCollapsed) return;
@@ -267,11 +319,15 @@ export async function buildInterleave(
       // Click outside our blocks: a bare-container click dismisses the peek;
       // anything else (above all, the peeked original itself) is left alone
       // so selecting a word in the revealed paragraph does not dismiss it.
-      if (target === session.container) clearPeek();
+      if (transOnly && target === session.container) clearPeek();
       return;
     }
-    // The block's retry button keeps its click for itself.
+    // The block's retry button keeps its click for itself (both modes).
     if (target?.closest?.(".ztransplit-bi-retry")) return;
+    if (!transOnly) {
+      toggleBlockHidden(bi as HTMLElement);
+      return;
+    }
     const refPath = (bi as HTMLElement).dataset?.refPath;
     const original = refPath ? originals.get(refPath) : undefined;
     if (!original) {
@@ -546,6 +602,9 @@ export async function buildInterleave(
       for (const el of injected.values()) {
         try {
           if (mode === "transOnly") {
+            // 段落显隐只属于上下对照：仅译文模式下原文本来就藏，译文再藏
+            // 会让段落整个消失，所以切换即全部恢复显示。
+            el.removeAttribute("data-hidden");
             el.setAttribute("title", getString("bilingual-peek-hint"));
           } else {
             el.removeAttribute("title");

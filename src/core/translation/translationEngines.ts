@@ -44,8 +44,16 @@ import type {
   BatchTranslatorHandle,
   ParagraphTranslator,
 } from "./types";
-import { createOpenAICompatClient } from "../ai/openaiCompat";
+import {
+  createOpenAICompatClient,
+  parseCustomHeaders,
+} from "../ai/openaiCompat";
 import { resolveModelBudgets } from "../ai/modelCatalog";
+import {
+  appendGlossary,
+  glossaryPromptBlock,
+  parseGlossary,
+} from "./glossary";
 import { getPrefDynamic } from "../../utils/prefs";
 import { parseJsonFromMarkdown } from "../../utils/json";
 import { toErrorMessage } from "../../utils/error";
@@ -105,6 +113,22 @@ export interface CustomTranslateOptions {
   apiUrl: string;
   apiKey?: string;
   model?: string;
+  /**
+   * Extra HTTP headers from translate.custom.headers (parsed). Merged after
+   * the built-in ones, so a name collision lets the user's value win — the
+   * one way to drive gateways that need e.g. a tenant id.
+   */
+  headers?: Record<string, string>;
+  /**
+   * User-set per-request output ceiling in tokens (translate.output.maxTokens;
+   * undefined = auto). Reasoning models burn completion tokens on hidden
+   * thinking, so the auto-derived cap can empty out mid-thought; an explicit
+   * budget replaces the derived value AND caps the escalated empty-completion
+   * retry — the budget stays a real ceiling.
+   */
+  maxOutputTokens?: number;
+  /** Raw glossary pref (translate.glossary); "" = none. */
+  glossary?: string;
 }
 
 export interface AITranslateOptions {
@@ -114,6 +138,12 @@ export interface AITranslateOptions {
   model?: string;
   /** Raw prompt template from prefs; "" = built-in default template. */
   prompt?: string;
+  /** Extra HTTP headers from translate.ai.headers (parsed) — see above. */
+  headers?: Record<string, string>;
+  /** User-set per-request output ceiling — see CustomTranslateOptions. */
+  maxOutputTokens?: number;
+  /** Raw glossary pref (translate.glossary); "" = none. */
+  glossary?: string;
 }
 
 /**
@@ -713,13 +743,22 @@ async function translateWithAI(
       apiKey: opts.apiKey,
       defaultModel: opts.model,
       emptyResultErrorKey: "translation-error-ai-empty",
+      extraHeaders: opts.headers,
+      // 显式预算就是上限：空回重试不得越过用户设的输出预算。
+      emptyCompletionRetryMaxTokens: opts.maxOutputTokens,
     });
+    const glossaryBlock = glossaryPromptBlock(
+      parseGlossary(opts.glossary || ""),
+    );
 
     // AI 端点同样有配额与并发限流；单段路径包一次限流退避，避免批量并发
     // 下的 429 直接变成段落失败。
     const result = await withRateLimitRetry(() =>
       client.chat({
         messages: [
+          ...(glossaryBlock
+            ? [{ role: "system" as const, content: glossaryBlock }]
+            : []),
           {
             role: "user",
             content: renderPrompt(check.template, {
@@ -729,10 +768,12 @@ async function translateWithAI(
             }),
           },
         ],
-        maxTokens: Math.max(
-          MODEL_OUTPUT_FLOOR_TOKENS,
-          Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
-        ),
+        maxTokens:
+          opts.maxOutputTokens ??
+          Math.max(
+            MODEL_OUTPUT_FLOOR_TOKENS,
+            Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+          ),
         temperature: 0.3,
         timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
       }),
@@ -768,6 +809,9 @@ async function translateWithCustom(
       apiUrl: opts.apiUrl,
       apiKey: opts.apiKey,
       defaultModel: opts.model,
+      extraHeaders: opts.headers,
+      // 显式预算就是上限：空回重试不得越过用户设的输出预算。
+      emptyCompletionRetryMaxTokens: opts.maxOutputTokens,
     });
 
     // 与 AI 引擎同源的自定义端点也走限流退避（同一个 openaiCompat 客户端，
@@ -777,14 +821,19 @@ async function translateWithCustom(
         messages: [
           {
             role: "system",
-            content: formulaPreservingPrompt(targetDesc, sourceDesc),
+            content: appendGlossary(
+              formulaPreservingPrompt(targetDesc, sourceDesc),
+              parseGlossary(opts.glossary || ""),
+            ),
           },
           { role: "user", content: text },
         ],
-        maxTokens: Math.max(
-          MODEL_OUTPUT_FLOOR_TOKENS,
-          Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
-        ),
+        maxTokens:
+          opts.maxOutputTokens ??
+          Math.max(
+            MODEL_OUTPUT_FLOOR_TOKENS,
+            Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+          ),
         temperature: 0.3,
       }),
     );
@@ -849,11 +898,22 @@ export interface EngineConfig {
   customApiUrl?: string;
   customApiKey?: string;
   customModel?: string;
+  /** Raw `Name: value` lines (translate.custom.headers); "" = none. */
+  customHeaders?: string;
   aiApiUrl?: string;
   aiApiKey?: string;
   aiModel?: string;
   /** Raw prompt template ("" = built-in default). */
   aiPrompt?: string;
+  /** Raw `Name: value` lines (translate.ai.headers); "" = none. */
+  aiHeaders?: string;
+  /** Raw glossary lines (translate.glossary); "" = none. */
+  glossary?: string;
+  /**
+   * User-set per-request output ceiling in tokens
+   * (translate.output.maxTokens; undefined = auto / model-derived).
+   */
+  maxOutputTokens?: number;
   /**
    * User-set cap on one merged batch's INPUT size, in estimated tokens
    * (translate.batchMaxTokens; undefined = default). planTranslationChunks
@@ -887,11 +947,18 @@ export function getEngineConfig(): EngineConfig {
     // Empty string = no model override: openaiCompat omits the wire `model`
     // field so the server picks its default, as the preferences pane promises.
     customModel: get("translate.custom.model") || "",
+    customHeaders: get("translate.custom.headers") || "",
     aiApiUrl: get("translate.ai.apiUrl") || undefined,
     aiApiKey: get("translate.ai.apiKey") || undefined,
     // Same "empty = server default" contract as customModel above.
     aiModel: get("translate.ai.model") || "",
     aiPrompt: get("translate.ai.prompt") || "",
+    aiHeaders: get("translate.ai.headers") || "",
+    glossary: get("translate.glossary") || "",
+    maxOutputTokens: (() => {
+      const raw = Number(get("translate.output.maxTokens"));
+      return Number.isFinite(raw) && raw > 0 ? raw : undefined;
+    })(),
     batchMaxTokens: (() => {
       const raw = Number(get("translate.batchMaxTokens"));
       return Number.isFinite(raw) && raw > 0 ? raw : undefined;
@@ -920,8 +987,29 @@ export function engineCacheIdentity(): string {
       (cfg.aiApiKey || "").slice(-6),
       promptFingerprint(resolvePromptTemplate(cfg.aiPrompt)),
     );
+    // Custom headers change which gateway answers (and thus the result
+    // shape), so — like the prompt — they must invalidate cached paragraphs.
+    // Only appended when actually configured: a headerless install must keep
+    // the identity it always had (no one-time cache wipe on upgrade).
+    const aiHeaders = parseCustomHeaders(cfg.aiHeaders || "");
+    if (Object.keys(aiHeaders).length > 0) {
+      parts.push("h:" + promptFingerprint(JSON.stringify(aiHeaders)));
+    }
+    // 术语表改变译文内容，与提示模板同理：改动必须使已缓存段落失效。
+    const aiGlossary = parseGlossary(cfg.glossary || "");
+    if (aiGlossary.length > 0) {
+      parts.push("g:" + promptFingerprint(JSON.stringify(aiGlossary)));
+    }
   } else if (cfg.engineType === "custom") {
     parts.push(cfg.customModel || "", cfg.customApiUrl || "", (cfg.customApiKey || "").slice(-6));
+    const customHeaders = parseCustomHeaders(cfg.customHeaders || "");
+    if (Object.keys(customHeaders).length > 0) {
+      parts.push("h:" + promptFingerprint(JSON.stringify(customHeaders)));
+    }
+    const customGlossary = parseGlossary(cfg.glossary || "");
+    if (customGlossary.length > 0) {
+      parts.push("g:" + promptFingerprint(JSON.stringify(customGlossary)));
+    }
   } else if (cfg.engineType === "google") {
     parts.push(cfg.googleApiKey ? "keyed" : "keyless");
   } else if (cfg.engineType === "deepl") {
@@ -1038,6 +1126,9 @@ function createTranslatorUncached(
             apiKey: cfg.aiApiKey,
             model: cfg.aiModel,
             prompt: cfg.aiPrompt,
+            headers: parseCustomHeaders(cfg.aiHeaders || ""),
+            maxOutputTokens: cfg.maxOutputTokens,
+            glossary: cfg.glossary,
           },
         );
         if (!result.success)
@@ -1191,6 +1282,9 @@ function createTranslatorUncached(
             apiUrl: cfg.customApiUrl,
             apiKey: cfg.customApiKey,
             model: cfg.customModel,
+            headers: parseCustomHeaders(cfg.customHeaders || ""),
+            maxOutputTokens: cfg.maxOutputTokens,
+            glossary: cfg.glossary,
           },
         );
         if (!result.success)
@@ -1414,6 +1508,11 @@ export async function createAIBatchTranslator(
     apiUrl,
     apiKey,
     defaultModel: model,
+    extraHeaders: parseCustomHeaders(
+      (isAI ? cfg.aiHeaders : cfg.customHeaders) || "",
+    ),
+    // 显式预算就是上限：批内空回重试不得越过用户设的输出预算。
+    emptyCompletionRetryMaxTokens: cfg.maxOutputTokens,
   });
 
   // ── Language descriptors ──
@@ -1427,10 +1526,17 @@ export async function createAIBatchTranslator(
   // the user's own template so a custom prompt still governs every segment
   // (rendered once with a symbolic {{text}} role — see prompts.ts).
   const template = resolvePromptTemplate(cfg.aiPrompt);
-  const prompt = isAI
-    ? batchJsonPromptFromTemplate(template, targetDesc, sourceDesc)
-    : batchJsonPrompt(targetDesc, sourceDesc);
-  const singlePrompt = formulaPreservingPrompt(targetDesc, sourceDesc);
+  const glossaryEntries = parseGlossary(cfg.glossary || "");
+  const prompt = appendGlossary(
+    isAI
+      ? batchJsonPromptFromTemplate(template, targetDesc, sourceDesc)
+      : batchJsonPrompt(targetDesc, sourceDesc),
+    glossaryEntries,
+  );
+  const singlePrompt = appendGlossary(
+    formulaPreservingPrompt(targetDesc, sourceDesc),
+    glossaryEntries,
+  );
 
   // ── Token budgets ──
   // Two hard constraints: contextWindow (input + output must fit) and
@@ -1444,7 +1550,10 @@ export async function createAIBatchTranslator(
   // `||` (not `??`) on both: a 0 return means "unknown", not "zero".
   const modelBudgets = resolveModelBudgets(model);
   const contextWindow = modelBudgets.contextWindowTokens || DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const maxOutput = modelBudgets.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS;
+  // 用户显式预算优先；思考型模型的隐藏推理随批规模增长，自动推导的
+  // 16384 上限会中途耗尽（StepFun step-3.7-flash 实测），预算交给用户抬。
+  const maxOutput =
+    cfg.maxOutputTokens || modelBudgets.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS;
 
   const outputBudgetTokens = Math.floor(maxOutput * (1 - SAFETY_MARGIN));
   const outputBudgetChars = Math.max(
@@ -1597,10 +1706,12 @@ export async function createAIBatchTranslator(
                       }),
                     },
                   ],
-                  maxTokens: Math.max(
-                    MODEL_OUTPUT_FLOOR_TOKENS,
-                    Math.min(texts[i].length * 2, SINGLE_OUTPUT_MAX_TOKENS),
-                  ),
+                  maxTokens:
+                    cfg.maxOutputTokens ??
+                    Math.max(
+                      MODEL_OUTPUT_FLOOR_TOKENS,
+                      Math.min(texts[i].length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+                    ),
                   temperature: 0.1,
                   signal,
                 })
@@ -1609,10 +1720,12 @@ export async function createAIBatchTranslator(
                     { role: "system", content: singlePrompt },
                     { role: "user", content: texts[i] },
                   ],
-                  maxTokens: Math.max(
-                    MODEL_OUTPUT_FLOOR_TOKENS,
-                    Math.min(texts[i].length * 2, SINGLE_OUTPUT_MAX_TOKENS),
-                  ),
+                  maxTokens:
+                    cfg.maxOutputTokens ??
+                    Math.max(
+                      MODEL_OUTPUT_FLOOR_TOKENS,
+                      Math.min(texts[i].length * 2, SINGLE_OUTPUT_MAX_TOKENS),
+                    ),
                   temperature: 0.1,
                   signal,
                 }),

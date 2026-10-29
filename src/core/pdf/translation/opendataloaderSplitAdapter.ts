@@ -113,6 +113,13 @@ export interface OdlSplitOptions {
   outcome?: "split" | "attachment";
   /** Attachment-mode callback — called after the translated PDF is imported. */
   openAttachment?: (attachmentId: number) => void;
+  /**
+   * 1-based page numbers to translate (sorted, unique). When set, only these
+   * pages are translated and stamped; every other page is carried over from
+   * the source untouched. Out-of-bounds numbers abort with a localized error
+   * before any expensive work starts.
+   */
+  pages?: number[];
 }
 
 export interface OdlSplitResult {
@@ -369,13 +376,37 @@ export async function translateAndSplitWithOpenDataLoader(
   }
   const { assemblies, pageSizes, formulaBlocks } = odlAnalysisToAssembly(analysis);
   const totalPages = assemblies.length;
+
+  // 页码范围：先于一切昂贵步骤（VLM 公式提取、截图、翻译）校验并定型为
+  // 0 基集合，范围外的页面完全不进入后续管线，输出 PDF 里保持原文原样。
+  let selectedPages: Set<number> | null = null; // 0-based page indices
+  if (opts.pages) {
+    const valid =
+      opts.pages.length > 0 &&
+      opts.pages.every(
+        (p) => Number.isInteger(p) && p >= 1 && p <= totalPages,
+      );
+    if (!valid) {
+      throw new Error(getString("odl-error-page-range", { count: totalPages }));
+    }
+    selectedPages = new Set(opts.pages.map((p) => p - 1));
+  }
+  const isPageSelected = (pageNumber: number): boolean =>
+    !selectedPages || selectedPages.has(pageNumber - 1);
+
   const totalParagraphs = assemblies.reduce(
-    (sum, a) => sum + a.paragraphs.length,
+    (sum, a, i) => sum + (isPageSelected(i + 1) ? a.paragraphs.length : 0),
     0,
   );
   if (totalParagraphs === 0) {
     throw new Error(getString("odl-error-parse-no-text"));
   }
+
+  // 公式提取与截图只服务被选中的页面：范围外的公式块不进入 VLM/截图，
+  // 省调用也避免把无关页面的区域贴上截图。
+  const selectedFormulaBlocks = formulaBlocks.filter((f) =>
+    isPageSelected(f.pageNumber),
+  );
 
   //    which the translator would corrupt. When a vision model is configured,
   //    crop each formula-bearing paragraph's bbox and ask the VLM for LaTeX,
@@ -383,15 +414,15 @@ export async function translateAndSplitWithOpenDataLoader(
   //    translation by formulaPreservingPrompt). Without vision, degrade: the
   //    formulas stay inline and may translate imperfectly (a known limitation).
   const visionOk = isFormulaVisionAvailable();
-  if (formulaBlocks.length > 0) {
+  if (selectedFormulaBlocks.length > 0) {
     if (visionOk) {
       onProgress(
-        getString("odl-progress-formula-vlm", { count: formulaBlocks.length }),
+        getString("odl-progress-formula-vlm", { count: selectedFormulaBlocks.length }),
       );
-      await extractFormulasForTranslation(sourceItem.id, assemblies, formulaBlocks, onProgress);
+      await extractFormulasForTranslation(sourceItem.id, assemblies, selectedFormulaBlocks, onProgress);
     } else {
       onProgress(
-        getString("odl-progress-formula-novlm", { count: formulaBlocks.length }),
+        getString("odl-progress-formula-novlm", { count: selectedFormulaBlocks.length }),
       );
     }
   }
@@ -435,11 +466,11 @@ export async function translateAndSplitWithOpenDataLoader(
   //     paste a clean image of the source math at the original bbox (instead
   //     of dropping the {vn} token and leaving dangling text). Requires the
   //     reader to be open — we open it transiently here.
-  if (formulaBlocks.length > 0) {
+  if (selectedFormulaBlocks.length > 0) {
     await captureFormulaScreenshots(
       sourceItem.id,
       assemblies,
-      formulaBlocks,
+      selectedFormulaBlocks,
       onProgress,
     );
   }
@@ -450,10 +481,20 @@ export async function translateAndSplitWithOpenDataLoader(
   let failedTranslations = 0;
   let translatedSets: string[][];
 
+  // 空译文集 = 该页不盖章也不建删除矩形（渲染器与删除矩形都以空串跳过），
+  // 范围外的页面因此在输出 PDF 里逐字保留原文。
+  const emptySet = (assembly: { paragraphs: unknown[] }): string[] =>
+    assembly.paragraphs.map(() => "");
+  const selectedIndices = assemblies
+    .map((_, i) => i)
+    .filter((i) => isPageSelected(i + 1));
+
   if (supportsBatching()) {
     const batchHandle = await createAIBatchTranslator(targetLanguage);
+    // 只送选中页：translateAllPagesBatched 按位置散回，选中的页按顺序映射
+    // 回原位，其余页放空集。
     const batchResult = await translateAllPagesBatched(
-      assemblies.map((a) => a.texts),
+      selectedIndices.map((i) => assemblies[i].texts),
       batchHandle.translate,
       {
         targetLanguage,
@@ -465,13 +506,21 @@ export async function translateAndSplitWithOpenDataLoader(
         cacheIdentity: engineCacheIdentity(),
       },
     );
-    translatedSets = batchResult.translatedSets;
+    translatedSets = assemblies.map((assembly, i) =>
+      isPageSelected(i + 1)
+        ? batchResult.translatedSets[selectedIndices.indexOf(i)]
+        : emptySet(assembly),
+    );
     failedTranslations = batchResult.failedCount;
   } else {
     const translator = makeTranslator(targetLanguage);
     translatedSets = [];
     for (let i = 0; i < totalPages; i++) {
       const assembly = assemblies[i];
+      if (!isPageSelected(i + 1)) {
+        translatedSets.push(emptySet(assembly));
+        continue;
+      }
       onProgress(
         getString("odl-progress-page", {
           current: i + 1,
@@ -553,12 +602,18 @@ export async function translateAndSplitWithOpenDataLoader(
       ...(cleanedBytes ? { maskOriginalText: false } : {}),
     };
     const renderSource = cleanedBytes ?? sourcePdfBytes;
+    // 范围外的页面在渲染器里整页跳过（含旋转检查）：旋转的扫描页不应
+    // 因为不在翻译范围而让整次翻译失败。
+    const renderOptions_ = {
+      ...renderOptions,
+      ...(selectedPages ? { renderPages: selectedPages } : {}),
+    };
     try {
       const result = await renderOverlayTranslated(
         renderSource,
         assemblies,
         translatedSets,
-        renderOptions,
+        renderOptions_,
       );
       merged = result.bytes;
     } catch (e) {
@@ -572,7 +627,7 @@ export async function translateAndSplitWithOpenDataLoader(
         sourcePdfBytes,
         assemblies,
         translatedSets,
-        { ...renderOptions, maskOriginalText: true },
+        { ...renderOptions_, maskOriginalText: true },
       );
       merged = result.bytes;
     }
@@ -580,9 +635,14 @@ export async function translateAndSplitWithOpenDataLoader(
     onProgress(getString("odl-progress-render-white"));
     const pageBytes: Uint8Array[] = [];
     for (let i = 0; i < totalPages; i++) {
+      // 白页兜底没有原始页面可保留：范围外的页面用原文重排（与该兜底
+      // 路径本身的保真度一致），范围内的页面用译文。
+      const pageTexts = isPageSelected(i + 1)
+        ? translatedSets[i]
+        : assemblies[i].texts;
       const render = await renderLayoutPreserving(
         assemblies[i],
-        translatedSets[i],
+        pageTexts,
         {
           targetLanguage,
           pageWidth: pageSizes[i].width,
@@ -603,6 +663,7 @@ export async function translateAndSplitWithOpenDataLoader(
     if (pageBytes.length === 0) throw new Error(getString("odl-error-render-empty"));
     merged = await mergePageBytes(pageBytes, translatedTitle);
   }
+  const selectedCount = selectedPages ? selectedPages.size : totalPages;
   const parentItemID = sourceItem.parentItemID;
   const translatedAtt = await importTranslatedBytes(
     merged,
@@ -615,7 +676,7 @@ export async function translateAndSplitWithOpenDataLoader(
   // here — no split view, optional auto-open of the result.
   if (opts.outcome === "attachment") {
     onProgress(
-      summarizePages(totalPages, totalParagraphs, failedTranslations),
+      summarizePages(selectedCount, totalParagraphs, failedTranslations),
     );
     try {
       opts.openAttachment?.(translatedAtt.id);
@@ -637,7 +698,7 @@ export async function translateAndSplitWithOpenDataLoader(
   try {
     splitTabID = await openSplitViewFn!(win, sourceItem, translatedAtt);
     onProgress(
-      summarizePages(totalPages, totalParagraphs, failedTranslations),
+      summarizePages(selectedCount, totalParagraphs, failedTranslations),
     );
   } catch (e) {
     // 译文已生成并入库——失败仅发生在分屏容器打开（openSplitView 超时抛错，

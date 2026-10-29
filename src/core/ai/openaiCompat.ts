@@ -71,6 +71,52 @@ export interface OpenAICompatClientConfig {
    * names the engine the user actually selected.
    */
   emptyResultErrorKey?: string;
+  /**
+   * Extra HTTP headers from the user's translate.*.headers preference,
+   * merged AFTER the built-in Content-Type/Authorization so a name collision
+   * lets the user's value win — the one way to drive gateways that require
+   * e.g. a tenant id or a non-Bearer auth scheme.
+   */
+  extraHeaders?: Record<string, string>;
+  /**
+   * Ceiling for the ONE escalated retry after an empty completion (reasoning
+   * models exhausting the request-shaped budget mid-thought). Defaults to
+   * 32768. Engines pass the user's explicit output budget here so an override
+   * is respected end-to-end: with a retry ceiling at or below the request's
+   * max_tokens the escalation never fires, and the budget stays a real
+   * ceiling instead of being silently exceeded by the retry.
+   */
+  emptyCompletionRetryMaxTokens?: number;
+}
+
+/**
+ * Header names are RFC 7230 tokens — letters, digits and the t-specials
+ * minus the colon. Anything else in the name position means the line is not
+ * a `Name: value` pair and must not silently become a broken header.
+ */
+const HEADER_NAME_RE = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/;
+
+/**
+ * Parse the raw `Name: value` lines from a translate.*.headers preference.
+ *
+ * Tolerant by design: blank lines and lines without a colon are skipped,
+ * values keep interior colons (URLs), duplicate names let the LAST value
+ * win, and everything is trimmed. Returns an empty object for empty input —
+ * callers can pass the result straight through as extraHeaders.
+ */
+export function parseCustomHeaders(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of String(raw || "").split(/\r?\n/)) {
+    const text = line.trim();
+    if (!text) continue;
+    const colon = text.indexOf(":");
+    if (colon <= 0) continue;
+    const name = text.slice(0, colon).trim();
+    const value = text.slice(colon + 1).trim();
+    if (!name || !HEADER_NAME_RE.test(name) || !value) continue;
+    out[name] = value;
+  }
+  return out;
 }
 
 export interface OpenAICompatClient {
@@ -146,6 +192,7 @@ export function createOpenAICompatClient(
       "Content-Type": "application/json",
     };
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+    if (config.extraHeaders) Object.assign(headers, config.extraHeaders);
 
     // An empty model id means "let the server pick its default" (the
     // preferences pane promises exactly that) — omit the field instead of
@@ -191,11 +238,15 @@ export function createOpenAICompatClient(
       // request shape so gateways that reject exotic params are unaffected.
       if (
         request.maxTokens !== undefined &&
-        request.maxTokens < EMPTY_COMPLETION_RETRY_MAX_TOKENS
+        request.maxTokens <
+          (config.emptyCompletionRetryMaxTokens ??
+            EMPTY_COMPLETION_RETRY_MAX_TOKENS)
       ) {
         return chat({
           ...request,
-          maxTokens: EMPTY_COMPLETION_RETRY_MAX_TOKENS,
+          maxTokens:
+            config.emptyCompletionRetryMaxTokens ??
+            EMPTY_COMPLETION_RETRY_MAX_TOKENS,
         });
       }
       // Tagged so callers can classify it deterministically: an empty

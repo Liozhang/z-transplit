@@ -105,6 +105,10 @@ itemtree-trans-only = Translation only
 itemtree-launch-progress = Z-Transplit: preparing bilingual overlay…
 itemtree-launch-done = Bilingual overlay ready
 itemtree-launch-no-reader = Could not resolve an open reader for this item. Reopen the PDF and try again.
+itemtree-pages-prompt-title = Translate page range
+itemtree-pages-prompt-text = Enter the pages to translate, e.g. 1-3,7. Pages outside the range are kept as-is in the output.
+itemtree-pages-invalid = Invalid page range: enter pages or ranges, e.g. 1-3,7.
+odl-error-page-range = Page out of range: this document has { $count } pages.
 
 ## Translated attachment (src/core/pdf/translation/translatedAttachment.ts)
 translated-tag = Translated

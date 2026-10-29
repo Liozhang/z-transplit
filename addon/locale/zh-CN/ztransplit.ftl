@@ -101,6 +101,10 @@ itemtree-trans-only = 仅译文
 itemtree-launch-progress = Z-Transplit: 正在准备双语阅读…
 itemtree-launch-done = 双语阅读已就绪
 itemtree-launch-no-reader = 无法确定当前阅读器，请重新打开该 PDF 后重试。
+itemtree-pages-prompt-title = 翻译指定页
+itemtree-pages-prompt-text = 输入要翻译的页码，例如 1-3,7。范围外的页面在译文里保持原样。
+itemtree-pages-invalid = 页码格式不合法：请输入页码或范围，例如 1-3,7。
+odl-error-page-range = 页码超出范围：这份文档共 { $count } 页。
 
 ## 译文附件（src/core/pdf/translation/translatedAttachment.ts）
 translated-tag = 译文

@@ -59,6 +59,15 @@ preferences-ztransplit-translate-max-chars-desc =
     the previous valid value; the setting is not overwritten.
 preferences-ztransplit-translate-max-chars-range = Enter an integer between 100 and 50000.
 
+preferences-ztransplit-name-template =
+    .value = Translated attachment name template
+preferences-ztransplit-name-template-desc =
+    Optional. Empty = the default shape Translated (language) · original
+    name. Placeholders: {"{"}lang{"}"} target language, {"{"}title{"}"}
+    source file name, {"{"}date{"}"} today. Changing the template stops
+    recognizing attachments produced by the previous one — the next
+    translation creates a fresh attachment.
+
 preferences-ztransplit-translate-batch-tokens =
     .value = Merged batch input cap (tokens)
 preferences-ztransplit-translate-batch-tokens-desc =
@@ -70,6 +79,27 @@ preferences-ztransplit-translate-batch-tokens-desc =
     but a reasoning model's thinking overhead grows with batch size, and so
     does the risk of an empty answer from an exhausted output budget.
 preferences-ztransplit-translate-batch-tokens-range = Enter an integer between 1000 and 65536.
+
+preferences-ztransplit-output-tokens =
+    .value = Output limit per request (tokens)
+preferences-ztransplit-output-tokens-desc =
+    Maximum output tokens a single model request may generate, 0-65536; 0
+    means automatic. Reasoning models spend output quota on hidden thinking,
+    so the automatic ceiling can run out mid-answer and return an empty
+    result. If that happens, raise this (for example 32768). An explicit
+    budget also caps the one escalated retry after an empty result, so the
+    budget is never silently exceeded. Leave empty or 0 for automatic.
+preferences-ztransplit-output-tokens-range = Enter an integer between 0 and 65536 (0 = automatic).
+preferences-ztransplit-glossary =
+    .value = Glossary
+preferences-ztransplit-glossary-desc =
+    Applies to the AI engine and the custom (OpenAI-compatible) engine only.
+    One entry per line as "source=translation", for example
+    transformer=transformer. When a term appears, the model must use the
+    listed translation; other words are unaffected. At most 200 entries;
+    changing the glossary re-requests affected translations (they no longer
+    hit the old cache).
+preferences-ztransplit-glossary-error-bad = Invalid glossary: each line should be "source=translation", and at most 200 entries.
 
 ## ── Translation engines ────────────────────────────────────────────────────
 preferences-ztransplit-engine-type =
@@ -241,10 +271,24 @@ preferences-ztransplit-ai-prompt-desc =
 preferences-ztransplit-ai-prompt-restore =
     .label = Restore the default template
 
+preferences-ztransplit-ai-headers =
+    .value = Custom headers
+preferences-ztransplit-ai-headers-desc =
+    Optional. Extra HTTP headers sent with every request, one `Name: value`
+    per line, e.g. X-Tenant-Id: my-team. A name collision lets your value win
+    over the built-in ones; invalid lines are not saved. Editing them makes
+    affected translations re-request (old cache entries no longer match).
+
 ## AI prompt template rejection reasons (mirrors the engine's runtime errors,
 ## shown inline while editing; the JS only copies the localized text)
 preferences-ztransplit-ai-prompt-error-too-long =
     The template is too long (at most 4000 characters).
+preferences-ztransplit-ai-headers-error-bad-line =
+    Invalid header line: each line should be `Name: value`, with a token-style
+    name (letters, digits, dashes and similar).
+preferences-ztransplit-custom-headers-error-bad-line =
+    Invalid header line: each line should be `Name: value`, with a token-style
+    name (letters, digits, dashes and similar).
 preferences-ztransplit-ai-prompt-error-unknown-placeholder =
     The template contains an unknown placeholder — only {"{{"}text{"}}"}, {"{{"}sourceLang{"}}"} and {"{{"}targetLang{"}}"} (double braces) are supported.
 preferences-ztransplit-ai-prompt-error-missing-text =
@@ -272,6 +316,13 @@ preferences-ztransplit-custom-api-key-desc =
 preferences-ztransplit-custom-model =
     .value = Model
 preferences-ztransplit-custom-model-desc =
+preferences-ztransplit-custom-headers =
+    .value = Custom headers
+preferences-ztransplit-custom-headers-desc =
+    Optional. Extra HTTP headers sent with every request, one `Name: value`
+    per line. A name collision lets your value win over the built-in ones;
+    invalid lines are not saved. Editing them makes affected translations
+    re-request (old cache entries no longer match).
     Optional. The model name to call, e.g. gpt-4o-mini. When empty, the server
     picks its default model, with no guarantee on translation quality.
 

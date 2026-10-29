@@ -36,19 +36,43 @@
  * @returns The created Zotero.Item (attachment).
  */
 import { getString } from "../../../utils/locale";
+import { getPrefDynamic } from "../../../utils/prefs";
 import { safeDebug } from "../../../utils/logger";
+
+/** Preference holding the attachment-title template ("" = legacy default). */
+const NAME_TEMPLATE_PREF = "translations.nameTemplate";
+
+/**
+ * Characters that are illegal in Windows file names (plus control chars).
+ * Zotero storage paths are built from the fileBaseName we hand to
+ * importFromFile, and source PDFs keep whatever name they were downloaded
+ * with — a "论文: v2?.pdf" in the library must not break the disk write
+ * (pdf2zh #69 is the same failure class).
+ */
+const FILENAME_ILLEGAL_RE = /[\\/:*?"<>|\u0000-\u001f]/g;
+/** Windows also rejects trailing dots and spaces on a file name. */
+const FILENAME_TRAILING_RE = /[. ]+$/;
+const FILENAME_MAX = 100;
 
 /**
  * Base name of the source PDF file without extension ("paper" from
  * ".../paper.pdf"). Prefers the attachment's own filename, falls back to its
- * file path, and finally to a constant so a name is always produced.
+ * file path, and finally to a constant so a name is always produced. The
+ * result is sanitized to a Windows-safe file-name fragment — it feeds both
+ * the disk fileBaseName and the display title.
  */
 export function translatedSourceBaseName(sourceItem: any): string {
   const raw = String(
     sourceItem?.attachmentFilename ?? sourceItem?.getFilePath?.() ?? "",
   );
   const file = raw.split(/[\\/]/).pop() ?? "";
-  const base = file.replace(/\.pdf$/i, "").trim();
+  let base = file.replace(/\.pdf$/i, "");
+  base = base
+    .replace(FILENAME_ILLEGAL_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  base = base.replace(FILENAME_TRAILING_RE, "").trimEnd();
+  if (base.length > FILENAME_MAX) base = base.slice(0, FILENAME_MAX).trimEnd();
   return base || "pdf";
 }
 
@@ -62,17 +86,89 @@ export function translatedFileBaseName(sourceItem: any): string {
 }
 
 /**
- * Display title for the translated attachment. MUST keep starting with
- * `Translated (<lang>) (` — splitViewCleanup's TRANSLATION_TITLE_RE and the
- * item-tree menu's inline copy anchor on exactly that shape for dedup and
- * split-reuse. The source base name is appended so the library row names
- * which paper this translation belongs to.
+ * Display title for the translated attachment.
+ *
+ * Default shape stays `Translated (<lang>) · <base>` — the legacy convention
+ * that splitViewCleanup and the item-tree menu have matched since the naming
+ * was introduced. When the `translations.nameTemplate` preference is set, the
+ * template is rendered instead; placeholders {lang}, {title} and {date}
+ * (YYYY-MM-DD) are substituted, unknown placeholders pass through as literal
+ * text, and a render that comes out empty falls back to the legacy shape so a
+ * title is never blank.
  */
 export function translatedTitleWithSource(
   lang: string,
   sourceBaseName: string,
 ): string {
-  return `Translated (${lang}) · ${sourceBaseName}`;
+  const template = String(getPrefDynamic(NAME_TEMPLATE_PREF) || "").trim();
+  if (!template) return `Translated (${lang}) · ${sourceBaseName}`;
+  const rendered = template
+    .replace(/\{lang\}/g, lang)
+    .replace(/\{title\}/g, sourceBaseName)
+    .replace(/\{date\}/g, new Date().toISOString().slice(0, 10))
+    .trim();
+  return rendered || `Translated (${lang}) · ${sourceBaseName}`;
+}
+
+/**
+ * Recognizer for translated-attachment titles, shared by every dedup site
+ * (split-view sibling scan, item-tree duplicate skip).
+ *
+ * Matches the legacy `译文 (` / `Translated (` prefix shape AND — when a name
+ * template is configured — titles matching the rendered template (literal
+ * parts escaped, placeholders as wildcards, {date} pinned to its format).
+ * Both checks are case-insensitive on the legacy side, like the original
+ * regex. A template change intentionally stops matching titles produced by
+ * the previous template: the user opted into a new convention, and the next
+ * translation pass simply creates a fresh attachment.
+ */
+export function translationTitleMatcher(): (title: string) => boolean {
+  const legacy = /^(译文|Translated)\s*\(/i;
+  const template = String(getPrefDynamic(NAME_TEMPLATE_PREF) || "").trim();
+  let templateRe: RegExp | null = null;
+  if (template) {
+    // Split on placeholders first, escape the literal segments afterwards —
+    // escaping the whole template would also escape the placeholder braces
+    // and leave stray backslashes around the wildcards.
+    const pieces: string[] = [];
+    const placeholderRe = /(\{lang\}|\{title\}|\{date\})/gi;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = placeholderRe.exec(template)) !== null) {
+      pieces.push(template.slice(last, m.index).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      pieces.push(
+        m[1].toLowerCase() === "{date}" ? "\\d{4}-\\d{2}-\\d{2}" : ".+",
+      );
+      last = m.index + m[0].length;
+    }
+    pieces.push(template.slice(last).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    try {
+      templateRe = new RegExp(`^${pieces.join("")}$`, "i");
+    } catch (e) {
+      safeDebug("[Z-Transplit] translatedAttachment: bad template RE: " + e);
+    }
+  }
+  return (title: string) => {
+    const t = title || "";
+    if (legacy.test(t)) return true;
+    return templateRe ? templateRe.test(t) : false;
+  };
+}
+
+/**
+ * Is this item a PDF attachment? `attachmentContentType` is the primary
+ * signal, but it is derived from the file extension at import time — a file
+ * downloaded as `PAPER.PDF` can end up with an empty/unknown content type on
+ * some hosts, so the file name (case-insensitive) is the fallback
+ * (pdf2zh #368 is the same failure class).
+ */
+export function isPdfAttachment(att: any): boolean {
+  try {
+    if (att?.attachmentContentType === "application/pdf") return true;
+    return /\.pdf$/i.test(String(att?.attachmentFilename ?? ""));
+  } catch (e) {
+    return false;
+  }
 }
 
 /** Merge `uri` into the item's dc:relation list (keeps other predicates). */

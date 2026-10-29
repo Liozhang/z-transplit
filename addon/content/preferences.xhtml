@@ -122,6 +122,58 @@
 
       <hbox class="ztransplit-row" align="center">
         <label
+          value="译文附件命名模板"
+          control="ztransplit-pref-name-template"
+          data-l10n-id="preferences-ztransplit-name-template"
+        />
+        <html:input
+          id="ztransplit-pref-name-template"
+          class="ztransplit-text"
+          type="text"
+          tabindex="0"
+          preference="extensions.zotero.ztransplit.translations.nameTemplate"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-name-template-desc"
+        >可留空。留空时译文附件标题为默认形状 Translated (语言) · 原文名。支持占位符：{lang} 目标语言、{title} 原文文件名、{date} 今天的日期。修改模板后，旧模板生成的附件不再被识别为译文，再次翻译会生成新附件。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          id="ztransplit-pref-glossary-label"
+          value="术语表"
+          control="ztransplit-pref-glossary"
+          data-l10n-id="preferences-ztransplit-glossary"
+        />
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-glossary-desc"
+        >只对 AI 引擎与自定义（OpenAI 兼容）引擎生效。每行一条「原文=译文」，例如：transformer=变换器。命中术语时模型必须使用给定的译法，未列出的词不受影响。最多 200 条；修改术语表后，相关翻译会重新请求（不再命中旧缓存）。</description>
+        <textbox
+          id="ztransplit-pref-glossary"
+          class="ztransplit-prompt"
+          multiline="true"
+          rows="4"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-glossary-label"
+          aria-describedby="ztransplit-pref-glossary-desc"
+        />
+        <description
+          id="ztransplit-pref-glossary-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+        >术语表格式不合法。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
           id="ztransplit-pref-batchtokens-label"
           value="合并批量输入上限（token）"
           control="ztransplit-pref-batchtokens"
@@ -151,6 +203,39 @@
           hidden="true"
           data-l10n-id="preferences-ztransplit-translate-batch-tokens-range"
         >请输入 1000 到 65536 之间的整数。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          id="ztransplit-pref-output-tokens-label"
+          value="单次输出上限（token）"
+          control="ztransplit-pref-output-tokens"
+          data-l10n-id="preferences-ztransplit-output-tokens"
+        />
+        <html:input
+          id="ztransplit-pref-output-tokens"
+          class="ztransplit-number"
+          type="number"
+          min="0"
+          max="65536"
+          step="256"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-output-tokens-label"
+          aria-describedby="ztransplit-pref-output-tokens-desc"
+        />
+      </hbox>
+      <vbox>
+        <description
+          id="ztransplit-pref-output-tokens-desc"
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-output-tokens-desc"
+        >单次模型请求最多生成的输出 token 数，可填 0–65536，0 表示自动。思考型模型的隐藏推理会消耗输出配额，自动上限可能中途耗尽并返回空结果；遇到空结果时把这里调大（例如 32768）。显式预算同时约束「空结果后的一次加大重试」，预算不会被重试悄悄突破。留空或 0 都表示自动。</description>
+        <description
+          id="ztransplit-pref-output-tokens-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+          data-l10n-id="preferences-ztransplit-output-tokens-range"
+        >请输入 0 到 65536 之间的整数（0 表示自动）。</description>
       </vbox>
     </groupbox>
 
@@ -626,6 +711,34 @@
           class="ztransplit-desc ztransplit-error"
           hidden="true"
         >模板不合法。</description>
+
+        <label
+          id="ztransplit-pref-ai-headers-label"
+          class="ztransplit-subhead"
+          value="自定义请求头"
+          control="ztransplit-pref-ai-headers"
+          data-l10n-id="preferences-ztransplit-ai-headers"
+        />
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-ai-headers-desc"
+          >可留空。随每个请求额外发送的 HTTP 头，每行一条，格式为「名称: 值」，例如 X-Tenant-Id: my-team。与内置头同名时以这里的值为准；非法行不会写入设置。修改后相关翻译会重新请求（不再命中旧缓存）。</description>
+        </vbox>
+        <textbox
+          id="ztransplit-pref-ai-headers"
+          class="ztransplit-prompt"
+          multiline="true"
+          rows="3"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-ai-headers-label"
+          aria-describedby="ztransplit-pref-ai-headers-desc"
+        />
+        <description
+          id="ztransplit-pref-ai-headers-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+        >请求头格式不合法。</description>
       </vbox>
 
       <!-- custom：OpenAI 兼容三件套 -->
@@ -703,6 +816,33 @@
             data-l10n-id="preferences-ztransplit-custom-model-desc"
           >可留空。要调用的模型名，例如 gpt-4o-mini。留空时由服务端使用默认模型，翻译质量不受保证。</description>
         </vbox>
+        <label
+          id="ztransplit-pref-custom-headers-label"
+          class="ztransplit-subhead"
+          value="自定义请求头"
+          control="ztransplit-pref-custom-headers"
+          data-l10n-id="preferences-ztransplit-custom-headers"
+        />
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-custom-headers-desc"
+          >可留空。随每个请求额外发送的 HTTP 头，每行一条，格式为「名称: 值」，例如 X-Tenant-Id: my-team。与内置头同名时以这里的值为准；非法行不会写入设置。修改后相关翻译会重新请求（不再命中旧缓存）。</description>
+        </vbox>
+        <textbox
+          id="ztransplit-pref-custom-headers"
+          class="ztransplit-prompt"
+          multiline="true"
+          rows="3"
+          tabindex="0"
+          aria-labelledby="ztransplit-pref-custom-headers-label"
+          aria-describedby="ztransplit-pref-custom-headers-desc"
+        />
+        <description
+          id="ztransplit-pref-custom-headers-error"
+          class="ztransplit-desc ztransplit-error"
+          hidden="true"
+        >请求头格式不合法。</description>
       </vbox>
 
       <!-- zotero-pdf-translate：pane 内直接探测插件是否存在。
@@ -1027,6 +1167,18 @@
       id="ztransplit-pref-string-ai-prompt-too-long"
       data-l10n-id="preferences-ztransplit-ai-prompt-error-too-long"
     >模板过长：不得超过 4000 个字符。</label>
+    <label
+      id="ztransplit-pref-string-ai-headers-bad"
+      data-l10n-id="preferences-ztransplit-ai-headers-error-bad-line"
+    >请求头格式不合法：每行应为「名称: 值」，名称只能含字母、数字与短横线等。</label>
+    <label
+      id="ztransplit-pref-string-custom-headers-bad"
+      data-l10n-id="preferences-ztransplit-custom-headers-error-bad-line"
+    >请求头格式不合法：每行应为「名称: 值」，名称只能含字母、数字与短横线等。</label>
+    <label
+      id="ztransplit-pref-string-glossary-bad"
+      data-l10n-id="preferences-ztransplit-glossary-error-bad"
+    >术语表格式不合法：每行应为「原文=译文」，且最多 200 条。</label>
     <label
       id="ztransplit-pref-string-ai-prompt-unknown-placeholder"
       data-l10n-id="preferences-ztransplit-ai-prompt-error-unknown-placeholder"

@@ -25,7 +25,10 @@
  * @module core/pdf/translation/formulaExtractor
  */
 
-import { normalizeChatCompletionsUrl } from "../../ai/openaiCompat";
+import {
+  normalizeChatCompletionsUrl,
+  parseCustomHeaders,
+} from "../../ai/openaiCompat";
 import { getPrefDynamic } from "../../../utils/prefs";
 import { safeDebug } from "../../../utils/logger";
 import { abortSignalTimeout } from "../../../utils/abort";
@@ -91,6 +94,13 @@ export async function extractFormulaLatex(
     "Content-Type": "application/json",
   };
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
+  // The custom headers pref governs this endpoint everywhere else — the VLM
+  // call must honour it too, or a gateway behind header auth works for
+  // translation but not for formula OCR.
+  Object.assign(
+    headers,
+    parseCustomHeaders(String(getPrefDynamic("translate.custom.headers") || "")),
+  );
 
   const resp = await fetch(url, {
     method: "POST",

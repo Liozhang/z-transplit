@@ -409,6 +409,11 @@ export async function renderOverlayTranslated(
      * 原文时传 false，译文直接落在干净的页面上（搜索/复制不再命中原文）。
      */
     maskOriginalText?: boolean;
+    /**
+     * 0 基页码集合：只渲染这些页（页码范围翻译）。未列出的页面整页跳过
+     * ——包括旋转检查——源文件里不在翻译范围的页保持逐字原样。
+     */
+    renderPages?: Set<number>;
   },
 ): Promise<{ bytes: Uint8Array; stats: RenderResult["stats"] }> {
   const lineHeight =
@@ -447,6 +452,7 @@ export async function renderOverlayTranslated(
 
   const maskOriginalText = options.maskOriginalText !== false;
   for (let i = 0; i < assemblies.length && i < pages.length; i++) {
+    if (options.renderPages && !options.renderPages.has(i)) continue;
     const assembly = assemblies[i];
     const translated = translatedSets[i] ?? [];
     const page = pages[i];

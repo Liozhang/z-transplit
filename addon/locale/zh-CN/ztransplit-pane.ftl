@@ -84,12 +84,14 @@ wordcards-no-match = 没有匹配的词卡。
 itemtree-menu = Z-Transplit
 itemtree-translate-attachment = 翻译全文（生成译文附件）
 itemtree-translate-split = 分屏翻译
+itemtree-translate-pages = 翻译指定页…
 
 ## ─── 双语对照阅读（src/ui/bilingualControl.ts + src/core/pdf/sdt/）────────
 bilingual-enable = 双语阅读
 bilingual-mode-interleave = 上下对照
 bilingual-mode-trans-only = 仅译文
 bilingual-peek-hint = 点击查看本段原文
+bilingual-show-hint = 点击恢复本段译文
 bilingual-translate-selection = 翻译本段
 bilingual-progress = 已译 { $done }/{ $total } 段
 bilingual-progress-failed = 已译 { $done }/{ $total } 段，{ $failed } 段失败：{ $error }（可点击失败段落重试）

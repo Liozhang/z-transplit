@@ -1116,3 +1116,251 @@ describe("translation cache", () => {
     expect(h.fetchCalls).toHaveLength(2);
   });
 });
+
+describe("translate.output.maxTokens — 输出预算", () => {
+  function budgetCustomPrefs(overrides: Record<string, unknown> = {}) {
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      ...overrides,
+    });
+  }
+
+  function chatRoute(content = "ok") {
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content } }] }),
+    );
+  }
+
+  it("无预算时维持现状：单段按长度推导（4096 下限），空回后升级重试到 32768", async () => {
+    budgetCustomPrefs();
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "" } }] }),
+    );
+
+    const t = createTranslator("fr-FR");
+    await expect(t("hello", "fr-FR")).rejects.toThrow();
+    expect(h.fetchCalls).toHaveLength(2); // 原预算 4096 + 升级重试 32768
+    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(4096);
+    expect(JSON.parse(h.fetchCalls[1].body).max_tokens).toBe(32768);
+  });
+
+  it("显式预算整体替换单段推导值", async () => {
+    budgetCustomPrefs({ "translate.output.maxTokens": 1234 });
+    chatRoute();
+
+    const t = createTranslator("fr-FR");
+    await t("hello", "fr-FR");
+    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(1234);
+  });
+
+  it("显式预算约束空回升级重试：不再越过预算，直接报空结果", async () => {
+    budgetCustomPrefs({ "translate.output.maxTokens": 8192 });
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "" } }] }),
+    );
+
+    const t = createTranslator("fr-FR");
+    await expect(t("hello", "fr-FR")).rejects.toThrow();
+    expect(h.fetchCalls).toHaveLength(1); // 无升级重试
+    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(8192);
+  });
+
+  it("批量路径：预算替换输出上限，并反映到输出预算字符数", async () => {
+    budgetCustomPrefs({ "translate.output.maxTokens": 1234 });
+    route("chat/completions", () =>
+      jsonResponse({
+        choices: [{ message: { content: '{"translations":["a","b"]}' } }],
+      }),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    // outputBudgetTokens = floor(1234 × 0.85) = 1048；×2.5 chars/token = 2620
+    expect(handle.outputBudgetChars).toBe(2620);
+    await handle.translate(["x", "y"]);
+    expect(JSON.parse(h.fetchCalls[0].body).max_tokens).toBe(1234);
+  });
+});
+
+describe("translate.glossary — 术语表注入", () => {
+  function glossaryPrefs(overrides: Record<string, unknown> = {}) {
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      ...overrides,
+    });
+  }
+
+  function chatRoute(content = "译文") {
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content } }] }),
+    );
+  }
+
+  it("custom 引擎：术语表接在系统提示之后", async () => {
+    glossaryPrefs({ "translate.glossary": "transformer=变换器\nbroken line" });
+    chatRoute();
+
+    const t = createTranslator("fr-FR");
+    await t("hello", "fr-FR");
+    const system = JSON.parse(h.fetchCalls[0].body).messages[0].content;
+    expect(system).toContain("- transformer = 变换器");
+    expect(system).toContain("from auto-detect to French");
+    expect(system).not.toContain("broken line");
+  });
+
+  it("ai 引擎：术语表作为独立的 system 消息，用户模板保持在 user 消息", async () => {
+    setPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.apiKey": "ak-1",
+      "translate.ai.model": "qwen-max",
+      "translate.glossary": "embedding=嵌入",
+    });
+    chatRoute();
+
+    const t = createTranslator("zh-CN");
+    await t("hello", "zh-CN");
+    const messages = JSON.parse(h.fetchCalls[0].body).messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[0].role).toBe("system");
+    expect(messages[0].content).toContain("- embedding = 嵌入");
+    expect(messages[1].role).toBe("user");
+    expect(messages[1].content).toContain("hello");
+  });
+
+  it("无术语表时 ai 引擎不发多余的系统消息", async () => {
+    setPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.model": "qwen-max",
+      "translate.glossary": "",
+    });
+    chatRoute();
+
+    const t = createTranslator("zh-CN");
+    await t("hello", "zh-CN");
+    const messages = JSON.parse(h.fetchCalls[0].body).messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe("user");
+  });
+
+  it("批量翻译器的系统提示同样带术语表（模板派生与固定文案两路）", async () => {
+    glossaryPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.apiKey": "ak-1",
+      "translate.ai.model": "qwen-max",
+      "translate.glossary": "LLM=大模型",
+    });
+    route("chat/completions", () =>
+      jsonResponse({
+        choices: [{ message: { content: '{"translations":["a","b"]}' } }],
+      }),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    await handle.translate(["x", "y"]);
+    const system = JSON.parse(h.fetchCalls[0].body).messages[0].content;
+    expect(system).toContain("- LLM = 大模型");
+    expect(system).toContain('"segments"'); // 模板派生的批量信封仍在
+  });
+
+  it("改动术语表使翻译缓存失效；空白等同未配置", () => {
+    glossaryPrefs();
+    const base = engineCacheIdentity();
+
+    glossaryPrefs({ "translate.glossary": "" });
+    expect(engineCacheIdentity()).toBe(base);
+    glossaryPrefs({ "translate.glossary": "  \n " });
+    expect(engineCacheIdentity()).toBe(base);
+
+    glossaryPrefs({ "translate.glossary": "LLM=大模型" });
+    const withGlossary = engineCacheIdentity();
+    expect(withGlossary).not.toBe(base);
+    glossaryPrefs({ "translate.glossary": "LLM=语言模型" });
+    expect(engineCacheIdentity()).not.toBe(withGlossary);
+  });
+});
+
+describe("translate.*.headers — 自定义请求头", () => {
+  function customChatPrefs(overrides: Record<string, unknown> = {}) {
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      ...overrides,
+    });
+  }
+
+  function chatRoute() {
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "ok" } }] }),
+    );
+  }
+
+  it("custom 引擎：合法行原样上线，非法行丢弃，内置头保留", async () => {
+    customChatPrefs({
+      "translate.custom.headers": "X-Tenant-Id: my-team\r\nbroken line",
+    });
+    chatRoute();
+
+    const t = createTranslator("fr-FR");
+    await t("hello", "fr-FR");
+    expect(h.fetchCalls[0].headers["X-Tenant-Id"]).toBe("my-team");
+    expect(h.fetchCalls[0].headers.Authorization).toBe("Bearer ck-1");
+    expect(JSON.stringify(h.fetchCalls[0].headers)).not.toContain("broken line");
+  });
+
+  it("ai 引擎：translate.ai.headers 同样上线", async () => {
+    setPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.apiKey": "ak-1",
+      "translate.ai.model": "qwen-max",
+      "translate.ai.headers": "X-Org: 42",
+    });
+    chatRoute();
+
+    const t = createTranslator("zh-CN");
+    await t("hello", "zh-CN");
+    expect(h.fetchCalls[0].headers["X-Org"]).toBe("42");
+    expect(h.fetchCalls[0].headers.Authorization).toBe("Bearer ak-1");
+  });
+
+  it("批量翻译器同样携带自定义请求头", async () => {
+    customChatPrefs({ "translate.custom.headers": "X-Tenant-Id: my-team" });
+    route("chat/completions", () =>
+      jsonResponse({
+        choices: [{ message: { content: '{"translations":["a","b"]}' } }],
+      }),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    await handle.translate(["x", "y"]);
+    expect(h.fetchCalls[0].headers["X-Tenant-Id"]).toBe("my-team");
+  });
+
+  it("改动请求头使翻译缓存失效；空白行等同未配置", async () => {
+    customChatPrefs();
+    const base = engineCacheIdentity();
+    expect(engineCacheIdentity()).toBe(base);
+
+    // 空串与纯空白都表示「无自定义头」，不得让持久缓存整体失效。
+    customChatPrefs({ "translate.custom.headers": "" });
+    expect(engineCacheIdentity()).toBe(base);
+    customChatPrefs({ "translate.custom.headers": "  \n " });
+    expect(engineCacheIdentity()).toBe(base);
+
+    customChatPrefs({ "translate.custom.headers": "X-Tenant-Id: my-team" });
+    const withHeaders = engineCacheIdentity();
+    expect(withHeaders).not.toBe(base);
+    customChatPrefs({ "translate.custom.headers": "X-Tenant-Id: other" });
+    expect(engineCacheIdentity()).not.toBe(withHeaders);
+  });
+});

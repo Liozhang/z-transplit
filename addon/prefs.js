@@ -63,6 +63,31 @@ pref("extensions.zotero.ztransplit.translate.ai.apiUrl", "");
 pref("extensions.zotero.ztransplit.translate.ai.apiKey", "");
 pref("extensions.zotero.ztransplit.translate.ai.model", "");
 pref("extensions.zotero.ztransplit.translate.ai.prompt", "");
+// Extra HTTP headers for the AI and custom OpenAI-compatible endpoints, one
+// `Name: value` per line (translate.ai.headers / translate.custom.headers).
+// Merged after the built-in Content-Type/Authorization, so a name collision
+// lets the user's value win. "" = none. Invalid lines are ignored at parse.
+pref("extensions.zotero.ztransplit.translate.ai.headers", "");
+pref("extensions.zotero.ztransplit.translate.custom.headers", "");
+
+// Attachment-title template for translated PDFs (translations.nameTemplate).
+// Placeholders: {lang} target language, {title} source base name, {date}
+// YYYY-MM-DD. "" = the legacy default shape `Translated (lang) · title`.
+// The dedup/split recognizers derive their matcher from the SAME template,
+// so a template change intentionally stops recognizing titles produced by
+// the previous template (the next translation creates a fresh attachment).
+pref("extensions.zotero.ztransplit.translations.nameTemplate", "");
+
+// 单次请求的输出 token 上限（translate.output.maxTokens）。0 = 自动：单段
+// 路径按文本长度推导，批量路径按模型目录 / 默认 16384。思考型模型的隐藏
+// 推理会消耗输出配额，自动上限可能中途耗尽返回空结果；显式预算整体替换
+// 推导值，空回重试也不会越过它。
+pref("extensions.zotero.ztransplit.translate.output.maxTokens", 0);
+
+// 术语表（translate.glossary）：一行一条「原文=译文」，AI 与自定义引擎的
+// 每个请求把术语表注入系统提示。留空 = 不注入。修改后相关翻译重新请求
+// （缓存指纹包含术语表）。
+pref("extensions.zotero.ztransplit.translate.glossary", "");
 
 // Target language for PDF split-view translation ("" = follow Zotero locale).
 // The reader translate pane overrides this per request; the PDF pipeline, the

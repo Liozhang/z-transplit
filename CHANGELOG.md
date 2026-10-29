@@ -16,6 +16,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   translation slot injected on the spot, joining the progress count, the
   retry flow and read-aloud like any other block. Reference sections stay
   excluded, exactly like automatic translation.
+- An attachment naming template. The new "Translated attachment naming
+  template" field in the preferences pane accepts `{lang}`, `{title}` and
+  `{date}` placeholders (for example `译文-{title}-{lang}`); leaving it empty
+  keeps the built-in `Translated (<lang>) · <name>` shape. Existing
+  translations created with the previous template are no longer detected as
+  translations after the template changes, so a re-translation produces a
+  fresh attachment instead of silently reusing the old one.
+- Custom HTTP headers for the AI and custom (OpenAI-compatible) engines. The
+  new multi-line fields in the preferences pane accept one `Name: value` per
+  line and are sent with every request of that engine; a name that collides
+  with a built-in header wins, which is the way to drive gateways that
+  require a tenant id or a non-Bearer auth scheme. Invalid lines are rejected
+  at the pane and never persisted. Changing the headers produces a different
+  cache fingerprint, so affected translations are re-requested instead of
+  being served from cache.
+- Per-paragraph translation show/hide in interleave bilingual mode. Clicking
+  a translation block collapses it to a thin bar so the original can be read
+  on its own; clicking the bar brings the translation back. The state belongs
+  to interleave mode only — switching to translation-only mode restores every
+  block (there a hidden block would blank the paragraph entirely), and a
+  drag-selection release never counts as a click.
+- Page-range translation. A new "Translate page range…" entry in the item
+  tree menu asks for pages such as `1-3,7` (single pages, closed ranges and
+  mixes; full-width commas and dashes are tolerated; a malformed input is
+  rejected outright instead of translating the wrong pages) and translates
+  only those pages. Every other page is carried into the output PDF exactly
+  as-is — no mask, no text removal, no formula screenshot — so a rotated or
+  figure-only page outside the range no longer aborts the run. The
+  VLM formula pass only visits selected pages, and the completion summary
+  counts only what was translated.
+- A glossary. The new "Glossary" field in the preferences pane takes one
+  `source=translation` pair per line (full-width colon accepted, at most 200
+  entries) and pins those terms in every request of the AI and custom
+  engines — single-paragraph, batched and the per-paragraph fallback alike.
+  Terms not listed translate normally. Changing the glossary produces a
+  different cache fingerprint, so affected translations are re-requested.
+- An explicit output budget. The new "Output limit per request" field caps
+  the tokens one model request may generate (0 = automatic). Reasoning-style
+  models spend the budget on hidden thinking and can come back empty on the
+  automatic ceiling (observed on StepFun step-3.7-flash); an explicit budget
+  replaces the derived value on the single-paragraph, batched and
+  per-paragraph paths, and the one escalated retry after an empty completion
+  never exceeds it — the budget stays a real ceiling instead of being
+  silently enlarged by the retry.
+
+### Fixed
+
+- A source PDF whose file name contains characters Windows forbids (for
+  example `论文: v2?.pdf`, or a name ending in a dot or space) made the
+  translated copy's write fail or produced a fragile name. Source names are
+  now sanitized before they feed the translated attachment's disk file name
+  and display title: forbidden characters become spaces, trailing dots and
+  spaces are stripped, and names longer than 100 characters are truncated.
+- A PDF downloaded as `PAPER.PDF` (uppercase extension) could end up with an
+  empty content type and was then invisible to every "is this a PDF
+  attachment" check, so its translation was skipped. The file-name extension
+  is now the fallback signal when the content type is missing.
 
 ## [1.13.1] - 2026-10-24
 

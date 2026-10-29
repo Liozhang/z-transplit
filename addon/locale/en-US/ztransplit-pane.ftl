@@ -85,12 +85,14 @@ wordcards-no-match = No matching cards.
 itemtree-menu = Z-Transplit
 itemtree-translate-attachment = Translate full text (save as attachment)
 itemtree-translate-split = Split-screen translation
+itemtree-translate-pages = Translate page range…
 
 ## ─── Bilingual reading (src/ui/bilingualControl.ts + src/core/pdf/sdt/) ───
 bilingual-enable = Bilingual reading
 bilingual-mode-interleave = Interleaved (original + translation)
 bilingual-mode-trans-only = Translation only
 bilingual-peek-hint = Click to show the original text of this paragraph
+bilingual-show-hint = Click to show this translation
 bilingual-translate-selection = Translate this paragraph
 bilingual-progress = { $done }/{ $total } paragraphs translated
 bilingual-progress-failed = { $done }/{ $total } paragraphs translated, { $failed } failed: { $error } (click a failed paragraph to retry)
