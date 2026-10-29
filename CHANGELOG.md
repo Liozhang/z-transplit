@@ -45,7 +45,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as-is — no mask, no text removal, no formula screenshot — so a rotated or
   figure-only page outside the range no longer aborts the run. The
   VLM formula pass only visits selected pages, and the completion summary
-  counts only what was translated.
+  counts only what was translated. Repeated range runs merge into the
+  existing translated attachment instead of accumulating copies: both
+  artifacts keep the source's full page list in order, so newly translated
+  pages replace the same positions in the existing file (the attachment item
+  itself is kept, along with its title and source link) and translated pages
+  accumulate in the file content across runs. A page-count mismatch, an
+  unreadable file or any merge failure falls back to saving a separate
+  attachment — the merged bytes are fully built in memory before anything
+  touches the disk, so the existing translation is never at risk.
 - A glossary. The new "Glossary" field in the preferences pane takes one
   `source=translation` pair per line (full-width colon accepted, at most 200
   entries) and pins those terms in every request of the AI and custom

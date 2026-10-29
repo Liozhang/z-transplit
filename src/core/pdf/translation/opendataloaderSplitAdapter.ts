@@ -63,6 +63,8 @@ import {
   translatedSourceBaseName,
   translatedTitleWithSource,
 } from "./translatedAttachment";
+import { mergeIntoExistingTranslation } from "./mergeTranslatedPages";
+import { findExistingTranslation } from "../splitview/splitViewCleanup";
 import {
   buildRemovalRects,
   serializeRemovalRects,
@@ -117,7 +119,10 @@ export interface OdlSplitOptions {
    * 1-based page numbers to translate (sorted, unique). When set, only these
    * pages are translated and stamped; every other page is carried over from
    * the source untouched. Out-of-bounds numbers abort with a localized error
-   * before any expensive work starts.
+   * before any expensive work starts. When an existing translated attachment
+   * of the same source is found, the run MERGES into it (positional page
+   * replacement) instead of importing another attachment; any merge failure
+   * falls back to a separate import.
    */
   pages?: number[];
 }
@@ -664,13 +669,41 @@ export async function translateAndSplitWithOpenDataLoader(
     merged = await mergePageBytes(pageBytes, translatedTitle);
   }
   const selectedCount = selectedPages ? selectedPages.size : totalPages;
-  const parentItemID = sourceItem.parentItemID;
-  const translatedAtt = await importTranslatedBytes(
-    merged,
-    parentItemID,
-    translatedTitle,
-    sourceItem,
-  );
+  // 页码范围 + 已有译文附件：按页替换并入，而不是再产出一份附件。两份
+  // 产物都保留源文件的全部页面且页序不变，第 i 页与第 i 页严格对应；
+  // 已翻译页面的并集在文件内容里自然累积，无需任何额外记录。任何一步
+  // 失败都回退为另存新附件，已有译文绝不暴露在风险里。
+  let translatedAtt: any = null;
+  if (opts.pages && selectedPages) {
+    const existing = findExistingTranslation(sourceItem);
+    if (existing) {
+      onProgress(getString("odl-progress-merging"));
+      const positions = Array.from(selectedPages).sort((a, b) => a - b);
+      translatedAtt = await mergeIntoExistingTranslation(
+        existing,
+        merged,
+        positions,
+      );
+      if (translatedAtt) {
+        onProgress(
+          getString("odl-progress-merged", { count: positions.length }),
+        );
+      } else {
+        safeDebug(
+          "[Z-Transplit] opendataloaderSplitAdapter: page merge failed, saving a separate attachment",
+        );
+      }
+    }
+  }
+  if (!translatedAtt) {
+    const parentItemID = sourceItem.parentItemID;
+    translatedAtt = await importTranslatedBytes(
+      merged,
+      parentItemID,
+      translatedTitle,
+      sourceItem,
+    );
+  }
 
   // Attachment outcome: the item-tree "translate to attachment" flow stops
   // here — no split view, optional auto-open of the result.
