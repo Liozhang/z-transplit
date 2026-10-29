@@ -26,6 +26,11 @@ declare namespace _ZoteroTypes {
       "translate.ai.apiKey": string;
       "translate.ai.model": string;
       "translate.ai.prompt": string;
+      "translate.ai.headers": string;
+      "translate.custom.headers": string;
+      "translations.nameTemplate": string;
+      "translate.output.maxTokens": number;
+      "translate.glossary": string;
       "translate.targetLanguage": string;
       "pdfParser.opendataloader.enabled": boolean;
       "pdfParser.opendataloader.tableEnable": string;
