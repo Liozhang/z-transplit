@@ -246,10 +246,12 @@ export class ZoteroMock {
   /**
    * Fire 「renderTextSelectionPopup」 the way Zotero's reader iframe does:
    * `{ reader, doc, params: { annotation }, append }` where `annotation.text`
-   * is the popup's own selection text. Pass `undefined` (or omit) to simulate
-   * a popup render that carries no annotation.
+   * is the popup's own selection text and `annotation.position` is the PDF
+   * position ({pageIndex, rects}). Pass `undefined` text (or omit) to simulate
+   * a popup render that carries no annotation; pass a position to simulate
+   * the geometry the in-text context capture consumes.
    */
-  fireSelectionPopup(annotationText?: string): void {
+  fireSelectionPopup(annotationText?: string, position?: unknown): void {
     const tabs = (globalThis as any).Zotero_Tabs ?? { selectedID: this.reader?.tabID ?? 1 };
     const reader = this.getReaderInstance();
     const event = {
@@ -257,7 +259,11 @@ export class ZoteroMock {
       doc: null,
       params: {
         annotation:
-          annotationText === undefined ? undefined : { text: annotationText },
+          annotationText === undefined
+            ? undefined
+            : position === undefined
+              ? { text: annotationText }
+              : { text: annotationText, position },
       },
       append: () => {},
     };

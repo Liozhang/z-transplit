@@ -31,7 +31,8 @@ import {
   getCachedTranslations,
   setCacheDirForTests,
 } from "../../../src/core/translation/translationCache";
-import { clearAllWordCards } from "../../../src/core/wordcards/wordCardStore";
+import { clearAllWordCards, getWordCard } from "../../../src/core/wordcards/wordCardStore";
+import { captureSentenceContext } from "../../../src/core/wordcards/sentenceContext";
 import { createZoteroMock } from "../../qa/harness/zotero-mock";
 import { createFetchMock } from "../../qa/harness/fetch-mock";
 import {
@@ -133,6 +134,22 @@ function routeOK(fm: ReturnType<typeof createFetchMock>, translated = "译文"):
     choices: [{ message: { content: translated } }],
   });
 }
+
+// 划词例句上下文：本文件内把 sentenceContext 换成确定性桩（真实提取逻辑已由
+// sentenceContext.test.ts 覆盖），面板侧只验证数据流：位置进入、上下文入库、
+// 无位置时降级为无例句。既有用例的选区桩不带位置，桩保持惰性、互不干扰。
+vi.mock("../../../src/core/wordcards/sentenceContext", () => ({
+  captureSentenceContext: vi.fn(
+    async (_reader: any, word: string, position: any) =>
+      position
+        ? {
+            sentence: `Mock sentence about ${word}.`,
+            pageIndex: position.pageIndex,
+            rects: position.rects,
+          }
+        : null,
+  ),
+}));
 
 // The engine's LRU translation cache is module-level and survives across tests
 // in this file. Clearing it per test keeps each case's fetch-count assertion
@@ -748,5 +765,107 @@ describe("B16 划词翻译：持久段落缓存（与 PDF 管线 / 双语对照�
     mountTranslatePane({ doc: ctx.doc, body: body2 });
     await flush(300);
     expect(String(body2.textContent)).toContain("缓存命中译文");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 词卡例句上下文：弹窗位置 → 原句入库（sentenceContext 已打桩，见文件头）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("词卡例句上下文：位置捕获与入库", () => {
+  let ctx: Ctx;
+  beforeEach(() => {
+    vi.mocked(captureSentenceContext).mockClear();
+  });
+  afterEach(() => {
+    ctx?.fm.uninstall();
+    ctx?.z.uninstall();
+    ctx?.dom.window.close();
+  });
+
+  it("弹窗携带 PDF 位置时，查词入库带例句上下文与来源条目", async () => {
+    ctx = setup({ ...ENGINE_PREFS, "wordcards.enabled": true }, ["resonance"]);
+    ctx.z.reader = {
+      tabID: 1,
+      itemID: 2,
+      selectionRanges: [{ text: "resonance" }],
+    };
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.z.fireSelectionPopup("resonance", {
+      pageIndex: 3,
+      rects: [[10, 20, 30, 40]],
+    });
+    ctx.click(K.lookup);
+    await flush(400); // 弹窗防抖 250ms + 查询 + 捕获 + 入库
+    const record = await getWordCard("resonance");
+    expect(record).not.toBeNull();
+    expect(record!.contexts).toHaveLength(1);
+    expect(record!.contexts![0].sentence).toBe("Mock sentence about resonance.");
+    expect(record!.contexts![0].pageIndex).toBe(3);
+    expect(record!.contexts![0].rects).toEqual([[10, 20, 30, 40]]);
+    expect(record!.contexts![0].itemID).toBe(2); // 阅读器展示的附件条目
+  });
+
+  it("弹窗未触发（键盘选区）时回落选区区间上的位置", async () => {
+    ctx = setup({ ...ENGINE_PREFS, "wordcards.enabled": true }, ["resonance"]);
+    ctx.z.reader = {
+      tabID: 1,
+      itemID: 2,
+      selectionRanges: [
+        {
+          text: "resonance",
+          position: { pageIndex: 1, rects: [[0, 0, 10, 10]] },
+        },
+      ],
+    };
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.lookup);
+    await flush(400);
+    const record = await getWordCard("resonance");
+    expect(record!.contexts).toHaveLength(1);
+    expect(record!.contexts![0].pageIndex).toBe(1);
+  });
+
+  it("无任何位置信息时正常出卡，不入例句", async () => {
+    ctx = setup({ ...ENGINE_PREFS, "wordcards.enabled": true }, ["resonance"]);
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.click(K.lookup);
+    await flush(400);
+    const record = await getWordCard("resonance");
+    expect(record).not.toBeNull();
+    expect(record!.contexts).toBeUndefined();
+    expect(vi.mocked(captureSentenceContext)).not.toHaveBeenCalled();
+  });
+
+  it("清空选区后位置随之失效：恢复选区再查词不再带旧位置", async () => {
+    ctx = setup({ ...ENGINE_PREFS, "wordcards.enabled": true }, ["resonance"]);
+    routeYoudao(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    ctx.z.fireSelectionPopup("resonance", {
+      pageIndex: 3,
+      rects: [[10, 20, 30, 40]],
+    });
+    // 选区消失（拔掉 reader），刷新选区清空面板的位置状态
+    ctx.z.reader = null;
+    ctx.click(K.refresh);
+    await flush(400);
+    // 选区恢复（不带位置形状），再查词——旧弹窗位置必须已被清除
+    ctx.z.reader = {
+      tabID: 1,
+      itemID: 2,
+      selectionRanges: [{ text: "resonance" }],
+    };
+    ctx.click(K.refresh);
+    await flush(400);
+    expect(ctx.text(ctx.body)).toContain("resonance");
+    ctx.click(K.lookup);
+    await flush(400);
+    const record = await getWordCard("resonance");
+    expect(record).not.toBeNull();
+    expect(record!.contexts).toBeUndefined();
+    expect(vi.mocked(captureSentenceContext)).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,14 @@
 /**
- * Word-cards tab pure helper tests (filterCards / sortCards / cardDate) —
- * no DOM, no Zotero: the helpers are exported exactly so these stay trivial.
+ * Word-cards tab pure helper tests (filterCards / sortCards / cardDate /
+ * resolveJumpTargetKind) — no DOM, no Zotero: the helpers are exported
+ * exactly so these stay trivial.
  */
 import { describe, it, expect } from "vitest";
 import {
   filterCards,
   sortCards,
   cardDate,
+  resolveJumpTargetKind,
 } from "../../../src/ui/wordCardsTab";
 import type { WordCardRecord } from "../../../src/core/wordcards/wordCardStore";
 
@@ -95,5 +97,30 @@ describe("cardDate", () => {
     expect(cardDate(NOW)).not.toBe("");
     expect(cardDate(0)).toBe("");
     expect(cardDate(Number.NaN)).toBe("");
+  });
+});
+
+describe("resolveJumpTargetKind", () => {
+  it("an attachment item (parentItemID or isAttachment) opens itself", () => {
+    expect(resolveJumpTargetKind({ id: 5, parentItemID: 3 })).toBe("self");
+    expect(
+      resolveJumpTargetKind({ id: 5, parentItemID: false, isAttachment: () => true }),
+    ).toBe("self");
+  });
+
+  it("a parent item resolves through its best attachment", () => {
+    expect(resolveJumpTargetKind({ id: 3, parentItemID: false })).toBe(
+      "best-attachment",
+    );
+    expect(resolveJumpTargetKind({ id: 3 })).toBe("best-attachment");
+    expect(
+      resolveJumpTargetKind({ id: 3, isAttachment: () => false }),
+    ).toBe("best-attachment");
+  });
+
+  it("unreadable shapes resolve null", () => {
+    expect(resolveJumpTargetKind(null)).toBeNull();
+    expect(resolveJumpTargetKind("junk")).toBeNull();
+    expect(resolveJumpTargetKind(undefined)).toBeNull();
   });
 });

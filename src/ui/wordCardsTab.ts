@@ -29,8 +29,12 @@ import {
   clearAllWordCards,
   deleteWordCard,
   listWordCards,
+  sanitizeContexts,
 } from "../core/wordcards/wordCardStore";
-import type { WordCardRecord } from "../core/wordcards/wordCardStore";
+import type {
+  WordCardContext,
+  WordCardRecord,
+} from "../core/wordcards/wordCardStore";
 import type { DictionaryCardContent } from "../core/translation/types";
 import {
   WordCardSpeaker,
@@ -246,6 +250,20 @@ const TAB_CSS = `
   font-size: 0.85em; opacity: 0.85; line-height: 1.5; margin-bottom: 2px;
 }
 .${CLS}-d-history-time { opacity: 0.6; font-size: 0.85em; margin-right: 6px; }
+.${CLS}-d-ctx {
+  display: block; width: 100%;
+  border: none; padding: 5px 6px; margin: 0 0 3px -6px;
+  border-radius: 4px; text-align: left;
+  background: transparent; color: inherit;
+  font: inherit; cursor: pointer;
+}
+.${CLS}-d-ctx:hover { background: var(--fill-quinary, rgba(127,127,127,0.15)); }
+.${CLS}-d-ctx:focus-visible {
+  outline: 2px solid var(--color-focus-border, var(--accent-blue, #4072e5));
+  outline-offset: -2px;
+}
+.${CLS}-d-ctx-sentence { font-size: 0.85em; font-style: italic; opacity: 0.85; line-height: 1.45; }
+.${CLS}-d-ctx-meta { font-size: 0.75em; opacity: 0.6; line-height: 1.4; margin-top: 1px; }
 .${CLS}-d-actions { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 .${CLS}-d-meta { font-size: 0.8em; opacity: 0.65; }
 
@@ -768,6 +786,18 @@ function buildDetail(
     box.appendChild(exampleTrans);
   }
 
+  // In-text contexts, newest first — the sentences this word was met in.
+  // Clicking one jumps back to the source location in the reader.
+  const contexts = sanitizeContexts(record.contexts);
+  if (contexts.length) {
+    const ctxTitle = el(state.doc, "div", `${CLS}-d-section`);
+    ctxTitle.textContent = getString("wordcards-contexts");
+    box.appendChild(ctxTitle);
+    for (const context of contexts) {
+      box.appendChild(buildContextRow(state, context));
+    }
+  }
+
   // Lookup history, newest first — the same card across time and languages.
   const historyTitle = el(state.doc, "div", `${CLS}-d-section`);
   historyTitle.textContent = getString("wordcards-history");
@@ -844,4 +874,166 @@ function buildDetail(
   // mid-play); a no-op when idle.
   updateSpeakButtons(state);
   return box;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-text contexts: rendering + jump-back
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One in-text context row: the sentence plus its source label (title, page).
+ * Clicking — or Enter/Space, the tile pattern — opens the source document's
+ * reader at the captured position. The row is a real interactive element so
+ * the jump is reachable from the keyboard too.
+ */
+function buildContextRow(
+  state: WordCardsTabState,
+  context: WordCardContext,
+): HTMLElement {
+  const row = el(state.doc, "div", `${CLS}-d-ctx`);
+  row.setAttribute("role", "button");
+  row.setAttribute("tabindex", "0");
+  const sentence = el(state.doc, "div", `${CLS}-d-ctx-sentence`);
+  sentence.textContent = context.sentence;
+  row.appendChild(sentence);
+  const metaParts: string[] = [];
+  if (context.itemTitle) metaParts.push(context.itemTitle);
+  if (typeof context.pageIndex === "number") {
+    // Stored 0-based, shown as the 1-based physical page number.
+    metaParts.push(
+      getString("wordcards-context-page", { page: context.pageIndex + 1 }),
+    );
+  }
+  if (metaParts.length) {
+    const meta = el(state.doc, "div", `${CLS}-d-ctx-meta`);
+    meta.textContent = metaParts.join(" · ");
+    row.appendChild(meta);
+  }
+  const open = () => {
+    void openContextLocation(state.win, context);
+  };
+  row.addEventListener("click", open);
+  row.addEventListener("keydown", (event) => {
+    const e = event as KeyboardEvent;
+    if (isIMEComposing(e)) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      open();
+    }
+  });
+  return row;
+}
+
+/**
+ * Which reader document a context's stored itemID resolves to: an attachment
+ * item opens itself; a parent item needs its best attachment (async, so the
+ * caller resolves it). Pure decision core — tests pass plain objects.
+ */
+export function resolveJumpTargetKind(item: any): "self" | "best-attachment" | null {
+  try {
+    if (!item || typeof item !== "object") return null;
+    if (typeof item.isAttachment === "function") {
+      return item.isAttachment() ? "self" : "best-attachment";
+    }
+    // Zotero items without a parent carry parentItemID === false.
+    if (typeof item.parentItemID === "number") return "self";
+    return "best-attachment";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open (or focus) the reader at a context's captured position. Official
+ * surfaces only: Zotero.Reader.open(itemID, location) for closed documents,
+ * reader.navigate(location) for open ones (the `_readers` id-match mirrors
+ * openReaderForCropping in opendataloaderSplitAdapter — Reader.open resolves
+ * undefined for an already-open document). Never throws: a failed jump costs
+ * a debug log, not a crash.
+ */
+async function openContextLocation(
+  win: any,
+  context: WordCardContext,
+): Promise<void> {
+  try {
+    if (typeof context?.itemID !== "number") return;
+    const Zotero = win?.Zotero ?? (globalThis as any)?.Zotero;
+    const Items = Zotero?.Items;
+    if (!Items?.get) return;
+    const item = Items.get(context.itemID);
+    if (!item) return;
+
+    let attachmentID: number | null = null;
+    if (resolveJumpTargetKind(item) === "self") {
+      attachmentID = context.itemID;
+    } else {
+      const best = await item.getBestAttachment?.();
+      if (best?.id != null) attachmentID = best.id;
+    }
+    if (attachmentID == null) {
+      safeDebug(
+        "[Z-Transplit] wordCards: context jump skipped — no attachment to open",
+      );
+      return;
+    }
+
+    const location =
+      typeof context.pageIndex === "number"
+        ? {
+            // 只传顶层 pageIndex：真机侦察（Zotero 10.0.3）确认 navigate
+            // 的 location 一旦携带 position 字段就进入其内部 position 分支
+            // 且不滚动，顶层 pageIndex 随之被忽略；裸 pageIndex 是唯一稳定
+            // 生效的页级定位形状。矩形级落点等上游 navigate 支持后再加。
+            pageIndex: context.pageIndex,
+          }
+        : undefined;
+
+    // 已打开的阅读器：字段名跨版本不定（_itemID / itemID / _attachmentId /
+    // attachmentID），与 openReaderForCropping 的四字段宽匹配保持一致。
+    const readers = Array.isArray(Zotero?.Reader?._readers)
+      ? Zotero.Reader._readers
+      : [];
+    const openReader = readers.find(
+      (reader: any) =>
+        (reader?._itemID ??
+          reader?.itemID ??
+          reader?._attachmentId ??
+          reader?.attachmentID) === attachmentID,
+    );
+    if (openReader) {
+      const Zotero_Tabs = win?.Zotero_Tabs ?? Zotero?.Tabs;
+      if (openReader.tabID && Zotero_Tabs?.select) {
+        Zotero_Tabs.select(openReader.tabID);
+      }
+      // 切 tab 后立即 navigate 不滚动（真机侦察：reader 的视图恢复会吃掉
+      // 跟随而来的导航）；等一拍再滚。
+      if (location) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        await openReader.navigate?.(location);
+      }
+      return;
+    }
+
+    if (typeof Zotero?.Reader?.open !== "function") {
+      safeDebug(
+        "[Z-Transplit] wordCards: Zotero.Reader.open unavailable — context jump skipped",
+      );
+      return;
+    }
+    const opened = await Zotero.Reader.open(attachmentID, location);
+    // Reader.open 对已打开的文档返回 undefined 且只聚焦不定位——用 navigate
+    // 补一次滚动（兜底，正常路径走上面的 openReader 分支）。
+    if (!opened && location) {
+      const existing = readers.find(
+        (reader: any) =>
+          (reader?._itemID ??
+            reader?.itemID ??
+            reader?._attachmentId ??
+            reader?.attachmentID) === attachmentID,
+      );
+      await existing?.navigate?.(location);
+    }
+  } catch (e) {
+    safeDebug("[Z-Transplit] wordCards: context jump failed: " + e);
+  }
 }

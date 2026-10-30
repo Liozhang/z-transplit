@@ -79,7 +79,12 @@ import {
   recentWordCardsForItem,
   upsertWordCard,
 } from "../core/wordcards/wordCardStore";
-import type { WordCardRecord } from "../core/wordcards/wordCardStore";
+import type {
+  WordCardContext,
+  WordCardRecord,
+} from "../core/wordcards/wordCardStore";
+import { captureSentenceContext } from "../core/wordcards/sentenceContext";
+import type { SelectionPositionLike } from "../core/wordcards/sentenceContext";
 
 /** Class prefix for every node this module creates. */
 const CLS = "ztransplit-tp";
@@ -475,6 +480,75 @@ function readSelection(doc: Document, itemID?: number): SelectionRead {
   return text ? { kind: "text", text } : { kind: "empty" };
 }
 
+/**
+ * Structural guard for a Zotero PDF annotation position: a finite
+ * non-negative pageIndex plus, when present, rects of number arrays. Popups
+ * and `_selectionRanges` are host-internal shapes — anything that does not
+ * look like a PDF position is rejected rather than stored.
+ */
+function isValidSelectionPosition(value: unknown): value is SelectionPositionLike {
+  if (!value || typeof value !== "object") return false;
+  const position = value as { pageIndex?: unknown; rects?: unknown };
+  if (typeof position.pageIndex !== "number" || !Number.isFinite(position.pageIndex)) {
+    return false;
+  }
+  if (position.pageIndex < 0) return false;
+  if (position.rects !== undefined) {
+    if (!Array.isArray(position.rects)) return false;
+    for (const rect of position.rects) {
+      if (!Array.isArray(rect) || !rect.every((n) => typeof n === "number" && Number.isFinite(n))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Best-effort selection position for in-text context capture: the popup
+ * annotation carries `{pageIndex, rects}`, and some reader builds mirror the
+ * same shape on `_selectionRanges` entries — this fallback covers keyboard
+ * selections and builds where the popup event skipped the pane. Missing or
+ * malformed geometry resolves null; capture simply skips that lookup.
+ */
+function readSelectionPosition(doc: Document, itemID?: number): SelectionPositionLike | null {
+  let ranges: any[] | undefined;
+  try {
+    const reader = resolveCurrentReader(doc, itemID);
+    const internal = reader?._internalReader;
+    ranges = internal?._primaryView?._selectionRanges;
+    if (ranges === undefined) ranges = internal?._secondaryView?._selectionRanges;
+  } catch (e) {
+    safeDebug("[Z-Transplit] translatePane: read selection position failed: " + e);
+    return null;
+  }
+  if (!Array.isArray(ranges)) return null;
+  for (const range of ranges) {
+    if (isValidSelectionPosition(range?.position)) return range.position;
+  }
+  return null;
+}
+
+/**
+ * Display title for a stored context: the parent item's title when the id is
+ * an attachment, else the item's own — defensive-optional throughout, since
+ * a missing title only costs a label, never the capture.
+ */
+function resolveItemTitle(itemIDValue: number | undefined): string | undefined {
+  if (itemIDValue === undefined) return undefined;
+  try {
+    const ZoteroGlobal = (globalThis as any)?.Zotero;
+    const item = ZoteroGlobal?.Items?.get?.(itemIDValue);
+    if (!item) return undefined;
+    const parentID = item?.parentItemID;
+    const source = parentID ? ZoteroGlobal?.Items?.get?.(parentID) : item;
+    const title = source?.getField?.("title");
+    return typeof title === "string" && title.trim() ? title.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Clipboard + IME helpers — shared implementations live in
 // src/utils/clipboard.ts and src/utils/ime.ts
@@ -529,8 +603,11 @@ interface SelectionSyncTarget {
    * the 「renderTextSelectionPopup」 event's own annotation text — empty when
    * the popup carried none. It is the freshest picture of what the user sees
    * selected and takes precedence over the `_selectionRanges` re-read.
+   * `popupPosition` is the same annotation's PDF position ({pageIndex, rects})
+   * when the popup carried one — the in-text context capture's geometry
+   * source; absent means "unknown", never "cleared".
    */
-  onSelection(popupText?: string): void;
+  onSelection(popupText?: string, popupPosition?: unknown): void;
 }
 
 /** Live panes interested in selection changes (module scope, event fanned out). */
@@ -567,9 +644,19 @@ function ensureReaderSelectionSync(): void {
           typeof event?.params?.annotation?.text === "string"
             ? event.params.annotation.text.trim()
             : "";
+        // The same annotation carries the selection's PDF position
+        // ({pageIndex, rects}) — the geometry the in-text context capture
+        // jumps back with. Guarded by shape at the pane side; popups without
+        // one (or with a selector-style position) pass undefined.
+        const popupPosition = (event as any)?.params?.annotation?.position;
         for (const target of [...selectionSyncTargets]) {
           try {
-            if (target.matchesReader(reader)) target.onSelection(popupText);
+            if (target.matchesReader(reader)) {
+              target.onSelection(
+                popupText,
+                isValidSelectionPosition(popupPosition) ? popupPosition : undefined,
+              );
+            }
           } catch (e) {
             safeDebug(
               "[Z-Transplit] translatePane: selection sync target failed: " + e,
@@ -637,6 +724,12 @@ export function mountTranslatePane(
    * this outranks a fresh `_selectionRanges` read.
    */
   let lastPopupText = "";
+  /**
+   * PDF position ({pageIndex, rects}) of the most recent popup selection —
+   * the geometry the in-text context capture jumps back with. Reset when the
+   * selection empties; a lookup without one simply stores no context.
+   */
+  let lastPopupPosition: SelectionPositionLike | null = null;
   /** Top of the word-card store, refreshed after mount and after each lookup. */
   let currentChips: WordCardRecord[] = [];
 
@@ -1137,6 +1230,15 @@ export function mountTranslatePane(
     const controller = createAbortController();
     abortController = controller;
 
+    // Geometry snapshot for the in-text context. The popup position is only
+    // trustworthy while it belongs to THIS selection (popup text matches the
+    // word); a popup without geometry — or any other path — falls back to a
+    // fresh ranges read, or no context.
+    const positionAtStart =
+      lastPopupText && word === lastPopupText && lastPopupPosition
+        ? lastPopupPosition
+        : readSelectionPosition(doc, itemID);
+
     copyError = null;
     setState({ status: "loading", error: null, result: null, card: null });
     renderResult();
@@ -1154,13 +1256,44 @@ export function mountTranslatePane(
       });
       // Record + refresh the chip strip off the critical path; both are
       // no-throw by contract, and a store failure must never look like a
-      // lookup failure.
-      void upsertWordCard({
-        word: looked.word || word,
-        targetLang: target,
-        content: looked,
-        sourceItemID: itemID,
-      }).then(() => void refreshChips());
+      // lookup failure. The in-text sentence context rides along: extraction
+      // failure degrades to a context-less card, never to a lookup failure.
+      void (async () => {
+        let context: WordCardContext | undefined;
+        try {
+          if (positionAtStart) {
+            const reader = resolveCurrentReader(doc, itemID);
+            const captured = await captureSentenceContext(
+              reader,
+              word,
+              positionAtStart,
+            );
+            if (captured && !controller.signal.aborted && !destroyed) {
+              // The reader shows the attachment item; jump-back targets it.
+              const contextItemID = reader?.itemID ?? itemID;
+              context = {
+                sentence: captured.sentence,
+                pageIndex: captured.pageIndex,
+                rects: captured.rects,
+                itemID: contextItemID,
+                itemTitle: resolveItemTitle(contextItemID),
+                at: Date.now(),
+              };
+            }
+          }
+        } catch (e) {
+          safeDebug("[Z-Transplit] translatePane: context capture failed: " + e);
+        }
+        if (controller.signal.aborted || destroyed) return;
+        await upsertWordCard({
+          word: looked.word || word,
+          targetLang: target,
+          content: looked,
+          sourceItemID: itemID,
+          context,
+        });
+        void refreshChips();
+      })();
     } catch (e) {
       if (controller.signal.aborted || destroyed) return;
       setState({
@@ -1322,6 +1455,7 @@ export function mountTranslatePane(
       abortController?.abort();
       abortController = null;
       wordMode = false;
+      lastPopupPosition = null; // no live selection → no geometry to capture
       setState({ sourceText: "", status: "idle", result: null, error: null, card: null });
     }
     renderAll();
@@ -1391,12 +1525,17 @@ export function mountTranslatePane(
         return false;
       }
     },
-    onSelection(popupText?: string): void {
+    onSelection(popupText?: string, popupPosition?: unknown): void {
       if (destroyed) return;
       // Capture the popup's own text at event time (freshest); the debounced
       // re-read then adjudicates against it (resolveSelectionText). Empty
       // payloads never erase an existing hint.
       if (popupText) lastPopupText = popupText;
+      // Same for the popup's PDF position — absent payloads keep the previous
+      // one, a fresh one replaces it (already shape-guarded by the listener).
+      if (isValidSelectionPosition(popupPosition)) {
+        lastPopupPosition = popupPosition;
+      }
       // Coalesce the popup event's possible re-fires while the selection
       // gesture settles (drag re-renders) into one re-read.
       if (syncTimer) clearTimeout(syncTimer);

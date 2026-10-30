@@ -199,3 +199,128 @@ describe("wordCardStore without a host", () => {
     expect((await listWordCards()).map((r) => r.word)).toEqual(["bare"]);
   });
 });
+
+describe("wordCardStore contexts", () => {
+  function context(sentence: string, itemID = 7, pageIndex = 3) {
+    return { sentence, itemID, itemTitle: `Paper ${itemID}`, pageIndex, rects: [[10, 20, 30, 40]], at: 1234 };
+  }
+
+  it("stores a context on first lookup and keeps the newest first", async () => {
+    await upsertWordCard({
+      word: "model", targetLang: "zh-CN", content: card("model", "模型"),
+      context: context("The model predicts the peak.", 7, 2),
+    });
+    await upsertWordCard({
+      word: "model", targetLang: "zh-CN", content: card("model", "模型"),
+      context: context("A different model appears here.", 9, 5),
+    });
+    const record = await getWordCard("model");
+    expect(record!.contexts).toHaveLength(2);
+    expect(record!.contexts![0].sentence).toBe("A different model appears here.");
+    expect(record!.contexts![0].itemID).toBe(9);
+    expect(record!.contexts![1].sentence).toBe("The model predicts the peak.");
+    // Contexts do not inflate the lookup count beyond the real lookups.
+    expect(record!.lookups).toBe(2);
+  });
+
+  it("dedupes the same sentence from the same item (case/apostrophe folded)", async () => {
+    const sentence = "The model predicts the peak.";
+    await upsertWordCard({
+      word: "model", targetLang: "zh-CN", content: card("model", "模型"),
+      context: context(sentence, 7),
+    });
+    await upsertWordCard({
+      word: "model", targetLang: "zh-CN", content: card("model", "模型"),
+      context: context("  THE MODEL PREDICTS THE PEAK. ", 7),
+    });
+    // Same sentence from ANOTHER item still accumulates.
+    await upsertWordCard({
+      word: "model", targetLang: "zh-CN", content: card("model", "模型"),
+      context: context(sentence, 9),
+    });
+    const record = await getWordCard("model");
+    expect(record!.contexts).toHaveLength(2);
+    expect(record!.contexts!.map((c) => c.itemID)).toEqual([9, 7]);
+  });
+
+  it("caps contexts at 20 entries, newest kept", async () => {
+    for (let i = 0; i < 25; i++) {
+      await upsertWordCard({
+        word: "many", targetLang: "zh-CN", content: card("many", "多"),
+        context: context(`Sentence number ${i} is here.`, 7, i),
+      });
+    }
+    const record = await getWordCard("many");
+    expect(record!.contexts).toHaveLength(20);
+    expect(record!.contexts![0].sentence).toContain("24");
+  });
+
+  it("drops malformed contexts instead of storing them", async () => {
+    await upsertWordCard({
+      word: "guard", targetLang: "zh-CN", content: card("guard", "防护"),
+      context: { sentence: "   ", at: 1 } as any,
+    });
+    await upsertWordCard({
+      word: "guard", targetLang: "zh-CN", content: card("guard", "防护"),
+      context: "not an object" as any,
+    });
+    await upsertWordCard({
+      word: "guard", targetLang: "zh-CN", content: card("guard", "防护"),
+      context: context("A valid sentence survives."),
+    });
+    const record = await getWordCard("guard");
+    expect(record!.contexts).toHaveLength(1);
+    expect(record!.contexts![0].sentence).toBe("A valid sentence survives.");
+  });
+
+  it("persists contexts across an index reload and accepts old records without them", async () => {
+    await upsertWordCard({
+      word: "older", targetLang: "zh-CN", content: card("older", "更早"),
+      context: context("Written before the field existed."),
+    });
+    await upsertWordCard({
+      word: "legacy", targetLang: "zh-CN", content: card("legacy", "旧格式"),
+    });
+    // Simulate an old-format record on disk: strip the new field.
+    const root = path.join(tmp, "ztransplit/word-cards/v1");
+    for (const bucket of fs.readdirSync(root)) {
+      for (const file of fs.readdirSync(path.join(root, bucket))) {
+        const filePath = path.join(root, bucket, file);
+        const raw = fs.readFileSync(filePath, "utf8");
+        if (raw.includes('"legacy"')) {
+          const parsed = JSON.parse(raw);
+          delete parsed.contexts;
+          fs.writeFileSync(filePath, JSON.stringify(parsed));
+        }
+      }
+    }
+    setWordCardDirForTests(tmp); // restart simulation
+    const kept = await getWordCard("older");
+    expect(kept!.contexts).toHaveLength(1);
+    expect(kept!.contexts![0].sentence).toBe("Written before the field existed.");
+    const legacy = await getWordCard("legacy");
+    expect(legacy).not.toBeNull();
+    expect(legacy!.contexts).toBeUndefined();
+  });
+
+  it("sanitizeContexts trims, caps and filters entries defensively", async () => {
+    const { sanitizeContexts } = await import("../../src/core/wordcards/wordCardStore");
+    const cleaned = sanitizeContexts([
+      { sentence: "  padded sentence.  ", at: 5 },
+      { sentence: "", at: 6 },
+      null,
+      "junk",
+      { sentence: "no timestamp" }, // at defaults, entry kept
+      { sentence: "rects kept", at: 7, rects: [[1, 2, 3, 4], ["bad"] as any] },
+      { sentence: "x".repeat(3000), at: 8 },
+    ]);
+    expect(cleaned).toHaveLength(4);
+    expect(cleaned[0].sentence).toBe("padded sentence.");
+    expect(cleaned[0].at).toBe(5);
+    expect(cleaned[1].at).toBeGreaterThan(0); // defaulted
+    expect(cleaned[1].itemID).toBeUndefined();
+    expect(cleaned[2].rects).toEqual([[1, 2, 3, 4]]);
+    expect(cleaned[3].sentence.length).toBe(1000); // defensive cap
+    expect(sanitizeContexts("not an array" as any)).toEqual([]);
+  });
+});

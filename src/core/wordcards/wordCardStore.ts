@@ -15,7 +15,10 @@
  *
  * Key: sha1 of the normalized word (case-folded, apostrophes unified) — the
  * same word looked up again merges into one card, whatever the engine or
- * target language was; each lookup lands in the record's history.
+ * target language was; each lookup lands in the record's history. A lookup
+ * that carries an in-text sentence context also lands in the record's
+ * `contexts` list (deduped per source item + sentence, capped), so one word
+ * keeps the sentences it was met in across papers.
  *
  * An in-memory index (Map key → record) is loaded lazily on first access and
  * kept in sync by every mutation, so pane chip reads and tab listing never
@@ -31,11 +34,40 @@ const STORE_VERSION = 1;
 /** Lookup history kept per card (newest first; older entries are dropped). */
 const HISTORY_LIMIT = 20;
 
+/** In-text contexts kept per card (newest first; older entries are dropped). */
+const CONTEXTS_LIMIT = 20;
+
+/** Defensive length caps for one stored context (capture caps at 500 chars). */
+const CONTEXT_SENTENCE_MAX = 1000;
+const CONTEXT_TITLE_MAX = 300;
+const CONTEXT_RECTS_MAX = 40;
+
 export interface WordCardHistoryEntry {
   /** Epoch ms of the lookup. */
   at: number;
   targetLang: string;
   content: DictionaryCardContent;
+}
+
+/**
+ * One in-text sentence context: the sentence a looked-up word appeared in,
+ * plus everything needed to jump back to the source location. Optional on the
+ * record, so records written before the field existed stay valid (no store
+ * migration; STORE_VERSION unchanged).
+ */
+export interface WordCardContext {
+  /** The sentence from the source document containing the word. */
+  sentence: string;
+  /** Item the sentence came from (the reader's attachment when known). */
+  itemID?: number;
+  /** Display title captured at save time (survives item deletion). */
+  itemTitle?: string;
+  /** 0-based page index for jump-back. */
+  pageIndex?: number;
+  /** PDF-space selection rects for jump-back targeting. */
+  rects?: number[][];
+  /** Epoch ms when the context was captured. */
+  at: number;
 }
 
 export interface WordCardRecord {
@@ -50,6 +82,8 @@ export interface WordCardRecord {
   sourceItemID?: number;
   latest: DictionaryCardContent;
   history: WordCardHistoryEntry[];
+  /** In-text sentence contexts, newest first (optional; absent on old records). */
+  contexts?: WordCardContext[];
 }
 
 /** Injectable base directory (tests). Undefined = derive from Zotero.DataDirectory. */
@@ -141,6 +175,61 @@ async function cardKey(normalized: string): Promise<string | null> {
   if (!normalized) return null;
   const hash = await sha1Hex(`${STORE_VERSION}|${normalized}`);
   return hash || null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * Structural guard + normalizer for context entries arriving from disk or
+ * from live capture. Invalid entries are dropped, valid ones trimmed to the
+ * defensive caps; never throws.
+ */
+export function sanitizeContexts(value: unknown): WordCardContext[] {
+  if (!Array.isArray(value)) return [];
+  const out: WordCardContext[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const rec = raw as Record<string, unknown>;
+    const sentence =
+      typeof rec.sentence === "string"
+        ? rec.sentence.replace(/\s+/g, " ").trim()
+        : "";
+    if (!sentence) continue;
+    const context: WordCardContext = {
+      sentence: sentence.slice(0, CONTEXT_SENTENCE_MAX),
+      at: isFiniteNumber(rec.at) ? rec.at : Date.now(),
+    };
+    if (isFiniteNumber(rec.itemID)) context.itemID = rec.itemID;
+    if (typeof rec.itemTitle === "string" && rec.itemTitle.trim()) {
+      context.itemTitle = rec.itemTitle.trim().slice(0, CONTEXT_TITLE_MAX);
+    }
+    if (isFiniteNumber(rec.pageIndex) && rec.pageIndex >= 0) {
+      context.pageIndex = rec.pageIndex;
+    }
+    if (Array.isArray(rec.rects)) {
+      const rects = (rec.rects as unknown[]).filter(
+        (rect) =>
+          Array.isArray(rect) &&
+          rect.length >= 4 &&
+          (rect as unknown[]).every(isFiniteNumber),
+      );
+      if (rects.length) context.rects = rects.slice(0, CONTEXT_RECTS_MAX) as number[][];
+    }
+    out.push(context);
+  }
+  return out.slice(0, CONTEXTS_LIMIT);
+}
+
+/**
+ * Dedup key for contexts: same source item + same sentence (case-folded,
+ * apostrophes unified — the sentence is already whitespace-collapsed by
+ * sanitizeContexts) is the same context, however often the word is looked up.
+ */
+function contextDedupKey(context: WordCardContext): string {
+  const sentence = context.sentence.toLowerCase().replace(/['’]/g, "'");
+  return `${context.itemID ?? ""}|${sentence}`;
 }
 
 function recordPath(key: string): string | null {
@@ -275,11 +364,14 @@ export interface UpsertWordCardOptions {
   targetLang: string;
   content: DictionaryCardContent;
   sourceItemID?: number;
+  /** In-text sentence context captured at lookup time (optional; deduped). */
+  context?: WordCardContext;
 }
 
 /**
  * Record one lookup: create the card or merge into the existing one (update
- * latest, bump counters, push history). Never throws.
+ * latest, bump counters, push history, fold in the in-text context). Never
+ * throws.
  */
 export async function upsertWordCard(options: UpsertWordCardOptions): Promise<void> {
   try {
@@ -310,6 +402,22 @@ export async function upsertWordCard(options: UpsertWordCardOptions): Promise<vo
       { at: now, targetLang: options.targetLang || "auto", content: options.content },
       ...(Array.isArray(record.history) ? record.history : []),
     ].slice(0, HISTORY_LIMIT);
+    if (options.context) {
+      // Same item + same sentence → one context, however often the word is
+      // looked up; different sentences (same or other papers) accumulate,
+      // newest first, capped.
+      const [cleaned] = sanitizeContexts([options.context]);
+      if (cleaned) {
+        const prior = Array.isArray(record.contexts)
+          ? sanitizeContexts(record.contexts)
+          : [];
+        const dedupKey = contextDedupKey(cleaned);
+        record.contexts = [
+          cleaned,
+          ...prior.filter((entry) => contextDedupKey(entry) !== dedupKey),
+        ].slice(0, CONTEXTS_LIMIT);
+      }
+    }
 
     index.set(key, record);
     await writeRecord(record);

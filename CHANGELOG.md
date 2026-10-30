@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- In-text example sentences for word cards. Every dictionary lookup of a
+  single word now also captures the sentence the word appeared in: the PDF
+  selection's page position (pageIndex + rects, carried by the reader's
+  text-selection popup) locates the page text, line clustering with
+  column-aware x scoping finds the word's line, and sentence-boundary
+  expansion (reusing the read-aloud sentence splitter) yields the sentence —
+  stored on the card as an in-text context with the source item, its title,
+  and the jump-back geometry. The same word met in another paper accumulates
+  a second context (deduped per source item + sentence, capped at 20, older
+  records without the field load unchanged). The word-cards tab renders the
+  card's contexts as an "In-text examples" section; each row shows the
+  sentence with its source title and page, and clicking it opens — or focuses
+  — the document's reader at the captured position via the official
+  Reader.open/navigate surface. Extraction failures (scanned pages, exotic
+  layouts) degrade to a context-less card; lookups are never blocked by it.
+
 ## [1.14.1] - 2026-10-30
 
 ### Changed

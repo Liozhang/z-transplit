@@ -375,6 +375,8 @@ export type FluentMessageId =
   | 'translation-error-unknown'
   | 'wordcards-clear'
   | 'wordcards-clear-confirm'
+  | 'wordcards-context-page'
+  | 'wordcards-contexts'
   | 'wordcards-count'
   | 'wordcards-delete'
   | 'wordcards-detail-empty'

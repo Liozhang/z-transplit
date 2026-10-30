@@ -1942,6 +1942,18 @@ PROBE_CMDS.maximize = async function () {
 //   "store"            list the on-disk word-card store records
 //   "shot"             screenshot the main window to D:\zt-qa\wordcards-shot-*.png
 PROBE_CMDS.wordcards = async function (action) {
+  // arg 兼容两种形态：纯子动作（"lookup"），或 JSON（{"sub":"lookup","word":...,
+  // "position":{pageIndex,rects},"select":"reading"}）——与 wc 命令同一约定。
+  let opts = {};
+  if (typeof action === "string" && action.trimStart().startsWith("{")) {
+    try {
+      opts = JSON.parse(action);
+    } catch {
+      opts = {};
+    }
+    action = opts.sub || "";
+  }
+  const opt = (k, d) => (opts[k] !== undefined ? opts[k] : d);
   const { win, Zotero_Tabs } = probeWin();
   const doc = win.document;
   const out = { action: action || "ui" };
@@ -2013,6 +2025,38 @@ PROBE_CMDS.wordcards = async function (action) {
           text: (container.textContent || "").slice(0, 500),
         }
       : null;
+    // opts.select：选中指定词卡，报告「文中例句」区的行（句子 + 来源元信息）。
+    const selectWord = opt("select", null);
+    if (container && selectWord) {
+      const tile = [...container.querySelectorAll(".ztransplit-wc-tile")].find(
+        (t) =>
+          t.querySelector(".ztransplit-wc-tile-word")?.textContent === selectWord,
+      );
+      if (tile) {
+        tile.click();
+        await Zotero.Promise.delay(600);
+        const detail = container.querySelector(".ztransplit-wc-detail");
+        const rows = [...(detail?.querySelectorAll(".ztransplit-wc-d-ctx") ?? [])];
+        out.selected = selectWord;
+        out.contextsSection = {
+          sectionTitles: [
+            ...(detail?.querySelectorAll(".ztransplit-wc-d-section") ?? []),
+          ].map((s) => s.textContent),
+          rows: rows.map((row) => ({
+            sentence:
+              row.querySelector(".ztransplit-wc-d-ctx-sentence")?.textContent ??
+              null,
+            meta:
+              row.querySelector(".ztransplit-wc-d-ctx-meta")?.textContent ?? null,
+          })),
+        };
+      } else {
+        out.selected = null;
+        out.tiles = [
+          ...container.querySelectorAll(".ztransplit-wc-tile-word"),
+        ].map((w) => w.textContent);
+      }
+    }
     return out;
   }
 
@@ -2102,6 +2146,23 @@ PROBE_CMDS.wordcards = async function (action) {
     // collapsible-section/shadow-root nesting quirks.
     const q = (sel) => doc.querySelector(sel);
     const qa = (sel) => [...doc.querySelectorAll(sel)];
+    // collapsible-section 的 body 是惰性渲染的：仅 open 属性不足以让面板
+    // DOM 出现，需要一次真实的开合交互。开关一次 header 强制渲染周期。
+    if (!q(".ztransplit-tp-lang-input")) {
+      try {
+        const header = section.querySelector(".collapsible-header") ||
+          section.querySelector("collapsible-section > div") ||
+          section.firstElementChild;
+        if (header) {
+          header.click();
+          await Zotero.Promise.delay(500);
+          header.click();
+          await Zotero.Promise.delay(900);
+        }
+      } catch (e) {
+        out.headerToggleError = String(e);
+      }
+    }
     const langInput = q(".ztransplit-tp-lang-input");
     if (!langInput) {
       return {
@@ -2110,6 +2171,9 @@ PROBE_CMDS.wordcards = async function (action) {
         text: (section.textContent || "").slice(0, 300),
         sectionHTML: (section.innerHTML || "").slice(0, 300),
         tpNodes: doc.querySelectorAll("[class*='ztransplit-tp']").length,
+        tpClassDump: [...doc.querySelectorAll("[class*='ztransplit-tp']")]
+          .slice(0, 20)
+          .map((n) => `${n.tagName}.${n.className}`),
         tpHosts: [
           ...new Set(
             [...doc.querySelectorAll("[class*='ztransplit-tp']")].map(
@@ -2126,10 +2190,17 @@ PROBE_CMDS.wordcards = async function (action) {
     await Zotero.Promise.delay(300);
 
     // 2) Fake the reader selection — the pane reads this exact property on
-    //    refresh (readSelection → _primaryView._selectionRanges).
+    //    refresh (readSelection → _primaryView._selectionRanges). opts.position
+    //    （{pageIndex, rects}）存在时按 Zotero 标注定单形状携带，走面板的
+    //    区间兜底路径；否则与真机键盘选区一样只有 text。
     const view = reader._internalReader?._primaryView;
     if (!view) return { error: "no _primaryView on the reader" };
-    view._selectionRanges = [{ text: "resonance" }];
+    const lookupWord = opt("word", "resonance");
+    const lookupPosition = opt("position", null);
+    view._selectionRanges = [
+      lookupPosition ? { text: lookupWord, position: lookupPosition } : { text: lookupWord },
+    ];
+    out.rangesShape = Object.keys(view._selectionRanges[0]);
 
     // 3) Refresh → idle state offers the Look up button (translate.auto off).
     const refreshBtn = qa("button").find((b) =>
@@ -2232,6 +2303,17 @@ PROBE_CMDS.wordcards = async function (action) {
               source: parsed?.latest?.source ?? null,
               senses: parsed?.latest?.senses?.length ?? null,
               phonetic: parsed?.latest?.phonetic ?? null,
+              // 例句上下文：数量 + 每条的来源与几何（真机验证核心字段）
+              contexts: Array.isArray(parsed?.contexts)
+                ? parsed.contexts.map((c) => ({
+                    sentence: String(c?.sentence ?? "").slice(0, 120),
+                    itemID: c?.itemID ?? null,
+                    itemTitle: c?.itemTitle ?? null,
+                    pageIndex: c?.pageIndex ?? null,
+                    rects: Array.isArray(c?.rects) ? c.rects.length : null,
+                    at: c?.at ?? null,
+                  }))
+                : null,
             });
           }
         }
@@ -2266,6 +2348,141 @@ PROBE_CMDS.wordcards = async function (action) {
     }
   }
 
+  // 点击详情页第一条例句行，验证跳转：词卡 tab → 文献阅读器，页码应落到
+  // 例句捕获时的页。Reader.open（未开）与 navigate（已开）两条路径都覆盖。
+  if (action === "jump") {
+    const container = doc.getElementById("ztransplit-wordcards");
+    if (!container) return { error: "word-cards tab not open" };
+    const row = container.querySelector(".ztransplit-wc-d-ctx");
+    if (!row) {
+      return {
+        error: "no context row — open the tab and select a card with contexts first",
+        tiles: [...container.querySelectorAll(".ztransplit-wc-tile-word")].map(
+          (w) => w.textContent,
+        ),
+      };
+    }
+    const pageOf = (reader) => {
+      try {
+        const iw = reader?._internalReader?._primaryView?._iframeWindow;
+        const raw = iw?.wrappedJSObject ?? iw;
+        return (
+          raw?.PDFViewerApplication?.pdfViewer?.currentPageNumber ?? null
+        );
+      } catch {
+        return null;
+      }
+    };
+    const readerBefore = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+    const before = {
+      selectedTab: Zotero_Tabs.selectedID,
+      selectedType: Zotero_Tabs.selectedType ?? null,
+      page: pageOf(readerBefore),
+      rowText: (row.textContent || "").slice(0, 200),
+      readersShape: (Zotero.Reader?._readers ?? []).map((r) => ({
+        itemID: r?.itemID ?? null,
+        _itemID: r?._itemID ?? null,
+        _attachmentId: r?._attachmentId ?? null,
+        attachmentID: r?.attachmentID ?? null,
+        tabID: r?.tabID ?? null,
+      })),
+    };
+    row.click();
+    await Zotero.Promise.delay(6000); // Reader.open 新开 tab 需要数秒
+    const readerAfter = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+    return {
+      before,
+      after: {
+        selectedTab: Zotero_Tabs.selectedID,
+        selectedType: Zotero_Tabs.selectedType ?? null,
+        page: pageOf(readerAfter),
+        readerItemID: readerAfter?.itemID ?? null,
+      },
+    };
+  }
+
+  // 页面行分布侦察：按 transform[5] 粗聚出基线行，报告 y / xMin / 文本前段。
+  // 为例句捕获的矩形坐标选择提供真实几何依据。
+  if (action === "page") {
+    const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+    const pv = reader?._internalReader?._primaryView;
+    const iw = pv?._iframeWindow;
+    const raw = iw?.wrappedJSObject ?? iw;
+    const app = raw?.PDFViewerApplication;
+    const pdfDoc = app?.pdfViewer?.pdfDocument || app?.pdfDocument;
+    if (!pdfDoc?.getPage) {
+      return {
+        error: "no pdfDocument",
+        diag: {
+          hasReader: !!reader,
+          hasPv: !!pv,
+          pvKeys: pv ? Object.keys(pv).filter((k) => /iframe|window/i.test(k)) : null,
+          iwType: Object.prototype.toString.call(iw),
+          hasWrapped: !!iw?.wrappedJSObject,
+          rawKeys: raw ? Object.keys(raw).filter((k) => /PDF|viewer|Application/i.test(k)).slice(0, 10) : null,
+          hasApp: !!app,
+          appKeys: app ? Object.keys(app).slice(0, 20) : null,
+          hasViewer: !!app?.pdfViewer,
+          viewerKeys: app?.pdfViewer ? Object.keys(app.pdfViewer).filter((k) => /doc|page/i.test(k)) : null,
+        },
+      };
+    }
+    const pageIndex = opt("pageIndex", 0);
+    const page = await pdfDoc.getPage(pageIndex + 1);
+    const rawPage = page?.wrappedJSObject ?? page;
+    const content = await rawPage.getTextContent();
+    const items = content?.items ?? [];
+    const clusters = new Map();
+    for (const it of items) {
+      if (!it.str || !it.str.trim()) continue;
+      if (!Array.isArray(it.transform) || !Number.isFinite(it.transform[5])) continue;
+      const key = Math.round(it.transform[5] / 4) * 4;
+      if (!clusters.has(key)) clusters.set(key, []);
+      clusters.get(key).push(it);
+    }
+    const rows = [...clusters.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([y, arr]) => ({
+        y,
+        x: Math.round(Math.min(...arr.map((i) => i.transform[4]))),
+        text: arr.map((i) => i.str).join("").replace(/\s+/g, " ").trim().slice(0, 70),
+      }));
+    return { pageIndex, numItems: items.length, rows };
+  }
+
+  // navigate 形状侦察：直接在当前 reader 上分别用顶层 pageIndex 与
+  // position.pageIndex 两种 location 形状导航，读页码变化——确定生产
+  // openContextLocation 应传哪种。
+  if (action === "navtest") {
+    const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+    if (!reader) return { error: "no reader — open one first" };
+    const pageOf = (r) => {
+      try {
+        const iw = r?._internalReader?._primaryView?._iframeWindow;
+        const raw = iw?.wrappedJSObject ?? iw;
+        return raw?.PDFViewerApplication?.pdfViewer?.currentPageNumber ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const out = { before: pageOf(reader) };
+    try {
+      await reader.navigate({ pageIndex: 1 });
+      await Zotero.Promise.delay(2500);
+      out.afterTopLevelPageIndex = pageOf(reader);
+    } catch (e) {
+      out.errTopLevel = String(e);
+    }
+    try {
+      await reader.navigate({ position: { pageIndex: 0 } });
+      await Zotero.Promise.delay(2500);
+      out.afterPositionPageIndex = pageOf(reader);
+    } catch (e) {
+      out.errPosition = String(e);
+    }
+    return out;
+  }
+
   return { error: "unknown wordcards sub-action: " + action };
 };
 
@@ -2280,6 +2497,19 @@ PROBE_CMDS.wordcards = async function (action) {
 //                  toolbar word-cards button and report whether the tab got
 //                  created AND selected (the two-click check)
 PROBE_CMDS.wc = async function (action) {
+  // arg 兼容两种形态：纯子动作（"lookup"），或 JSON（{"sub":"lookup","word":...,
+  // "position":{pageIndex,rects},"select":"resonance"}）。JSON 形态为例句验证
+  // 提供：带位置的伪造选区、指定词、选中词卡、跳转。
+  let opts = {};
+  if (typeof action === "string" && action.trimStart().startsWith("{")) {
+    try {
+      opts = JSON.parse(action);
+    } catch {
+      opts = {};
+    }
+    action = opts.sub || "";
+  }
+  const opt = (k, d) => (opts[k] !== undefined ? opts[k] : d);
   const { win, Zotero_Tabs } = probeWin();
   const doc = win.document;
   const rectOf = (el) => {
@@ -2329,6 +2559,20 @@ PROBE_CMDS.wc = async function (action) {
           latest: { word, phonetic, senses: [{ pos: "n.", meaning }], source: "youdao" },
           history: [{ at: now, targetLang: "zh-CN", content: { word, phonetic, senses: [{ pos: "n.", meaning }], source: "youdao" } }],
         };
+        // resonance 携带一条「另一篇文献」的预置例句：真机查词后应与新来源的
+        // 例句并存（多来源累积），也顺带验证旧记录加新字段的读取兼容。
+        if (word === "resonance") {
+          record.contexts = [
+            {
+              sentence: "Preexisting sentence about resonance from an earlier paper.",
+              itemID: 999,
+              itemTitle: "Earlier resonance paper (seeded)",
+              pageIndex: 0,
+              rects: [[50, 500, 300, 520]],
+              at: now - 60000,
+            },
+          ];
+        }
         const path = PathUtils.join(
           Zotero.DataDirectory.dir,
           "ztransplit",
