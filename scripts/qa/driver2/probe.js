@@ -2669,6 +2669,105 @@ PROBE_CMDS.bilingualMode = async function (mode) {
 };
 
 /**
+ * theme — force the CONTENT color-scheme (the SDT reading-mode stylesheet
+ * and the bilingual blocks key off prefers-color-scheme; this Firefox root
+ * pref overrides it per profile without touching the OS). arg: "dark" |
+ * "light".
+ */
+PROBE_CMDS.theme = async function (mode) {
+  const dark = /dark|暗/i.test(mode || "");
+  Services.prefs.setIntPref(
+    "layout.css.prefers-color-scheme.content-override",
+    dark ? 0 : 1,
+  );
+  // The reader is a privileged document: the content pref above does not
+  // reach it. Gecko's per-docShell colorSchemeOverride does — apply it down
+  // the frame chain (reader docShell + the nested SDT view's docShell).
+  const overrides = [];
+  const { Zotero_Tabs } = probeWin();
+  const r = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+  const shells = [];
+  try {
+    shells.push(["reader", r?._iframeWindow?.docShell]);
+    const sdtView = r?._internalReader?._primarySDTView;
+    const rawView = sdtView?.wrappedJSObject ?? sdtView;
+    shells.push(["sdt", rawView?._iframe?.contentWindow?.docShell]);
+  } catch (e) {
+    overrides.push("collect: " + e);
+  }
+  for (const [name, shell] of shells) {
+    try {
+      shell.colorSchemeOverride = dark ? "dark" : "light";
+      overrides.push(name + ":ok");
+    } catch (e) {
+      overrides.push(name + ":" + e);
+    }
+  }
+  await Zotero.Promise.delay(1200);
+  const irWin = r?._internalReader?._iframeWindow;
+  let contentDark = null;
+  try {
+    contentDark =
+      irWin?.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? null;
+  } catch (e) {
+    /* ignore */
+  }
+  return { mode: dark ? "dark" : "light", contentDark, overrides };
+};
+
+/**
+ * biToggle — click the first visible bilingual block (the paragraph
+ * show/hide gesture) so a capture can show the neutral collapsed bar.
+ */
+/**
+ * biPoint — screen coordinates of the first bilingual block plus its
+ * collapsed state, so a REAL mouse click (trusted event) can be driven from
+ * outside. Synthetic cross-realm dispatchEvent was swallowed by the content
+ * realm and never reached the click handler (2026-10-30 real-machine round);
+ * trusted clicks are also the faithful test of the user gesture.
+ */
+PROBE_CMDS.biPoint = async function () {
+  const { Zotero_Tabs } = probeWin();
+  const r = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+  const internal = r?._internalReader;
+  const sdtView = internal?._primarySDTView;
+  const rawView = sdtView?.wrappedJSObject ?? sdtView;
+  const frameEl = rawView?._iframe;
+  const doc = frameEl?.contentDocument;
+  const bi = doc?.querySelector("#sdt-content .ztransplit-bi");
+  if (!bi) return { error: "no bi block in the reading view" };
+  bi.scrollIntoView({ block: "center" });
+  await Zotero.Promise.delay(600);
+  const rect = bi.getBoundingClientRect();
+  let x = rect.left + Math.min(rect.width / 2, 200);
+  let y = rect.top + Math.min(rect.height / 2, 12);
+  // Compound the iframe chain: the SDT iframe's rect inside the reader doc,
+  // then the reader's browser element inside the chrome window.
+  try {
+    const fr = frameEl.getBoundingClientRect();
+    x += fr.left;
+    y += fr.top;
+    const readerWin = frameEl.ownerDocument.defaultView;
+    const readerFrameEl = r._iframeWindow?.frameElement ?? readerWin?.frameElement;
+    if (readerFrameEl) {
+      const rf = readerFrameEl.getBoundingClientRect();
+      x += rf.left;
+      y += rf.top;
+    }
+  } catch (e) {
+    /* coordinates stay viewport-relative — the caller sees a bad point */
+  }
+  const cw = Zotero.getMainWindow();
+  const dpr = cw.devicePixelRatio || 1;
+  return {
+    hidden: bi.hasAttribute("data-hidden"),
+    screenX: Math.round(cw.mozInnerScreenX + x * dpr),
+    screenY: Math.round(cw.mozInnerScreenY + y * dpr),
+    viewport: { top: Math.round(rect.top), h: Math.round(rect.height) },
+  };
+};
+
+/**
  * openTranslated — open the demo item's `Translated (…)` attachment tab
  * (the pipeline normally auto-opens it; this is the recovery path).
  */
