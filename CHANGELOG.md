@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- The bilingual reading view's translation styling now follows the mode, so
+  salience tracks the translation's role. In interleave mode the original
+  leads and the translation follows quietly: muted ink (74% opacity — the
+  same hue as the original text, so light and dark themes both stay legible),
+  one size smaller, and a neutral hairline on the leading edge as a scanning
+  anchor; hovering a block restores full ink and adds a barely-there
+  background. In translation-only mode the translation IS the body text, so
+  it reads at full ink and inherited size with no decoration. The collapsed
+  bar of per-paragraph show/hide went from the accent color to neutral gray
+  to match. The accent color lives on in transient states only (loading
+  placeholder, failure, read-aloud highlight) and in the peek mark, where the
+  attention was explicitly requested.
+
 ## [1.14.0] - 2026-10-30
 
 ### Added

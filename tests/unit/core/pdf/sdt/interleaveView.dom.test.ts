@@ -294,3 +294,89 @@ describe("interleaveView：段落显隐（上下对照点击折叠译文）", ()
     await handle.dispose();
   });
 });
+
+describe("interleaveView：两模式样式分层（样式契约）", () => {
+  let fx: Fixture | undefined;
+
+  beforeEach(() => {
+    fx = makeSession();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    fx = undefined;
+  });
+
+  /** 样式表是本契约的直接载体，断言读它注入后的原文。 */
+  function css(): string {
+    const el = document.getElementById("ztransplit-bi-style");
+    if (!el) throw new Error("no injected style");
+    return el.textContent || "";
+  }
+
+  it("基线只含结构规则：全墨、字号继承、无装饰（仅译文模式即正文）", async () => {
+    await build(fx!.session);
+    const m = /\.ztransplit-bi\s*\{([^}]*)\}/.exec(css());
+    expect(m).toBeTruthy();
+    const base = m![1];
+    expect(base).toContain("font-size: 1em");
+    expect(base).toContain("line-height: 1.75");
+    expect(base).not.toContain("opacity:");
+    expect(base).not.toContain("border-inline-start");
+    expect(base).not.toContain("background:");
+  });
+
+  it("对照模式层负责淡墨：透明度、小一号、灰细线，悬停恢复全墨", async () => {
+    await build(fx!.session);
+    const m = /\.ztransplit-bi-mode-interleave \.ztransplit-bi\s*\{([^}]*)\}/.exec(
+      css(),
+    );
+    expect(m).toBeTruthy();
+    const mute = m![1];
+    expect(mute).toContain("opacity: 0.74");
+    expect(mute).toContain("font-size: 0.92em");
+    expect(mute).toContain("border-inline-start");
+    expect(css()).toMatch(
+      /\.ztransplit-bi-mode-interleave \.ztransplit-bi:hover\s*\{[^}]*opacity: 1/,
+    );
+  });
+
+  it("仅译文层不设透明度：cursor 与 display 之外无视觉改写", async () => {
+    await build(fx!.session);
+    const rules = [
+      ...css().matchAll(
+        /\.ztransplit-bi-mode-trans-only \.ztransplit-bi\s*\{([^}]*)\}/g,
+      ),
+    ].map((m) => m[1]);
+    expect(rules.length).toBeGreaterThanOrEqual(2);
+    for (const body of rules) {
+      expect(body).not.toContain("opacity");
+      expect(body).not.toContain("font-size");
+    }
+    // 两个行为样式仍在
+    expect(css()).toMatch(
+      /\.ztransplit-bi-mode-trans-only \.ztransplit-bi\s*\{[^}]*cursor: pointer/,
+    );
+    expect(css()).toMatch(
+      /\.ztransplit-bi-mode-trans-only \.ztransplit-bi\s*\{[^}]*display: block !important/,
+    );
+  });
+
+  it("折叠横条声明在对照层之后（同特异性靠顺序取胜），且为中性灰", async () => {
+    await build(fx!.session);
+    const text = css();
+    const interleaveAt = text.indexOf(".ztransplit-bi-mode-interleave .ztransplit-bi {");
+    const hiddenAt = text.indexOf(".ztransplit-bi[data-hidden]");
+    expect(interleaveAt).toBeGreaterThan(-1);
+    expect(hiddenAt).toBeGreaterThan(interleaveAt);
+    const m = /\.ztransplit-bi\[data-hidden\]\s*\{([^}]*)\}/.exec(text);
+    expect(m![1]).toContain("rgba(127, 127, 127, 0.45)");
+  });
+
+  it("瞬时状态在两种模式下都保持自己的颜色", async () => {
+    await build(fx!.session);
+    const text = css();
+    expect(text).toMatch(/\.ztransplit-bi-error\s*\{[^}]*color:/);
+    expect(text).toMatch(/\.ztransplit-sent-active\s*\{[^}]*background:/);
+  });
+});

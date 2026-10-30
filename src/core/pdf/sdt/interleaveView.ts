@@ -12,6 +12,14 @@
  *   ztransplit-bi-mode-trans-only  originals hidden (translations remain)
  *   (mode-off removes everything — handled by exitInterleave)
  *
+ * Styling is mode-aware by design: salience follows the translation's ROLE.
+ * The baseline in ensureStyle is structural only; the interleave layer mutes
+ * the translation (opacity, smaller size, a neutral hairline anchor, hover
+ * restores full ink) because there the original leads and the translation
+ * follows. The trans-only layer is the plain baseline — there the translation
+ * IS the body text and reads at full ink. Transient states (placeholder,
+ * error, read-aloud highlight) keep their own colors in both modes.
+ *
  * In trans-only mode a click on a translation block temporarily reveals its
  * original paragraph (data-peek on the original + the CSS overrides in
  * ensureStyle); the peek moves with the next block click and is cleared on
@@ -103,14 +111,18 @@ function ensureStyle(doc: Document): void {
   const style = doc.createElement("style");
   style.id = "ztransplit-bi-style";
   style.textContent = `
+/* Two-layer styling. The baseline is structural only and serves BOTH modes;
+ * each mode layer decides how loud the translation is. Interleave: the
+ * original leads, so the translation follows in muted ink (opacity), one
+ * size smaller, with a neutral hairline as a scanning anchor — hovering
+ * restores full ink, so salience follows attention. Trans-only: the
+ * translation IS the body text (originals are hidden), so it reads at full
+ * ink and inherited size with no decoration. */
 .${BI_CLASS} {
-  margin: 0.35em 0 0.8em 0;
-  padding: 0.55em 0.8em;
-  border-inline-start: 3px solid var(--ztransplit-accent, #1f9e8d);
-  background: var(--ztransplit-bi-bg, rgba(31, 158, 141, 0.08));
-  border-radius: 4px;
-  font-size: 0.95em;
-  line-height: 1.65;
+  margin: 0.25em 0 1em 0;
+  padding: 0;
+  font-size: 1em;
+  line-height: 1.75;
   color: var(--ztransplit-bi-text, inherit);
   white-space: pre-wrap;
   min-height: 1.2em;
@@ -170,25 +182,39 @@ function ensureStyle(doc: Document): void {
 .ztransplit-bi-mode-trans-only .${BI_CLASS} {
   cursor: pointer;
 }
+/* Interleave mode layer: muted ink, one size smaller, a neutral hairline on
+ * the leading edge as a scanning anchor (thin, gray, no area — felt only
+ * while scrolling). Hover restores full ink plus a barely-there background:
+ * quiet at rest, solid once attended. */
+.ztransplit-bi-mode-interleave .${BI_CLASS} {
+  padding-inline-start: 0.75em;
+  border-inline-start: 2px solid rgba(127, 127, 127, 0.5);
+  opacity: 0.74;
+  font-size: 0.92em;
+  cursor: pointer;
+}
+.ztransplit-bi-mode-interleave .${BI_CLASS}:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.08);
+}
 /* Paragraph show/hide (interleave mode): clicking a translation block
- * collapses it to a thin accent bar — practice the original, click the bar
+ * collapses it to a thin neutral bar — practice the original, click the bar
  * to restore. Children stay in the DOM (read-aloud highlighting rebuilds
  * content) and are merely invisible; mode switches clear the state (in
- * trans-only a hidden block would blank the paragraph entirely). */
+ * trans-only a hidden block would blank the paragraph entirely). Declared
+ * AFTER the interleave layer: equal specificity, so source order lets the
+ * bar's own opacity win over the muted layer's. */
 .${BI_CLASS}[data-hidden] {
   min-height: 0;
   height: 8px;
   padding: 0;
   overflow: hidden;
-  background: var(--ztransplit-accent, #1f9e8d);
-  opacity: 0.35;
+  background: rgba(127, 127, 127, 0.45);
+  opacity: 0.9;
   border-radius: 4px;
 }
 .${BI_CLASS}[data-hidden] > * {
   visibility: hidden;
-}
-.ztransplit-bi-mode-interleave .${BI_CLASS} {
-  cursor: pointer;
 }
 /* Manual-translation trigger: a small pill centered below the active
  * selection. It lives in the SDT document body (outside #sdt-content) and is
