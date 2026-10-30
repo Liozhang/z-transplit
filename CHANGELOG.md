@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.14.1] - 2026-10-30
 
 ### Changed
 
@@ -788,6 +788,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Releases before 1.2.0 predate this changelog and are not backfilled.
 
+[1.14.0]: https://github.com/Liozhang/z-transplit/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/Liozhang/z-transplit/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/Liozhang/z-transplit/compare/v1.13.0...v1.13.1
 [1.9.0]: https://github.com/Liozhang/z-transplit/compare/v1.8.1...v1.9.0
