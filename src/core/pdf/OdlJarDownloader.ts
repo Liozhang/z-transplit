@@ -59,6 +59,8 @@ interface JarSource {
 const WHEEL_PACKAGE_HASH_PATH: Record<string, string> = {
   "2.5.0":
     "b1/78/c2e5aab0ad1076fc9f76234f021c622e2344543a6a3622152d220781f94f",
+  "2.5.17":
+    "89/95/5fa96eb9a599eee8734f74130c70ed1f957287ccb7ffb7fa5cb4e62f2e08",
 };
 
 /**
@@ -109,7 +111,7 @@ export function buildSources(meta: PinnedJarMeta): JarSource[] {
 
 /**
  * 压缩包条目名是否指向目标 jar。GitHub Release 的 zip 内文件名可能带版本
- * 后缀（…-cli-2.5.0.jar），轮子内固定为 …/jar/opendataloader-pdf-cli.jar，
+ * 后缀（…-cli-<版本>.jar），轮子内固定为 …/jar/opendataloader-pdf-cli.jar，
  * 两种都接受。纯函数，供测试。
  */
 export function jarEntryMatches(entryName: string, meta: PinnedJarMeta): boolean {
