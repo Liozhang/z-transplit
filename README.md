@@ -92,6 +92,9 @@ and bidirectional scroll, page and zoom sync — for close paragraph-by-paragrap
   under the same parent item, side by side
 - "Translate and open side by side" runs the full-text pipeline when no translation
   exists yet, and reuses an existing one when it does
+- One item opens one split view: an item holding both an original and its
+  translation resolves a single source, and the right pane takes the newest
+  existing translation
 - While a translation runs, the context menu gains "Cancel translation in progress"
 
 ### 4. Interleaved Bilingual Reading (Zotero 10)
@@ -105,6 +108,13 @@ choice is remembered for the next session. A paragraph that was never
 translated automatically (a late-rendered block, a list or table) needs no
 mode switch either: select it and click the "Translate this paragraph" pill
 to translate it on the spot — or to retranslate an existing translation.
+
+In interleave mode, selecting text on either side highlights the matching
+block on the other side at the same time: select an original block and its
+translation lights up beneath it, select a translation and the original above
+it answers in kind. The highlight moves with the selection and clears when you
+click empty space. Translation-only mode takes no part in the linking — the
+original is hidden wholesale, so there is no other side to correspond to.
 
 ![Interleaved bilingual](docs/screenshots/bilingual-interleave.png)
 
