@@ -43,6 +43,15 @@
  * translation slot injected on the spot; reference sections stay excluded,
  * exactly like automatic translation.
  *
+ * Paragraph linking: a selection anywhere in interleave mode marks the block
+ * it starts in AND its counterpart, so the original and the translation light
+ * up together. The mark is persistent — it outlives the native selection and
+ * survives scrolling — so a one-sided mark would strand the user without a
+ * reference the moment the native selection is gone; both sides carry it by
+ * design. Interleave-only: in trans-only the originals are hidden, so the
+ * counterpart does not exist to light. Selection and click stay disjoint
+ * gestures — drag-select links, click toggles (peek / collapse).
+ *
  * @module core/pdf/sdt/interleaveView
  */
 
@@ -216,6 +225,27 @@ function ensureStyle(doc: Document): void {
 .${BI_CLASS}[data-hidden] > * {
   visibility: hidden;
 }
+/* Paragraph linking (interleave only): a selection marks the block it starts
+ * in AND its counterpart, both sides at the same tint — the mark is
+ * persistent (it outlives the native selection and survives scrolling), so a
+ * one-sided mark would lose its reference the moment the native selection is
+ * gone. The 0.14 tint sits above peek's 0.08 (a weak hint) and below the
+ * read-aloud sentence's 0.34 (happening now), and keeps the accent hue so it
+ * never reads as the read-aloud's warm tone. The leading bar is an inset
+ * shadow, not a border: no layout shift when the mark appears (peek's border
+ * is fine there — a one-shot reveal can jitter, a persistent mark cannot).
+ * Collapsed bars keep their own gray via :not([data-hidden]). Scoped to
+ * interleave: in trans-only the originals are hidden, so there is no
+ * counterpart to light. */
+.ztransplit-bi-mode-interleave [data-ref-path][data-linked] {
+  background: rgba(31, 158, 141, 0.14);
+  box-shadow: inset 3px 0 0 var(--ztransplit-accent, #1f9e8d);
+  border-radius: 4px;
+}
+.ztransplit-bi-mode-interleave .${BI_CLASS}[data-linked]:not([data-hidden]) {
+  background: rgba(31, 158, 141, 0.14);
+  border-radius: 4px;
+}
 /* Manual-translation trigger: a small pill centered below the active
  * selection. It lives in the SDT document body (outside #sdt-content) and is
  * positioned fixed — the selection rect is iframe-viewport-relative, fixed
@@ -298,6 +328,33 @@ export async function buildInterleave(
       /* element already gone with the view */
     }
     peeked = null;
+  };
+  /**
+   * 段落联动：选原文亮译文、选译文亮原文，同一 refPath 的两侧同亮。
+   * data-linked 与 data-peek 同性质——写在官方元素上的临时属性，清除点
+   * （换选/收起/切模式/dispose）一个都不能少，否则退出会话后原文块上会
+   * 残留标记。
+   */
+  const clearLinked = (): void => {
+    for (const el of doc.querySelectorAll("[data-linked]")) {
+      el.removeAttribute("data-linked");
+    }
+  };
+  const applyLinked = (refPath: string | null): void => {
+    clearLinked();
+    // 仅上下对照联动：仅译文模式下原文整批隐藏，联动的另一侧不可见，
+    // 不给官方元素留无谓的临时属性（CSS 作用域同样限定对照模式，双保险）。
+    if (
+      !refPath ||
+      !session.container.classList.contains(MODE_CLASSES.interleave)
+    ) {
+      return;
+    }
+    // 没有译文块的段落（引用区等 collectBlocks 跳过的）不联动：只亮一半
+    // 没有对应意义。
+    if (!injected.has(refPath)) return;
+    originals.get(refPath)?.setAttribute("data-linked", "");
+    injected.get(refPath)?.setAttribute("data-linked", "");
   };
   /**
    * Toggle one paragraph's translation between shown and collapsed (上下对照
@@ -466,7 +523,11 @@ export async function buildInterleave(
   };
 
   const onDocMouseUp = (): void => {
-    positionTrigger(resolveSelectionTarget());
+    const target = resolveSelectionTarget();
+    positionTrigger(target);
+    // 与手动翻译 pill 共用同一次选区解析：拖选松手即联动，空选择/收起
+    // 即清除。
+    applyLinked(target?.refPath ?? null);
   };
   const onDocMouseDown = (ev: Event): void => {
     // Pressing the trigger itself must not dismiss it before its click.
@@ -474,8 +535,14 @@ export async function buildInterleave(
     if (t?.closest?.(".ztransplit-bi-trigger")) return;
     trigger.style.display = "none";
   };
+  // 键盘选择（Shift+方向键等）不触发 mouseup：任何按键后重解析一次，
+  // 选区被方向键收起时自然清除，无需判断具体按键。
+  const onDocKeyUp = (): void => {
+    applyLinked(resolveSelectionTarget()?.refPath ?? null);
+  };
   doc.addEventListener("mouseup", onDocMouseUp);
   doc.addEventListener("mousedown", onDocMouseDown);
+  doc.addEventListener("keyup", onDocKeyUp);
 
   const ensureManualBlock = (target: ManualTarget): void => {
     if (injected.has(target.refPath)) return;
@@ -625,6 +692,8 @@ export async function buildInterleave(
       // The peek's display override is trans-only-only, so any mode switch
       // invalidates it; the pointer affordance and hint follow the mode.
       clearPeek();
+      // 联动标记只属于上下对照：仅译文模式下没有另一侧可亮，切换即清除。
+      clearLinked();
       for (const el of injected.values()) {
         try {
           if (mode === "transOnly") {
@@ -698,14 +767,16 @@ export async function buildInterleave(
       session.container.removeEventListener("click", onContainerClick);
       doc.removeEventListener("mouseup", onDocMouseUp);
       doc.removeEventListener("mousedown", onDocMouseDown);
+      doc.removeEventListener("keyup", onDocKeyUp);
       try {
         trigger.remove();
       } catch {
         /* already gone with the view */
       }
-      // data-peek is the one transient state we ever put on official
-      // elements — strip it so exit leaves the view exactly as found.
+      // data-peek 与 data-linked 是我们唯一写在官方元素上的临时属性——
+      // 剥净它们，退出后视图与进入时完全一致。
       clearPeek();
+      clearLinked();
       for (const el of injected.values()) {
         try {
           el.remove();
