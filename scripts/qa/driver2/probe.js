@@ -3320,6 +3320,798 @@ PROBE_CMDS.bilingualWait = async function (capMs) {
   return { progress: last, stableFor: stable, ms: Date.now() - t0 };
 };
 
+/** 取文档顺序里最后一个分隔条：真实鼠标命中的就是它（绘制在最上层）。
+ *  一个条目挂多个 PDF 时批量开屏会产生多个分屏视图，全部叠在同一个
+ *  tabs-deck 里，querySelector 取到的第一个往往是被盖住的那个。 */
+function visibleResizer(doc) {
+  const all = doc.querySelectorAll(".ztransplit-split-resizer");
+  return all.length ? all[all.length - 1] : null;
+}
+
+/** parseArg — the launcher hands the handler argv[4] as a raw string. */
+function parseArg(arg) {
+  if (arg && typeof arg === "object") return arg;
+  if (typeof arg !== "string" || !arg.trim()) return {};
+  try {
+    const v = JSON.parse(arg);
+    return v && typeof v === "object" ? v : { value: v };
+  } catch (e) {
+    return { value: arg };
+  }
+}
+
+/**
+ * splitOpenOnce — 与 splitOpen 相同，但只调 doCommand()，不派发 popupshowing。
+ * 用来隔离「一次菜单调用打开两个分屏标签」是插件缺陷还是探针调用方式导致：
+ * 两种方式各开一次，比较 resizerCount 与 reader 标签数。
+ */
+PROBE_CMDS.splitOpenOnce = async function (arg) {
+  const opts = parseArg(arg);
+  const FIXDIR = "D:\\github_code\\z-transplit\\scripts\\qa\\fixtures";
+  const left = opts.left || PathUtils.join(FIXDIR, "attention-reading.pdf");
+  const right = opts.right || PathUtils.join(FIXDIR, "reading-brain.pdf");
+  const dataDir = Zotero.DataDirectory.dir;
+  const leftPath = PathUtils.join(dataDir, "split-left.pdf");
+  const rightPath = PathUtils.join(dataDir, "split-right.pdf");
+  await IOUtils.copy(left, leftPath);
+  await IOUtils.copy(right, rightPath);
+  const item = new Zotero.Item("journalArticle");
+  item.setField("title", "QA split-view pair");
+  const itemID = await item.saveTx();
+  await Zotero.Attachments.importFromFile({ file: leftPath, parentItemID: itemID, title: "QA split left" });
+  await Zotero.Attachments.importFromFile({ file: rightPath, parentItemID: itemID, title: "QA split right" });
+  const { ZoteroPane, Zotero_Tabs } = probeWin();
+  const doc = Zotero.getMainWindow().document;
+  ZoteroPane.selectItem(itemID);
+  await Zotero.Promise.delay(600);
+  const entry = doc.getElementById("ztransplit-itemmenu-split");
+  if (!entry) return { error: "no ztransplit-itemmenu-split" };
+  entry.doCommand();   // 注意：没有派发 popupshowing
+  const t0 = Date.now();
+  let resizer = null;
+  while (Date.now() - t0 < 60000) {
+    await Zotero.Promise.delay(500);
+    resizer = visibleResizer(doc);
+    if (resizer) break;
+  }
+  await Zotero.Promise.delay(3000);
+  return {
+    invoked: "doCommand only (no popupshowing)",
+    resizerCount: doc.querySelectorAll(".ztransplit-split-resizer").length,
+    readerTabs: (Zotero_Tabs._tabs || []).filter((t) => t.type === "reader").length,
+    tabs: (Zotero_Tabs._tabs || []).map((t) => [t.id, t.type]),
+    ms: Date.now() - t0,
+  };
+};
+
+/** winSize — resize the main window to a fixed logical size (CSS px). */
+PROBE_CMDS.winSize = async function (arg) {
+  const opts = parseArg(arg);
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  win.resizeTo(Number(opts.w) || 1280, Number(opts.h) || 800);
+  await Zotero.Promise.delay(900);
+  const R = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  return {
+    window: { w: win.innerWidth, h: win.innerHeight, dpr: win.devicePixelRatio, sizemode: doc.documentElement.getAttribute("sizemode") },
+    itemsTree: R(doc.getElementById("zotero-items-tree")),
+    itemsToolbox: R(doc.getElementById("zotero-tb-toolbar")),
+    tabs: R(doc.getElementById("zotero-tabs")),
+    tabpanels: R(doc.getElementById("zotero-tabs")?.querySelector("tabpanels")),
+    contextPane: R(doc.getElementById("zotero-context-pane")),
+  };
+};
+
+/**
+ * splitOpen — build the issue's repro: one item with two PDF attachments,
+ * then launch the split-screen reading entry from the library item-tree menu.
+ * Leaves the split tab open for `divider`.
+ *   arg: { left, right }  — source PDF paths (defaults to the repo fixtures)
+ */
+PROBE_CMDS.splitOpen = async function (arg) {
+  const opts = parseArg(arg);
+  const FIX = "D:\\github_code\\z-transplit\\scripts\\qa\\fixtures\\";
+  const left = opts.left || FIX + "attention-reading.pdf";
+  const right = opts.right || FIX + "reading-brain.pdf";
+  const dataDir = Zotero.DataDirectory.dir;
+  const dest = async (src, name) => {
+    const p = PathUtils.join(dataDir, name);
+    await IOUtils.copy(src, p);
+    return p;
+  };
+  const leftPath = await dest(left, "split-left.pdf");
+  const rightPath = await dest(right, "split-right.pdf");
+
+  const item = new Zotero.Item("journalArticle");
+  item.setField("title", "QA split-view pair");
+  const itemID = await item.saveTx();
+  const leftAtt = await Zotero.Attachments.importFromFile({
+    file: leftPath,
+    parentItemID: itemID,
+    title: "QA split left",
+  });
+  const rightAtt = await Zotero.Attachments.importFromFile({
+    file: rightPath,
+    parentItemID: itemID,
+    title: "QA split right",
+  });
+
+  const { ZoteroPane, Zotero_Tabs } = probeWin();
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  ZoteroPane.selectItem(itemID);
+  await Zotero.Promise.delay(600);
+
+  const popup = doc.getElementById("zotero-itemmenu");
+  popup.dispatchEvent(new win.Event("popupshowing"));
+  const entry = doc.getElementById("ztransplit-itemmenu-split");
+  if (!entry) {
+    return { error: "no ztransplit-itemmenu-split", itemID, leftAtt: leftAtt.id, rightAtt: rightAtt.id };
+  }
+  entry.doCommand();
+
+  // Wait for the split view to finish building (resizer appears last).
+  const t0 = Date.now();
+  let resizer = null;
+  while (Date.now() - t0 < 60000) {
+    await Zotero.Promise.delay(500);
+    resizer = visibleResizer(doc);
+    if (resizer) break;
+  }
+  await Zotero.Promise.delay(3000);
+  return {
+    itemID,
+    leftAtt: leftAtt.id,
+    rightAtt: rightAtt.id,
+    tabID: Zotero_Tabs.selectedID,
+    tabType: (Zotero_Tabs._tabs || []).find((t) => t.id === Zotero_Tabs.selectedID)?.type,
+    resizerFound: !!resizer,
+    ms: Date.now() - t0,
+    tabs: (Zotero_Tabs._tabs || []).map((t) => [t.id, t.type]),
+  };
+};
+
+/**
+ * divider — measure how the split-view divider actually tracks the pointer.
+ *
+ * Drives the resizer's own handlers with synthetic mouse events and records
+ * the resulting pane geometry, so the ratio math can be checked against the
+ * real layout instead of against what the code assumes.
+ *   arg: { step, target, delay }
+ *     step   — pointer step in px (default 25)
+ *     target — where mousemove is dispatched: "win" (default, the retargeted
+ *              path the handler listens on) | "browser" | "resizer"
+ */
+PROBE_CMDS.divider = async function (arg) {
+  const opts = parseArg(arg);
+  const step = Number(opts.step) || 25;
+  const target = opts.target || "win";
+  const delay = Number(opts.delay) || 25;
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+
+  const resizer = visibleResizer(doc);
+  if (!resizer) {
+    return {
+      error: "no .ztransplit-split-resizer in the main window",
+      tabs: (win.Zotero_Tabs._tabs || []).map((t) => [t.id, t.type]),
+    };
+  }
+  const mainHbox = resizer.parentNode;
+  const kids = Array.from(mainHbox.children);
+  const browsers = kids.filter((c) => c.localName === "browser");
+  if (browsers.length !== 2) {
+    return {
+      error: "expected 2 browser children",
+      children: kids.map((c) => c.localName),
+    };
+  }
+  const leftB = browsers[0];
+  const rightB = browsers[1];
+
+  const R = (el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      x: +r.x.toFixed(1),
+      y: +r.y.toFixed(1),
+      w: +r.width.toFixed(1),
+      h: +r.height.toFixed(1),
+    };
+  };
+  const cs = (el, props) => {
+    const s = win.getComputedStyle(el);
+    const o = {};
+    for (const p of props) o[p] = s[p];
+    return o;
+  };
+  const hbox = R(mainHbox);
+
+  const fire = (type, el, clientX, bubbles = true, buttons = 1) => {
+    const cy = Math.round(hbox.y + hbox.h / 2);
+    el.dispatchEvent(
+      new win.MouseEvent(type, {
+        bubbles,
+        cancelable: true,
+        view: win,
+        button: 0,
+        buttons,
+        clientX,
+        clientY: cy,
+        // installResizer 读 screenX 的位移量（修复本身），合成事件必须带上，
+        // 否则 screenX 默认为 0、位移量恒为 0，分隔条不会动。
+        screenX: clientX,
+        screenY: cy,
+      }),
+    );
+  };
+  const moveTarget = (x) =>
+    target === "browser"
+      ? x < hbox.x + hbox.w / 2
+        ? leftB
+        : rightB
+      : target === "resizer"
+        ? resizer
+        : win;
+
+  const measure = (cursor) => {
+    const rr = R(resizer);
+    return {
+      cursor,
+      leftW: R(leftB).w,
+      resizerX: rr.x,
+      resizerW: rr.w,
+      rightW: R(rightB).w,
+      leftGrow: leftB.style.flexGrow,
+      rightGrow: rightB.style.flexGrow,
+      delta: cursor == null ? null : +(rr.x - cursor).toFixed(1),
+    };
+  };
+
+  const sweep = async (xs) => {
+    const out = [];
+    fire("mousedown", resizer, xs[0]);
+    for (const x of xs) {
+      fire("mousemove", moveTarget(x), x);
+      await Zotero.Promise.delay(delay);
+      out.push(measure(x));
+    }
+    fire("mouseup", win, xs[xs.length - 1], true, 0);
+    await Zotero.Promise.delay(200);
+    return out;
+  };
+
+  const lo = Math.ceil(hbox.x + 1);
+  const hi = Math.floor(hbox.x + hbox.w - 1);
+  const rightXs = [];
+  for (let x = lo; x <= hi; x += step) rightXs.push(x);
+  if (rightXs[rightXs.length - 1] !== hi) rightXs.push(hi);
+
+  const out = {
+    info: {
+      window: { w: win.innerWidth, h: win.innerHeight, dpr: win.devicePixelRatio },
+      hbox,
+      containerStyle: mainHbox.parentNode?.getAttribute("style"),
+      hboxStyle: mainHbox.getAttribute("style"),
+      children: kids.map((c) => ({
+        tag: c.localName,
+        cls: String(c.className),
+        ...R(c),
+      })),
+      leftStyle: leftB.getAttribute("style"),
+      rightStyle: rightB.getAttribute("style"),
+      resizerComputed: cs(resizer, ["width", "minWidth", "maxWidth", "flexGrow", "flexBasis", "flexShrink"]),
+      leftComputed: cs(leftB, ["flexGrow", "flexBasis", "flexShrink", "minWidth", "maxWidth"]),
+      rightComputed: cs(rightB, ["flexGrow", "flexBasis", "flexShrink", "minWidth", "maxWidth"]),
+    },
+  };
+
+  out.sweepRight = await sweep(rightXs);
+  out.sweepLeft = await sweep(rightXs.slice().reverse());
+
+  // A mouseup that only reaches the pane (bubbles:false mimics the event being
+  // consumed by the out-of-process content instead of retargeted to chrome):
+  // if the handler never sees it, `dragging` stays true and every later
+  // pointer move keeps resizing the panes.
+  {
+    const mid = Math.round(hbox.x + hbox.w / 2);
+    fire("mousedown", resizer, mid);
+    fire("mousemove", win, mid + 40);
+    await Zotero.Promise.delay(80);
+    fire("mouseup", rightB, mid + 40, false, 0);
+    await Zotero.Promise.delay(120);
+    const before = measure(mid + 40);
+    fire("mousemove", win, mid + 200, true, 0); // no button held
+    await Zotero.Promise.delay(120);
+    const after = measure(mid + 200);
+    out.stuckDrag = { before, after, movedWithoutButton: after.leftW !== before.leftW };
+    fire("mouseup", win, mid + 200, true, 0);
+    await Zotero.Promise.delay(200);
+  }
+  out.final = measure(null);
+  return out;
+};
+
+/**
+ * dividerGo — park the divider at an absolute clientX (synthetic drag), and
+ * report the clientX→screen mapping the real-mouse driver needs.
+ *   arg: { x }  — target clientX inside mainHbox
+ */
+PROBE_CMDS.dividerGo = async function (arg) {
+  const opts = parseArg(arg);
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const resizer = visibleResizer(doc);
+  if (!resizer) return { error: "no .ztransplit-split-resizer" };
+  const mainHbox = resizer.parentNode;
+  const browsers = Array.from(mainHbox.children).filter(
+    (c) => c.localName === "browser",
+  );
+  const R = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
+  };
+  const hbox = R(mainHbox);
+  // 文档里可能同时存在多个分隔条（多个分屏标签），逐个报告它们所在
+  // hbox 的两个浏览器宽度，便于判断插件监听到底挂在哪一个上。
+  const allRzs = Array.from(doc.querySelectorAll(".ztransplit-split-resizer"));
+  const siblingsOf = (el) => {
+    const hb = el.parentNode;
+    if (!hb) return null;
+    const bs = Array.from(hb.children).filter((c) => c.localName === "browser");
+    return bs.length === 2
+      ? { left: R(bs[0]).w, right: R(bs[1]).w, leftX: R(bs[0]).x }
+      : { browsers: bs.length };
+  };
+  const x = opts.x == null ? Math.round(hbox.x + hbox.w / 2) : Number(opts.x);
+  const y = Math.round(hbox.y + hbox.h / 2);
+  const fire = (type, el, clientX, buttons) =>
+    el.dispatchEvent(
+      new win.MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: win,
+        button: 0,
+        buttons,
+        clientX,
+        clientY: y,
+        screenX: clientX,
+        screenY: y,
+      }),
+    );
+  fire("mousedown", resizer, x, 1);
+  fire("mousemove", win, x, 1);
+  await Zotero.Promise.delay(60);
+  fire("mouseup", win, x, 0);
+  await Zotero.Promise.delay(200);
+  const dpr = win.devicePixelRatio || 1;
+  return {
+    target: x,
+    hbox,
+    resizer: R(resizer),
+    leftW: R(browsers[0]).w,
+    rightW: R(browsers[1]).w,
+    leftGrow: browsers[0].style.flexGrow,
+    rightGrow: browsers[1].style.flexGrow,
+    allResizers: allRzs.map((el) => ({
+      x: R(el).x,
+      sameAsQueried: el.isSameNode(resizer),
+      siblings: siblingsOf(el),
+    })),
+    screen: {
+      originX: win.mozInnerScreenX,
+      originY: win.mozInnerScreenY,
+      dpr,
+      toScreen: (cx) => Math.round(win.mozInnerScreenX + cx * dpr),
+      toScreenY: Math.round(win.mozInnerScreenY + y * dpr),
+    },
+  };
+};
+
+/**
+ * dividerRecord — record what the chrome window actually receives while a REAL
+ * mouse drags the divider. Registers window-level mousemove/mouseup/mousedown
+ * recorders, then waits `ms` while the caller drives the physical mouse, and
+ * returns the event log plus the pane geometry at each event.
+ *   arg: { ms }
+ */
+PROBE_CMDS.dividerRecord = async function (arg) {
+  const opts = parseArg(arg);
+  const ms = Number(opts.ms) || 12000;
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const resizer = visibleResizer(doc);
+  if (!resizer) return { error: "no .ztransplit-split-resizer" };
+  const mainHbox = resizer.parentNode;
+  const browsers = Array.from(mainHbox.children).filter(
+    (c) => c.localName === "browser",
+  );
+  const leftB = browsers[0];
+  const rightB = browsers[1];
+  const R = (el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      x: +r.x.toFixed(1),
+      y: +r.y.toFixed(1),
+      w: +r.width.toFixed(1),
+      h: +r.height.toFixed(1),
+    };
+  };
+  const hbox = R(mainHbox);
+  const log = [];
+  const rec = (type) => (e) => {
+    log.push({
+      type,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      screenX: e.screenX,
+      screenY: e.screenY,
+      captured,
+      buttons: e.buttons,
+      target: String(e.target?.localName || e.target?.nodeName),
+      leftW: R(leftB).w,
+      resizerX: R(resizer).x,
+      rightW: R(rightB).w,
+      leftGrow: leftB.style.flexGrow,
+      rightGrow: rightB.style.flexGrow,
+      cls: String(resizer.className),
+      sameNode: !!(e.target && e.target.isSameNode && e.target.isSameNode(resizer)),
+      at: Date.now(),
+    });
+  };
+  // 真实 mousedown 落在分隔条上时，立刻对其设置指针捕获，然后观察后续
+  // 事件的目标与坐标是否都回归 chrome 文档——这决定修复方案能否只靠捕获。
+  let captured = false;
+  const tryCapture = (e) => {
+    if (captured) return;
+    if (e.type !== "mousedown") return;
+    if (!e.target || !e.target.isSameNode || !e.target.isSameNode(resizer)) return;
+    try {
+      resizer.setPointerCapture(e.pointerId ?? 1);
+      captured = resizer.hasPointerCapture?.(e.pointerId ?? 1) ?? false;
+    } catch (err) {
+      captured = false;
+    }
+  };
+  const onMove = rec("mousemove");
+  const onDown = rec("mousedown");
+  const onUp = rec("mouseup");
+  // 只挂 win：插件的拖拽处理函数就监听在 state.win 上，挂多了会把
+  // 只到达 browser 元素的事件也记下来，混淆「插件到底看到没看到」。
+  // 同时挂 capture 与 bubble 两种：插件自己的处理函数是 bubble 阶段，
+  // 若只有 capture 收到事件，就说明真实拖拽的事件根本没走完冒泡。
+  const onMoveB = rec("mousemove(bubble)");
+  const onDownB = rec("mousedown(bubble)");
+  const onUpB = rec("mouseup(bubble)");
+  win.addEventListener("mousedown", tryCapture, true);
+  win.addEventListener("mousemove", onMove, true);
+  win.addEventListener("mousedown", onDown, true);
+  win.addEventListener("mouseup", onUp, true);
+  win.addEventListener("mousemove", onMoveB, false);
+  win.addEventListener("mousedown", onDownB, false);
+  win.addEventListener("mouseup", onUpB, false);
+  const start = {
+    window: {
+      w: win.innerWidth,
+      h: win.innerHeight,
+      dpr: win.devicePixelRatio,
+      screenX: win.mozInnerScreenX,
+      screenY: win.mozInnerScreenY,
+    },
+    hbox,
+    resizerX: R(resizer).x,
+    leftW: R(leftB).w,
+    rightW: R(rightB).w,
+    resizerCount: doc.querySelectorAll(".ztransplit-split-resizer").length,
+    allResizers: Array.from(doc.querySelectorAll(".ztransplit-split-resizer")).map((el) => ({
+      x: R(el).x,
+      parent: el.parentNode ? el.parentNode.localName : null,
+      inDoc: doc.contains(el),
+      sameAsQueried: el.isSameNode(resizer),
+    })),
+  };
+  // Self-test: a synthetic event must be caught by the very same listeners, so
+  // a zero-event log can only mean the real pointer never reached chrome.
+  {
+    let caught = 0;
+    const selfRec = () => {
+      caught++;
+    };
+    win.addEventListener("mousemove", selfRec, true);
+    win.dispatchEvent(
+      new win.MouseEvent("mousemove", {
+        bubbles: true,
+        cancelable: true,
+        view: win,
+        buttons: 1,
+        clientX: Math.round(hbox.x + hbox.w / 2),
+        clientY: Math.round(hbox.y + hbox.h / 2),
+      }),
+    );
+    win.removeEventListener("mousemove", selfRec, true);
+    start.selfTestCaught = caught;
+  }
+  await Zotero.Promise.delay(ms);
+  win.removeEventListener("mousemove", onMove, true);
+  win.removeEventListener("mousedown", onDown, true);
+  win.removeEventListener("mouseup", onUp, true);
+  win.removeEventListener("mousemove", onMoveB, false);
+  win.removeEventListener("mousedown", onDownB, false);
+  win.removeEventListener("mouseup", onUpB, false);
+  return { start, eventCount: log.length, log, captured, end: { leftW: R(leftB).w, resizerX: R(resizer).x, rightW: R(rightB).w } };
+};
+
+/**
+ * dividerZoom — watch both panes' zoom while the divider is dragged, to see
+ * whether the sync engine's zoom mirroring fires and re-scales a pane (which
+ * would look to the user like the panel "jumping").
+ *   arg: { step, dwell }
+ */
+PROBE_CMDS.dividerZoom = async function (arg) {
+  const opts = parseArg(arg);
+  const step = Number(opts.step) || 40;
+  const dwell = Number(opts.dwell) || 60;
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const resizer = visibleResizer(doc);
+  if (!resizer) return { error: "no .ztransplit-split-resizer" };
+  const mainHbox = resizer.parentNode;
+  const browsers = Array.from(mainHbox.children).filter(
+    (c) => c.localName === "browser",
+  );
+  const readers = browsers.map((b) =>
+    (Zotero.Reader._readers || []).find((r) => r._iframe === b),
+  );
+  const zoomOf = (i) => {
+    try {
+      const w =
+        readers[i]?._internalReader?._primaryView?._iframeWindow
+          ?.wrappedJSObject ??
+        readers[i]?._internalReader?._primaryView?._iframeWindow;
+      const v = w?.PDFViewerApplication?.pdfViewer;
+      return {
+        mode: v?.currentScaleValue ?? null,
+        scale: v?.currentScale ?? null,
+      };
+    } catch (e) {
+      return { mode: null, scale: null, err: String(e) };
+    }
+  };
+  const R = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: +r.x.toFixed(1), w: +r.width.toFixed(1) };
+  };
+  const hbox = R(mainHbox);
+  const y = Math.round(
+    mainHbox.getBoundingClientRect().y +
+      mainHbox.getBoundingClientRect().height / 2,
+  );
+  const fire = (type, el, clientX, buttons) =>
+    el.dispatchEvent(
+      new win.MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: win,
+        button: 0,
+        buttons,
+        clientX,
+        clientY: y,
+        screenX: clientX,
+        screenY: y,
+      }),
+    );
+  const snap = (label) => ({
+    label,
+    leftW: R(browsers[0]).w,
+    rightW: R(browsers[1]).w,
+    leftZoom: zoomOf(0),
+    rightZoom: zoomOf(1),
+  });
+
+  const out = { before: snap("before") };
+  const xs = [];
+  for (let x = Math.round(hbox.x + hbox.w * 0.2); x <= hbox.x + hbox.w * 0.8; x += step) {
+    xs.push(x);
+  }
+  fire("mousedown", resizer, xs[0], 1);
+  out.during = [];
+  for (const x of xs) {
+    fire("mousemove", win, x, 1);
+    await Zotero.Promise.delay(dwell);
+    out.during.push(snap("during@" + x));
+  }
+  fire("mouseup", win, xs[xs.length - 1], 0);
+  out.afterDrag = snap("afterDrag");
+  await Zotero.Promise.delay(400);
+  out.after400 = snap("after400ms");
+  await Zotero.Promise.delay(1600);
+  out.after2000 = snap("after2000ms");
+  return out;
+};
+
+/**
+ * hitTest — what does Gecko's own hit-testing say is under a set of client
+ * points? Real mouse input is delivered to whatever this returns, so a
+ * divider that is covered by another element explains a drag that never
+ * starts. Also reports pointer-events and stacking context of each hit.
+ *   arg: { points: [[x,y],...] }
+ */
+PROBE_CMDS.hitTest = async function (arg) {
+  const opts = parseArg(arg);
+  const win = Zotero.getMainWindow();
+  const doc = win.document;
+  const resizer = visibleResizer(doc);
+  if (!resizer) return { error: "no .ztransplit-split-resizer" };
+  const mainHbox = resizer.parentNode;
+  const browsers = Array.from(mainHbox.children).filter(
+    (c) => c.localName === "browser",
+  );
+  const R = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
+  };
+  const hbox = R(mainHbox);
+  const res = R(resizer);
+  const y = Math.round(res.y + res.h / 2);
+  const describe = (el) => {
+    if (!el) return null;
+    const cs = win.getComputedStyle(el);
+    return {
+      tag: el.localName,
+      id: el.id || null,
+      cls: String(el.className || "").slice(0, 80),
+      rect: R(el),
+      pointerEvents: cs.pointerEvents,
+      position: cs.position,
+      zIndex: cs.zIndex,
+      visibility: cs.visibility,
+      opacity: cs.opacity,
+      isResizer: el === resizer,
+      isBrowser: browsers.includes(el),
+    };
+  };
+  const pts = opts.points || [
+    [Math.round(res.x + 2), y],
+    [Math.round(res.x), y],
+    [Math.round(hbox.x + 10), y],
+    [Math.round(hbox.x + hbox.w - 10), y],
+    [Math.round(hbox.x + hbox.w / 2), y],
+  ];
+  return {
+    hbox,
+    resizer: res,
+    resizerStyle: resizer.getAttribute("style"),
+    resizerClass: String(resizer.className),
+    points: pts.map(([x, yy]) => {
+      let hit = null;
+      let err = null;
+      try {
+        hit = doc.elementFromPoint(x, yy);
+      } catch (e) {
+        err = String(e);
+      }
+      return { x, y: yy, hit: describe(hit), err };
+    }),
+    // What covers the resizer's own box?
+    resizerStack: (() => {
+      const out = [];
+      const cx = Math.round(res.x + res.w / 2);
+      const cy = Math.round(res.y + res.h / 2);
+      let el = doc.elementFromPoint(cx, cy);
+      let guard = 0;
+      while (el && guard++ < 12) {
+        out.push(describe(el));
+        el = el.parentElement;
+      }
+      return out;
+    })(),
+  };
+};
+
+/**
+ * paneItems — what the split view actually shows.
+ *
+ * The split tab's title is "{left title} | {right title}" (see
+ * splitview-tab-title in the FTL), so it names both panes directly. That is
+ * the definitive check for "one split per item, right pane = latest
+ * translation": a repro item holding an original plus two translations of
+ * different ages must show the original on the left and the NEWER
+ * translation on the right, and only ONE reader tab must exist.
+ */
+PROBE_CMDS.paneItems = async function () {
+  const { Zotero_Tabs } = probeWin();
+  const doc = Zotero.getMainWindow().document;
+  const tabs = (Zotero_Tabs._tabs || []).map((t) => ({
+    id: t.id,
+    type: t.type,
+    title: t.title,
+  }));
+  return {
+    resizerCount: doc.querySelectorAll(".ztransplit-split-resizer").length,
+    readerTabs: tabs.filter((t) => t.type === "reader").length,
+    tabs,
+  };
+};
+
+/**
+ * splitTriple — the definitive repro: one item holding an original and TWO
+ * translations of different ages. The split entry must open ONE reader tab
+ * whose title reads "Original | Translated (zh-CN) NEW".
+ */
+PROBE_CMDS.splitTriple = async function () {
+  const dataDir = Zotero.DataDirectory.dir;
+  const FIXDIR = PathUtils.join("D:", "github_code", "z-transplit", "scripts", "qa", "fixtures");
+  const step = async (label, fn) => {
+    try {
+      return { label, ok: true, value: await fn() };
+    } catch (e) {
+      return { label, ok: false, error: String(e) };
+    }
+  };
+  const copies = [];
+  for (const [n, src] of [
+    ["triple-a.pdf", PathUtils.join(FIXDIR, "attention-reading.pdf")],
+    ["triple-b.pdf", PathUtils.join(FIXDIR, "reading-brain.pdf")],
+  ]) {
+    const dest = PathUtils.join(dataDir, n);
+    copies.push(await step("copy " + n, async () => {
+      await IOUtils.copy(src, dest);
+      return dest;
+    }));
+  }
+  const item = new Zotero.Item("journalArticle");
+  item.setField("title", "QA triple pair");
+  const itemID = await item.saveTx();
+  const specs = [
+    ["Original", "triple-a.pdf"],
+    ["Translated (zh-CN) OLD", "triple-b.pdf"],
+    ["Translated (zh-CN) NEW", "triple-a.pdf"],
+  ];
+  const made = [];
+  for (const [title, file] of specs) {
+    made.push(await step("import " + title, async () => {
+      const a = await Zotero.Attachments.importFromFile({
+        file: PathUtils.join(dataDir, file), parentItemID: itemID, title,
+      });
+      return a.id;
+    }));
+  }
+  const { ZoteroPane } = probeWin();
+  ZoteroPane.selectItem(itemID);
+  await Zotero.Promise.delay(600);
+  const entry = Zotero.getMainWindow().document.getElementById("ztransplit-itemmenu-split");
+  if (!entry) return { error: "no ztransplit-itemmenu-split", copies, made };
+  entry.doCommand();
+  const t0 = Date.now();
+  let ok = false;
+  while (Date.now() - t0 < 45000) {
+    await Zotero.Promise.delay(500);
+    if (Zotero.getMainWindow().document.querySelector(".ztransplit-split-resizer")) { ok = true; break; }
+  }
+  await Zotero.Promise.delay(3000);
+  const tabs = (probeWin().Zotero_Tabs._tabs || []).map((t) => ({ id: t.id, type: t.type, title: t.title }));
+  return {
+    copies,
+    made,
+    resizerAppeared: ok,
+    readerTabs: tabs.filter((t) => t.type === "reader").length,
+    readerTabTitles: tabs.filter((t) => t.type === "reader").map((t) => t.title),
+    siblings: (Zotero.Items.get(itemID).getAttachments() || []).map((id) => {
+      const it = Zotero.Items.get(id);
+      return {
+        id,
+        title: typeof it?.getField === "function" ? it.getField("title") : null,
+        dateAdded: it?.dateAdded ?? null,
+      };
+    }),
+  };
+};
+
+// ── driver: poll command.json ───────────────────────────────────────────────
+var probeTimer = null;
 // ── driver: poll command.json ───────────────────────────────────────────────
 var probeTimer = null;
 
