@@ -17,6 +17,18 @@
 export type SplitSide = "left" | "right";
 
 /**
+ * Width of the split-view divider in CSS pixels. Must stay in sync with the
+ * rules injected by ensureSplitResizerStyle() in splitViewFactory.ts.
+ */
+export const RESIZER_WIDTH = 5;
+
+/**
+ * Minimum width of a single pane in CSS pixels. Must stay in sync with the
+ * `min-width` createReaderBrowser() sets in readerPaneAdapter.ts.
+ */
+export const MIN_PANE_WIDTH = 200;
+
+/**
  * Per-tab state for an open split view. All event listeners and timeouts are
  * tracked so cleanupTabResources() can remove them without leaks (XUL leaks
  * cause callbacks to fire after tab close → crashes).
@@ -33,9 +45,6 @@ export interface SplitTabState {
   resizer: any;
   leftAdapter: ReaderPaneAdapter | null;
   rightAdapter: ReaderPaneAdapter | null;
-
-  /** Current split ratio in [0.1, 0.9] — left share of total width. */
-  splitRatio: number;
 
   // ── Scroll sync state ──
   /** True while dragging the resizer / zooming — pauses sync. */

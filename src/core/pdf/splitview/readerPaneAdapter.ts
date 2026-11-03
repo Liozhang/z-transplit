@@ -21,6 +21,7 @@
  */
 
 import type { ReaderPaneAdapter, ReaderPaneAttachOptions } from "./types";
+import { MIN_PANE_WIDTH } from "./types";
 import { buildReaderConfig, cloneIntoConfig } from "./readerConfig";
 import { getString } from "../../../utils/locale";
 import { safeDebug } from "../../../utils/logger";
@@ -40,7 +41,7 @@ export function createReaderBrowser(win: Window): any {
   browser.setAttribute("transparent", "true");
   browser.setAttribute("src", "resource://zotero/reader/reader.html");
   browser.style.flex = "1 1 0";
-  browser.style.minWidth = "200px";
+  browser.style.minWidth = `${MIN_PANE_WIDTH}px`;
   browser.style.maxWidth = "none";
   browser.style.overflow = "hidden";
   browser.style.boxSizing = "border-box";

@@ -139,7 +139,6 @@ function makeSyncState(overrides: Partial<SplitTabState> = {}): SplitTabState {
     resizer: null,
     leftAdapter: null,
     rightAdapter: null,
-    splitRatio: 0.5,
     syncPaused: false,
     mirrorGuard: false,
     syncScheduled: false,

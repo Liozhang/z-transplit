@@ -32,7 +32,13 @@
  * @module core/pdf/splitview/splitViewFactory
  */
 
-import type { SplitTabState, ReaderPaneAdapter, SplitSide } from "./types";
+import {
+  MIN_PANE_WIDTH,
+  RESIZER_WIDTH,
+  type ReaderPaneAdapter,
+  type SplitSide,
+  type SplitTabState,
+} from "./types";
 import { getString } from "../../../utils/locale";
 import { getPrefDynamic } from "../../../utils/prefs";
 import { createReaderBrowser, ReaderPane } from "./readerPaneAdapter";
@@ -80,6 +86,10 @@ export {
   getSplitTabState,
   isSplitViewTab,
 } from "./splitViewCleanup";
+// 仅供测试：分隔条拖拽的监听装配（消费者：
+// tests/unit/core/pdf/splitview/splitResizer.dom.test.ts）。
+// resolveLeftWidth 已在声明处直接 export，此处不再重复导出。
+export { installResizer };
 
 /** This addon's ID (package.json config), with a runtime fallback. */
 function addonID(): string {
@@ -202,17 +212,18 @@ async function populateSplitPanes(
   const leftBrowser = createReaderBrowser(win);
   const rightBrowser = createReaderBrowser(win);
 
-  // Resizer: 5px fixed flex item between the browsers. Visual styling (width,
-  // cursor, hover/drag feedback) comes from the injected document rules in
-  // ensureSplitResizerStyle; the element only carries the class hooks.
+  // Resizer: a fixed-width flex item between the browsers. Visual styling
+  // (width, cursor, hover/drag feedback) comes from the injected document rules
+  // in ensureSplitResizerStyle; the element only carries the class hooks.
   ensureSplitResizerStyle(win.document);
   const resizer = win.document.createXULElement("box");
   resizer.className = "ztransplit-split-resizer";
 
-  // Initial 50/50 split. flexGrow = ratio*1000, flexBasis = 0.
-  const initialRatio = 0.5;
-  leftBrowser.style.flexGrow = String(initialRatio * 1000);
-  rightBrowser.style.flexGrow = String((1 - initialRatio) * 1000);
+  // Initial 50/50 split. With flexBasis 0 the flexGrow value IS the pane's
+  // pixel width (see installResizer), so any pair summing to the same total
+  // yields a 50/50 layout — 500/500 is the half of the default 1000 baseline.
+  leftBrowser.style.flexGrow = "500";
+  rightBrowser.style.flexGrow = "500";
   leftBrowser.style.flexBasis = "0";
   rightBrowser.style.flexBasis = "0";
 
@@ -231,7 +242,6 @@ async function populateSplitPanes(
     resizer,
     leftAdapter: new ReaderPane(leftItem),
     rightAdapter: new ReaderPane(rightItem),
-    splitRatio: initialRatio,
     syncPaused: false,
     mirrorGuard: false,
     syncScheduled: false,
@@ -341,9 +351,9 @@ function ensureSplitResizerStyle(doc: any): void {
     style.id = SPLIT_RESIZER_STYLE_ID;
     style.textContent = `
 .ztransplit-split-resizer {
-  width: 5px;
-  min-width: 5px;
-  max-width: 5px;
+  width: ${RESIZER_WIDTH}px;
+  min-width: ${RESIZER_WIDTH}px;
+  max-width: ${RESIZER_WIDTH}px;
   cursor: col-resize;
   background: var(--fill-quinary, rgba(127, 127, 127, 0.12));
   transition: background-color 150ms ease;
@@ -363,26 +373,55 @@ function ensureSplitResizerStyle(doc: any): void {
   }
 }
 
-/** Wire the 5px resizer box to drag-adjust the split ratio. */
+/** Delay before scroll mirroring resumes after a divider drag ends. */
+const RESIZER_RESUME_MS = 100;
+
+/**
+ * Clamp the left pane's pixel width for a divider drag.
+ *
+ * `startLeftWidth` is the measured left-pane width at mousedown, `deltaX` the
+ * pointer's horizontal travel since then, and `total` the width both panes
+ * share (the hbox width minus the divider itself). The return value doubles as
+ * the left pane's flexGrow: with flexBasis 0 the flexGrow number IS the pane's
+ * pixel width, and the two panes' flexGrow values always sum to `total`, so the
+ * laid-out width equals the returned number exactly.
+ *
+ * `total` smaller than two minimum panes (an extremely narrow window) would
+ * otherwise put the upper bound below the lower one and invert the clamps,
+ * collapsing the left pane to zero — hence the Math.max on the upper bound.
+ */
+export function resolveLeftWidth(
+  startLeftWidth: number,
+  deltaX: number,
+  total: number,
+  minPane: number = MIN_PANE_WIDTH,
+): number {
+  const upper = Math.max(minPane, total - minPane);
+  return Math.min(upper, Math.max(minPane, startLeftWidth + deltaX));
+}
+
+/**
+ * Wire the divider box so dragging it resizes the two panes.
+ *
+ * The pointer's horizontal travel is measured from `screenX`, never `clientX`.
+ * Once the pointer leaves the divider and moves over a pane, the mouse events
+ * that reach this chrome window are retargeted out of the reader's content
+ * document, and their `clientX` belongs to THAT document's coordinate space
+ * (measured on a real machine: values jumping between 20 and 340 while the
+ * pointer actually travelled 640→880 in chrome coordinates, an error of 600+
+ * pixels). `screenX` is a screen coordinate and stays exact across the process
+ * boundary (measured: 638, 663, 688 … 888, one value per pointer step).
+ *
+ * Using the travel since mousedown rather than an absolute position also makes
+ * the result independent of the window's position, the display scaling, and
+ * where inside the divider the pointer happened to grab it.
+ */
 function installResizer(state: SplitTabState): void {
   let dragging = false;
+  let startScreenX = 0;
+  let startLeftWidth = 0;
 
-  const onMouseDown = (e: any) => {
-    dragging = true;
-    state.resizer.classList.add("dragging");
-    e.preventDefault();
-  };
-  const onMouseMove = (e: any) => {
-    if (!dragging) return;
-    const rect = state.mainHbox.getBoundingClientRect();
-    let ratio = (e.clientX - rect.left) / rect.width;
-    ratio = Math.min(0.9, Math.max(0.1, ratio)); // clamp [0.1, 0.9]
-    state.splitRatio = ratio;
-    state.leftBrowser.style.flexGrow = String(ratio * 1000);
-    state.rightBrowser.style.flexGrow = String((1 - ratio) * 1000);
-    state.syncPaused = true; // pause sync while dragging
-  };
-  const onMouseUp = () => {
+  const endDrag = () => {
     if (!dragging) return;
     dragging = false;
     state.resizer.classList.remove("dragging");
@@ -391,17 +430,49 @@ function installResizer(state: SplitTabState): void {
     trackTimeout(
       state,
       () => {
+        if (state.isCleaningUp) return;
         state.syncPaused = false;
         primeSyncBaselines(state);
       },
-      100,
+      RESIZER_RESUME_MS,
     );
+  };
+
+  const onMouseDown = (e: any) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    startScreenX = e.screenX;
+    startLeftWidth = state.leftBrowser.getBoundingClientRect().width;
+    state.resizer.classList.add("dragging");
+    // Pause sync for the whole drag: a pane resize reflows the viewer and the
+    // resulting scroll events must not be mirrored.
+    state.syncPaused = true;
+  };
+
+  const onMouseMove = (e: any) => {
+    if (!dragging) return;
+    // A missed mouseup (pointer released outside the window) would otherwise
+    // leave `dragging` true forever, resizing the panes on every later move
+    // even with no button held.
+    if (!e.buttons) {
+      endDrag();
+      return;
+    }
+    const total =
+      state.mainHbox.getBoundingClientRect().width - RESIZER_WIDTH;
+    const left = resolveLeftWidth(
+      startLeftWidth,
+      e.screenX - startScreenX,
+      total,
+    );
+    state.leftBrowser.style.flexGrow = String(left);
+    state.rightBrowser.style.flexGrow = String(total - left);
   };
 
   addTrackedListener(state, state.resizer, "mousedown", onMouseDown);
   // move/up on the window so dragging beyond the resizer still tracks.
   addTrackedListener(state, state.win, "mousemove", onMouseMove);
-  addTrackedListener(state, state.win, "mouseup", onMouseUp);
+  addTrackedListener(state, state.win, "mouseup", endDrag);
 }
 
 /**
