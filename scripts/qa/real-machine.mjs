@@ -22,7 +22,13 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const QA_ROOT = "D:\\zt-qa";
+// QA 通道根目录，可用 QA_ROOT 环境变量覆盖以实现多会话隔离。真机测试台的
+// 路径原本是硬编码的，本仓库与上游 leadero 共用同一套默认路径时，两个会话的
+// command.json / result.json 会互相踩（实测：命令发出后返回的是对方会话的
+// 结果）。私有根目录名请避开 "zt-qa" 子串——其他会话的 shoot 按 '*zt-qa*'
+// 匹配进程，不含该子串的实例不会被误杀；本文件的 shoot 也只匹配当前
+// QA_ROOT，不会碰别人的实例。
+const QA_ROOT = process.env.QA_ROOT || "D:\\zt-qa";
 const PROBE_ID = "ztransplit-qa-probe@zotero.org";
 const ADDON_ID = "ztransplit@zotero.org";
 const ZOTERO_BIN = process.env.ZOTERO_BIN || "D:\\zotero10\\zotero.exe";
@@ -56,12 +62,14 @@ function stopZotero() {
 
 /** Kill only the QA instance(s): every Zotero whose command line points at
  *  the QA profile/data dir. A tree-kill from the recorded root pid misses
- *  content processes that were (re)spawned after the root died. */
+ *  content processes that were (re)spawned after the root died. Matched on
+ *  the CURRENT QA_ROOT so an isolated run never kills another session's
+ *  instance (and vice versa). */
 function stopQaZotero() {
   try {
     const ps =
       `Get-CimInstance Win32_Process -Filter "name='zotero.exe'" | ` +
-      `Where-Object { $_.CommandLine -like '*zt-qa*' } | ForEach-Object { $_.ProcessId }`;
+      `Where-Object { $_.CommandLine -like '*${QA_ROOT}*' } | ForEach-Object { $_.ProcessId }`;
     const out = execSync(
       `powershell -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`,
       { encoding: "utf8" },
@@ -115,6 +123,18 @@ function writeProxyAddon(id, sourceDir) {
   fs.writeFileSync(path.join(extensionsDir, id), sourceDir, "utf8");
 }
 
+/**
+ * Rewrite the hardcoded default QA root ("D:\\zt-qa", source-escaped) inside a
+ * probe copy to the current QA_ROOT. No-op when QA_ROOT IS the default — the
+ * replacement is then the identity, so shared-channel runs are unaffected.
+ */
+function patchProbePaths(file) {
+  if (!fs.existsSync(file)) return;
+  const text = fs.readFileSync(file, "utf8");
+  const escaped = QA_ROOT.replace(/\\/g, "\\\\");
+  fs.writeFileSync(file, text.split("D:\\\\zt-qa").join(escaped), "utf8");
+}
+
 /** Directory install: a real copy at extensions/<id>/ (as a user install is). */
 function writeDirAddon(id, sourceDir) {
   const dest = path.join(extensionsDir, id);
@@ -132,19 +152,35 @@ function writeDirAddon(id, sourceDir) {
  */
 function buildProbeCopy() {
   const src = path.join(ROOT, ".scaffold", "build", "addon");
-  const dest = "D:\\zt-qa\\addon-under-test";
+  const dest = path.join(QA_ROOT, "addon-under-test");
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(src, dest, { recursive: true });
   fs.copyFileSync(
     path.join(ROOT, "scripts", "qa", "driver2", "probe.js"),
     path.join(dest, "content", "scripts", "probe.js"),
   );
+  // 追加探针（可选存在）：与 probe.js 同一个 scope 对象加载，只往 PROBE_CMDS
+  // 上挂额外命令。单独一个文件，避免改动 probe.js 本体——它可能带着其他
+  // QA 轮次未提交的改动，混进来会让 diff 分不清归属。
+  const extraProbe = path.join(ROOT, "scripts", "qa", "driver2", "probe-extra.js");
+  if (fs.existsSync(extraProbe)) {
+    fs.copyFileSync(
+      extraProbe,
+      path.join(dest, "content", "scripts", "probe-extra.js"),
+    );
+  }
+  // 隔离模式收尾：探针副本里硬编码的 D:\zt-qa 改写为当前 QA_ROOT。探针自己
+  // 轮询 command.json、落盘 result.json 用的就是硬编码路径，只改启动器不够。
+  // 改的是这份 QA 产物副本，scripts/qa/driver2 下的本体不动；QA_ROOT 为默认
+  // 值时替换是恒等的，行为零变化。
+  patchProbePaths(path.join(dest, "content", "scripts", "probe.js"));
+  patchProbePaths(path.join(dest, "content", "scripts", "probe-extra.js"));
   // Patch the bootstrap: after the addon's own startup, load the probe.
   const bootPath = path.join(dest, "bootstrap.js");
   const boot = fs.readFileSync(bootPath, "utf8");
   const patched = boot.replace(
     /await Zotero\.ZTransplit\.hooks\.onStartup\(\);/,
-    `await Zotero.ZTransplit.hooks.onStartup();\n  try {\n    const probe = ctx._probe = {};\n    Services.scriptloader.loadSubScript(\`\${rootURI}/content/scripts/probe.js\`, probe);\n    probe.startProbe();\n  } catch (e) {\n    Zotero.logError ? Zotero.logError("[Z-Transplit QA] probe failed: " + e) : Zotero.debug("probe failed: " + e);\n  }`,
+    `await Zotero.ZTransplit.hooks.onStartup();\n  try {\n    const probe = ctx._probe = {};\n    Services.scriptloader.loadSubScript(\`\${rootURI}/content/scripts/probe.js\`, probe);\n    Services.scriptloader.loadSubScript(\`\${rootURI}/content/scripts/probe-extra.js\`, probe);\n    probe.startProbe();\n  } catch (e) {\n    Zotero.logError ? Zotero.logError("[Z-Transplit QA] probe failed: " + e) : Zotero.debug("probe failed: " + e);\n  }`,
   );
   if (!patched.includes("startProbe")) {
     throw new Error("bootstrap patch failed — onStartup marker not found");
