@@ -109,6 +109,65 @@ function resolveAllSourcePdfAttachments(items: any[]): any[] {
   return out;
 }
 
+/**
+ * One source PDF per selected item, in selection order.
+ *
+ * The split entry used to feed resolveAllSourcePdfAttachments() into the
+ * per-source loop, so an item holding BOTH an original and its translation
+ * resolved two sources and opened TWO split views stacked on top of each
+ * other — the exact repro in issue #4 ("open an item containing two PDF
+ * attachments, launch split-screen comparison"). Only the topmost one
+ * answered the mouse, which read as "the divider jumps and behaves
+ * erratically".
+ *
+ * So the split path resolves at most one source per item: the item itself
+ * when it is a PDF (the user picked a file), otherwise the single best child
+ * attachment — a non-translated PDF preferred, newest first — so the original
+ * becomes the left pane and the latest translation the right one. Which
+ * translation that is stays runPipeline's job (findExistingTranslation).
+ */
+export function resolveSplitSources(items: any[]): any[] {
+  const out: any[] = [];
+  const seen = new Set<number>();
+  const isTranslation = translationTitleMatcher();
+  for (const item of items || []) {
+    if (!item) continue;
+    try {
+      if (item.isAttachment?.() && isPdfAttachment(item)) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          out.push(item);
+        }
+        continue;
+      }
+      const candidates: any[] = (item.getAttachments?.() || [])
+        .map((id: number) => (globalThis as any).Zotero?.Items?.get?.(id))
+        .filter(
+          (att: any) => att && isPdfAttachment(att) && !seen.has(att.id),
+        );
+      if (!candidates.length) continue;
+      // Prefer the original: a translation is the right pane's job, not the
+      // left one. Fall back to every candidate when the item holds nothing
+      // but translations.
+      const originals = candidates.filter(
+        (c) => !isTranslation(c.getField?.("title") || ""),
+      );
+      const pool = originals.length ? originals : candidates;
+      pool.sort((a, b) => {
+        const da = a?.dateAdded || "";
+        const db = b?.dateAdded || "";
+        return db < da ? -1 : db > da ? 1 : 0;
+      });
+      seen.add(pool[0].id);
+      out.push(pool[0]);
+    } catch (e) {
+      safeDebug(`[Z-Transplit] resolveSplitSources scan error: ${e}`);
+      /* not an item we understand — keep scanning */
+    }
+  }
+  return out;
+}
+
 /** Pick the first PDF attachment from the current selection. */
 function resolveSourcePdfAttachment(items: any[]): any | null {
   return resolveAllSourcePdfAttachments(items)[0] || null;
@@ -406,7 +465,7 @@ function injectIntoWindow(win: any): boolean {
       () => {
         const zp = win.ZoteroPane || win.wrappedJSObject?.ZoteroPane;
         const items: any[] = zp?.itemsView?.getSelectedItems?.() || [];
-        void runPipelines(win, resolveAllSourcePdfAttachments(items), "split");
+        void runPipelines(win, resolveSplitSources(items), "split");
       },
     );
     // Bilingual launch with visible feedback: the reader-menu path shows a
