@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.1] - 2026-11-03
+
+### Changed
+
+- The pinned OpenDataLoader PDF parsing engine was upgraded from 2.5.0 to
+  2.5.17, picking up seventeen upstream patch releases of parsing fixes that
+  reach the plugin's analysis: table header rows are now recognized (table
+  cells carry a header flag), adjacent text runs merge without phantom
+  spaces or stray NUL characters, text hidden in PDF structure-tree
+  artifact sequences stays out of the output, and the engine holds less
+  memory on long extraction runs. Before landing, the new engine was run
+  with the plugin's exact CLI arguments against six sample PDFs spanning
+  papers, CJK text, two-column and rotated layouts: the JSON schema is
+  compatible (the only additions are optional fields on table rows and
+  cells), the extracted body text is byte-identical on every sample, and
+  embedded figure extraction is unchanged. The Java requirement is
+  unchanged (Java 11+). The slim install fetches the engine on demand by
+  its recorded fingerprint, so the new version arrives on the first parse
+  after updating — no action needed.
+
 ## [1.16.0] - 2026-11-03
 
 ### Added
@@ -876,6 +896,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Releases before 1.2.0 predate this changelog and are not backfilled.
 
+[1.16.1]: https://github.com/Liozhang/z-transplit/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/Liozhang/z-transplit/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/Liozhang/z-transplit/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/Liozhang/z-transplit/compare/v1.14.0...v1.14.1
