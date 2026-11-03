@@ -3,6 +3,74 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Paragraph-level linking in the bilingual interleave view. Selecting text on
+  either side now highlights the matching block on the other side at the same
+  time: select an original block and its translation lights up beneath it,
+  select a translation and the original above it answers in kind. The highlight
+  is one shared tint plus a 3px bar on the leading edge, the same weight on both
+  sides, with no bolding and no size change; reference sections and horizontal
+  bars stay out of it. Changing the selection moves the single focus, clicking
+  empty space clears it, and keyboard selection behaves exactly like mouse
+  selection. Translation-only mode does not link (the original is hidden
+  wholesale, so there is no other side to correspond to), and switching modes
+  or ending the session strips the temporary attributes again — including the
+  ones placed on Zotero's own elements.
+
+### Fixed
+
+- Split-view divider dragging (issue #4). The report said "the divider jumps
+  when dragged right, but behaves normally when dragged left", and the real
+  cause is different from that description: event delivery was never broken — a
+  window-level bubble-phase `mousemove` listener receives every drag event,
+  including while the pointer is over a PDF pane. What broke was the coordinate
+  space: once the pointer enters a pane, the events that reach this chrome
+  window are retargeted out of the reader's content document and their `clientX`
+  belongs to THAT document's space (measured on a real machine: values jumping
+  between 20 and 340 while the pointer actually travelled 640→880 in chrome
+  coordinates, an error of 600+ pixels), while `screenX` stays exact (measured
+  638, 663, 688 … 888, one value per pointer step). Dragging right enters the
+  right pane, whose content origin sits at chrome ≈632, so the error exceeds
+  600px and the divider collapses or even runs backwards; dragging left enters
+  the left pane, whose origin is near the chrome origin, so the computed ratio
+  looks roughly right. That is the true source of the reported left/right
+  asymmetry. The drag now takes the `screenX` travel as its input and treats the
+  left pane's pixel width as the single source of truth, which also removes
+  three direction-independent defects: the ratio arithmetic ignored the
+  divider's own 5px, so the divider never coincided with the cursor (up to 4.5px
+  off); `min-width: 200px` against the hardcoded [0.1, 0.9] clamp left about
+  190px of dead travel at each end; and a swallowed `mouseup` left the drag
+  latched on, resizing the panes on every later mouse move.
+- Split comparison opens exactly one view per item. An item holding both an
+  original PDF and its translation used to resolve two sources, so the item
+  tree's split entry opened two split views stacked in the same tab deck, the
+  upper one covering the lower and answering every mouse event. Each item now
+  resolves at most one source PDF: the item's own PDF when it is one (the user
+  picked the file explicitly), otherwise a child attachment, preferring a
+  non-translation — the translation is the right pane's job — and taking the
+  newest, degrading to the newest when the item holds only translations.
+  Multi-select still opens one view per item. The right pane's choice is
+  unchanged: `findExistingTranslation` in `runPipeline` still decides it.
+- Translation failures now carry their reason instead of disappearing. Batch
+  translation never throws — it reports failure only through `failedIndices` —
+  and the engine's reason was dropped inside the batch function, so the
+  bilingual progress line could only show "Unknown error" (reproduced on a real
+  machine: an AI batch hit 429, all 95 paragraphs failed, and the progress line
+  said nothing but "Unknown error"). `BatchTranslateResult` gained an `error`
+  field and the per-paragraph fallback's reason now rides along with the
+  result — it is the direct cause of that paragraph's failure, so it takes
+  precedence over the batch-level reason — while `bilingualLauncher` records it
+  on the same success-clear / failure-set terms as the per-paragraph path. A 429
+  whose `Retry-After` asks for more than 120 seconds now ends in a dedicated
+  "the server asked to wait too long" message instead of throwing the raw
+  error: the selection panel used to show the whole HTTP 429 response body to
+  the user. Once rate limiting is confirmed the batch stops asking for the
+  remaining paragraphs instead of firing them one by one (reproduced: 7
+  paragraphs all went out within 20ms and all came back 429).
+
 ## [1.15.0] - 2026-10-30
 
 ### Added
