@@ -64,12 +64,17 @@ jar 更新后必须跑 `npm run check:jar`（与 `PROVENANCE.json` 的 sha256 �
   界面文案已由 Fluent 语言包按 Zotero 语言切换，发布说明不再做本地化。
 - 引用代码里的原始字面量（例如正则匹配的中文错误文本）可保留原文，其余
   行文必须是英文。
-- 发布前在 CHANGELOG.md 顶部按 `[x.y.z] - YYYY-MM-DD` 格式新增英文段落，
-  再同步 package.json 的 `version` 并打 `vX.Y.Z` 标签。
+- 功能与修复提交在 CHANGELOG.md 顶部维护 `## [Unreleased]` 节（英文，
+  Keep a Changelog 的 Added / Changed / Fixed / Removed 分节）；发布时把这个
+  标题改成 `[x.y.z] - YYYY-MM-DD`，再同步 package.json 的 `version` 并打
+  `vX.Y.Z` 标签。只记用户可见的改动，内部开发工具（真机测试台、脚本）不进
+  发布说明。
 - `zotero-plugin.config.ts` 已把 `release.changelog` 配置为
   `node scripts/release-notes.mjs`：走 `npx zotero-plugin release`（需要
   GITHUB_TOKEN）时，GitHub Release 说明自动取自 CHANGELOG.md 当前版本段落，
   不会用中文提交信息生成。手工发布时同样以 CHANGELOG.md 对应段落为正文。
+  该脚本按 package.json 的版本号取段，`## [Unreleased]` 在版本号改动前不会被
+  取走。
 - 推送 `v*` 标签后由 CI（`.github/workflows/ci.yml` 的 release 任务）自动
   完成发布：门禁通过 → 构建精简版与完整版 XPI → `scripts/make-update-
   manifests.mjs` 生成自动更新清单 → 创建 GitHub Release 并上传 → 把清单
@@ -165,6 +170,16 @@ node scripts/qa/real-machine.mjs shoot                   # 结束
 `Zotero.ZTransplit.odlJar.getStatus`）、`odlInstall`（解析组件下载/修复入口）、
 `odlHashProbe`（宿主 WebCrypto 大文件哈希探测）、`odlZipApi`（nsIZipReader
 真实接口面与 findEntries/extract 行为探查）。
+
+多会话隔离：通道根目录默认 `D:\zt-qa`，可用环境变量 `QA_ROOT` 覆盖（启动器与
+探针副本同步改写，`shoot` 只结束当前根目录下的实例）。私有根目录名避开 `zt-qa`
+子串，即可与上游 leadero 共用同一套默认路径而互不干扰。
+
+探针补充命令：`scripts/qa/driver2/probe-extra.js` 存在时，启动器会在 `probe.js`
+之后、`startProbe()` 之前用同一个作用域加载它，直接往既有 `PROBE_CMDS` 上挂命令。
+单独一个文件是为了不改动 `probe.js` 本体——它可能带着其他轮次未提交的改动。
+现有补充命令针对 Zotero 10 SDT 阅读模式的 iframe 文档（`probe.js` 的 `selectText`
+选的是 pdf.js 文本层，SDT 模式下该层被隐藏，选不中）。
 
 排版/引擎相关的真机发现都建议带上 `docs/screenshots/` 截图归档。
 
