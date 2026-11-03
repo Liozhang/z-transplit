@@ -372,6 +372,7 @@ export type FluentMessageId =
   | 'translation-error-pdf-translate-failed'
   | 'translation-error-pdf-translate-missing'
   | 'translation-error-rate-limited'
+  | 'translation-error-rate-limited-wait-too-long'
   | 'translation-error-unknown'
   | 'wordcards-clear'
   | 'wordcards-clear-confirm'

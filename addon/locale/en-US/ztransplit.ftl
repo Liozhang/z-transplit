@@ -38,6 +38,7 @@ translation-error-ai-empty = AI translation returned an empty result
 translation-error-ai-failed = AI translation failed
 translation-error-ai-url-missing = AI translation API URL is not configured
 translation-error-rate-limited = The translation service is rate-limiting requests: waited as instructed and retried once, still rejected. Try again later or lower the batch translation concurrency.
+translation-error-rate-limited-wait-too-long = The translation service is rate-limiting requests: the server asked for a wait longer than 120 seconds, so this attempt was abandoned. Try again later or lower the batch translation concurrency.
 
 ## AI engine prompt template rejections (src/core/translation/promptTemplate.ts)
 translation-error-ai-prompt-too-long = The AI prompt template is too long (at most 4000 characters).

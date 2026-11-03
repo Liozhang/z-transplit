@@ -688,10 +688,10 @@ describe("custom engine (OpenAI-compatible)", () => {
 
     const handle = await createAIBatchTranslator("zh-CN", "en-US");
     const result = await handle.translate(["x", "y"]);
-    expect(result).toEqual({
-      translations: ["x", "y"],
-      failedIndices: [0, 1],
-    });
+    expect(result.translations).toEqual(["x", "y"]);
+    expect(result.failedIndices).toEqual([0, 1]);
+    // 兜底首段失败的原因上浮（非限流：两段都真实发过请求）。
+    expect(result.error).toContain("HTTP 500");
     // 2 (chatJson with its built-in retry) + 3 (manual retries) + 2 (per-paragraph)
     expect(h.fetchCalls).toHaveLength(7);
     // Per-paragraph level uses the single-paragraph formula prompt.
@@ -739,10 +739,11 @@ describe("custom engine (OpenAI-compatible)", () => {
 
     const handle = await createAIBatchTranslator("zh-CN", "en-US");
     const result = await handle.translate(["x", "y"]);
-    expect(result).toEqual({
-      translations: ["x", "y"],
-      failedIndices: [0, 1],
-    });
+    expect(result.translations).toEqual(["x", "y"]);
+    expect(result.failedIndices).toEqual([0, 1]);
+    // 兜底首段失败的原因（空结果）优先于批级原因（计数不符）上浮——
+    // 前者才是这段文字失败的直接原因。
+    expect(result.error).toBe("translation-error-custom-empty");
     // 1 structured attempt + 3 manual retries + 2 per-paragraph paragraphs,
     // each of which retries once at the escalated budget on its empty answer
     // (4 + 2×2 = 8).
@@ -962,7 +963,11 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
 
     const handle = await createAIBatchTranslator("zh-CN", "en-US");
     const result = await handle.translate(["x"]);
-    expect(result).toEqual({ translations: ["x"], failedIndices: [0] });
+    expect(result.translations).toEqual(["x"]);
+    expect(result.failedIndices).toEqual([0]);
+    // 失败原因随结果上浮：修复前原因在批量函数里被丢弃，双语进度行只能
+    // 显示「未知错误」（真机复现 2026-11-02）。
+    expect(result.error).toContain("HTTP 500");
     // Last call: the per-paragraph fallback carrying the rendered template.
     const last = JSON.parse(h.fetchCalls[h.fetchCalls.length - 1].body);
     expect(last.messages[0].role).toBe("user");
@@ -985,6 +990,56 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     );
     // 恰好两次请求：一次初试 + 一次退避重试。
     expect(h.fetchCalls).toHaveLength(2);
+  });
+
+  it("Retry-After beyond the wait ceiling fails with the wait-too-long message", async () => {
+    aiPrefs();
+    // 429 + Retry-After: 300（超过 120 秒上限）：不等待、不重试，以「等太久」
+    // 专门文案终态。修复前这里上抛原始错误，划词面板会把
+    // "HTTP 429: {响应体 JSON}" 整段显示给用户（真机复现 2026-11-02）。
+    route("chat/completions", () => ({
+      ...jsonResponse({ error: "slow down" }, false, 429, "Too Many Requests"),
+      headers: { get: (k: string) => (k === "retry-after" ? "300" : null) },
+    }));
+    const t = createTranslator("zh-CN");
+    await expect(t("hello", "zh-CN")).rejects.toThrow(
+      "translation-error-rate-limited-wait-too-long",
+    );
+    // 恰好一次请求：等太久，直接终态，不退避重试。
+    expect(h.fetchCalls).toHaveLength(1);
+  });
+
+  it("batch 429: the reason rides on the result and the fallback stops asking", async () => {
+    aiPrefs();
+    // Retry-After: 1：批间退避恰好 1 秒（响应头值是精确秒，无抖动），
+    // 测试不必真等指数退避。
+    route("chat/completions", () => ({
+      ...jsonResponse({ error: "quota" }, false, 429, "Too Many Requests"),
+      headers: { get: (k: string) => (k === "retry-after" ? "1" : null) },
+    }));
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["甲", "乙", "丙"]);
+    expect(result.failedIndices).toEqual([0, 1, 2]);
+    // 原因是限流专门文案而非原始 HTTP 报文——双语进度行直接显示它。
+    expect(result.error).toBe("translation-error-rate-limited");
+    // 4 次批量尝试——chatJson 自带一次内部重试（2 次）+ 3 次手动重试——
+    // 加兜底首段 1 次：确认限流后剩余段落不再发送。修复前 3 段会连发 3 个
+    // 请求（真机复现：7 段在 20 毫秒内全部打出，全部 429）。
+    expect(h.fetchCalls).toHaveLength(6);
+  });
+
+  it("batch 429 with an over-long Retry-After records the wait-too-long reason", async () => {
+    aiPrefs();
+    route("chat/completions", () => ({
+      ...jsonResponse({ error: "slow down" }, false, 429, "Too Many Requests"),
+      headers: { get: (k: string) => (k === "retry-after" ? "300" : null) },
+    }));
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["甲", "乙"]);
+    expect(result.failedIndices).toEqual([0, 1]);
+    expect(result.error).toBe("translation-error-rate-limited-wait-too-long");
+    // chatJson 自带一次内部重试（2 次）+ 兜底首段确认限流后停止（1 次）。
+    expect(h.fetchCalls).toHaveLength(3);
   });
 
   it("cache: repeat translations of the same text hit the endpoint once", async () => {

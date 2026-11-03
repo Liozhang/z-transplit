@@ -303,10 +303,10 @@ describe("createAIBatchTranslator / 批量链路", () => {
 
     const handle = await createAIBatchTranslator("zh-CN", "en");
     const result = await handle.translate(["one", "two"]);
-    expect(result).toEqual({
-      translations: ["one", "two"],
-      failedIndices: [0, 1],
-    });
+    expect(result.translations).toEqual(["one", "two"]);
+    expect(result.failedIndices).toEqual([0, 1]);
+    // 失败原因随结果上浮（兜底首段的 HTTP 503），不再被丢弃。
+    expect(result.error).toBe("HTTP 503: down");
   });
 });
 

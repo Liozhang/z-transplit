@@ -278,7 +278,19 @@ async function makeBatchTranslator(
 ): Promise<(texts: string[], signal?: AbortSignal) => Promise<{ translations: string[]; failedIndices: number[] }>> {
   if (supportsBatching()) {
     const handle = await createAIBatchTranslator(targetLanguage);
-    return (texts, signal) => handle.translate(texts, signal);
+    return async (texts, signal) => {
+      const result = await handle.translate(texts, signal);
+      // 批量路径的失败只以 failedIndices 返回、从不抛出——引擎原因必须在
+      // 这里记录，侧边栏进度行才有东西可显示（真机复现 2026-11-02：AI 批量
+      // 429 时 95 段全败，进度行只有「未知错误」，原因在批量函数里被丢弃）。
+      // 与逐段分支同一语义：整块成功即清空，有失败记最近一次原因。
+      if (result.failedIndices.length === 0) {
+        noteEngineError(null);
+      } else if (result.error) {
+        noteEngineError(result.error);
+      }
+      return result;
+    };
   }
   const translator = createTranslator(targetLanguage);
   return async (texts, signal) => {

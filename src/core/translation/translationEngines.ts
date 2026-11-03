@@ -77,6 +77,7 @@ import {
   rateLimitDelayMs,
   retryAfterFromHeaders,
   retryAfterOfError,
+  MAX_RETRY_AFTER_SEC,
 } from "../../utils/rateLimit";
 
 export type TranslationEngineType =
@@ -324,7 +325,14 @@ async function withRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
   } catch (e) {
     if (!isRateLimitError(e)) throw e;
     const delayMs = rateLimitDelayMs(retryAfterOfError(e), 1);
-    if (delayMs == null) throw e;
+    if (delayMs == null) {
+      // 服务器要求等待过久（超过 120 秒上限）：这也是限流的一种终态，用
+      // 专门文案说清「等太久，已放弃」——此前这里上抛原始错误，划词面板
+      // 会把 "HTTP 429: {响应体 JSON}" 整段显示给用户（真机复现 2026-11-02）。
+      throw new Error(getString("translation-error-rate-limited-wait-too-long"), {
+        cause: e,
+      });
+    }
     await new Promise((r) => setTimeout(r, delayMs));
     try {
       return await fn();
@@ -337,6 +345,25 @@ async function withRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
       throw retryError;
     }
   }
+}
+
+/**
+ * 失败原因的用户可见文案。
+ *
+ * 限流错误按实际形态转成两种专门文案之一——服务器要求等待过久（超过
+ * 120 秒上限，我们拒绝等待）与「已等待并重试仍被拒」——其余错误取自身
+ * 消息。批量结果的 error 字段会直达界面（双语进度行经 getLastEngineError、
+ * 划词面板经 pane-translate-error），不能把原始 HTTP 报文冒泡上去。
+ */
+function rateLimitAwareMessage(e: unknown): string {
+  if (isRateLimitError(e)) {
+    const retryAfterSec = retryAfterOfError(e);
+    if (retryAfterSec != null && retryAfterSec > MAX_RETRY_AFTER_SEC) {
+      return getString("translation-error-rate-limited-wait-too-long");
+    }
+    return getString("translation-error-rate-limited");
+  }
+  return toErrorMessage(e);
 }
 
 /**
@@ -1687,8 +1714,21 @@ export async function createAIBatchTranslator(
     // preserved + flagged on failure), so the chunk still completes.
     const translations: string[] = [];
     const failedIndices: number[] = [];
+    // 兜底同样要尊重限流：确认被限流后，剩余段落不再发送。对限流端点连发
+    // 只会加重拒绝（真机复现 2026-11-02：一个 7 段的块在批量重试预算用尽
+    // 后，7 个请求 20 毫秒内连续打出，全部 429）。与 Google 路径失败后粘性
+    // 走 Bing 是同一思想——限流是端点级状态，不是段落级状态。
+    let rateLimited = false;
+    // 兜底失败的首个原因：这段文字失败的直接原因，优先于批级原因上浮
+    // （批级可能是「JSON 不合规」这类与单段无关的内部细节）。
+    let fallbackReason: string | null = null;
     for (let i = 0; i < texts.length; i++) {
       if (signal?.aborted) throw new Error(CANCELLED);
+      if (rateLimited) {
+        translations.push(texts[i]);
+        failedIndices.push(i);
+        continue;
+      }
       try {
         const result = await executeWithIdleTimeout(
           () =>
@@ -1739,9 +1779,21 @@ export async function createAIBatchTranslator(
         if (isCancelled(e)) throw e;
         translations.push(texts[i]);
         failedIndices.push(i);
+        if (isRateLimitError(e)) rateLimited = true;
+        fallbackReason ??= rateLimitAwareMessage(e);
       }
     }
-    return { translations, failedIndices };
+    return {
+      translations,
+      failedIndices,
+      // 失败原因随结果上浮：批量失败只以 failedIndices 返回、从不抛出，
+      // 不带上原因的话调用方（双语进度行经 getLastEngineError）只能显示
+      // 「未知错误」——真机复现 2026-11-02：AI 批量 429 时 95 段全败，
+      // 进度行只有 "Unknown error"，原因在批量函数里被丢弃。
+      ...(failedIndices.length > 0
+        ? { error: fallbackReason ?? rateLimitAwareMessage(lastError) }
+        : {}),
+    };
   };
 
   return { translate, inputBudgetChars, outputBudgetChars };

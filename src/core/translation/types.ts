@@ -43,6 +43,14 @@ export interface BatchTranslateResult {
   translations: string[];
   /** Indices that failed and kept original text (empty if all succeeded). */
   failedIndices: number[];
+  /**
+   * Human-readable reason for the failures, when known. Rate-limit failures
+   * carry the localized wording, never the raw HTTP message — callers surface
+   * this verbatim (the bilingual progress line reads it through
+   * getLastEngineError), so it must already be user-facing. Absent when
+   * nothing failed or no reason was captured.
+   */
+  error?: string;
 }
 
 /**

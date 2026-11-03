@@ -19,6 +19,13 @@
  * @module utils/rateLimit
  */
 
+/**
+ * 「等待过久」的判定上限（秒）。服务器通过 Retry-After 要求比这更久的等待
+ * 时，调用方应把 429 作为终态处理。rateLimitDelayMs 的默认值与
+ * translationEngines 的限流文案分流共用这一个常量，避免两处阈值漂移。
+ */
+export const MAX_RETRY_AFTER_SEC = 120;
+
 export interface RateLimitDelayOptions {
   /**
    * Retry-After 超过此秒数视为「等待过久」，返回 null 让调用方直接终态。
@@ -68,7 +75,7 @@ export function rateLimitDelayMs(
   attempt: number,
   options: RateLimitDelayOptions = {},
 ): number | null {
-  const maxRetryAfterSec = options.maxRetryAfterSec ?? 120;
+  const maxRetryAfterSec = options.maxRetryAfterSec ?? MAX_RETRY_AFTER_SEC;
   if (retryAfterSec != null) {
     if (retryAfterSec > maxRetryAfterSec) return null;
     return retryAfterSec * 1000;
