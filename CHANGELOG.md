@@ -3,6 +3,48 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.17.0] - 2026-11-05
+
+### Fixed
+
+- Progress popups that stayed on screen after the work was done. Two separate
+  causes, both fixed. First, the parsing-component download popup never closed
+  itself: it only armed a close timer on the downloader's terminal phases, and
+  a fresh download ended at "verifying" — so after the first parse of a slim
+  install the popup sat in the corner of the main window until it was clicked.
+  The downloader now reports completion after a successful install. Second,
+  the bilingual reading popup came back from the dead: the interleave view
+  translates blocks lazily as the reader scrolls, so progress reports kept
+  arriving long after the entry point had printed its "ready" line and armed
+  its close timer, and each late report re-opened the popup the timer had just
+  closed — with no new timer, so it stayed open for the rest of the session.
+  Reports that arrive after the terminal line are now dropped instead.
+
+### Changed
+
+- Long-running operations now report progress on a single in-place row with
+  Zotero's own circular progress indicator filling up as the work proceeds,
+  instead of appending one text row per report. This applies to the bilingual
+  reading sessions (paragraphs translated), the PDF translation pipeline —
+  both the page-by-page phase used by the non-batching engines and the batch
+  phase (chunks translated) — the Java runtime download and the parsing
+  component download. A row per report used to stack dozens of near-identical
+  "x/y" lines: a 56-page document produced 56 of them, which could grow the
+  popup taller than the main window.
+- Every checkbox option in the settings pane is now on for a fresh install, so
+  a new user gets the full feature set instead of three features shipping
+  switched off. "Translate automatically when an item is opened",
+  "Use the structure tree to determine reading order" and "Return embedded
+  images" now default to on; "Enable text translation", "Record looked-up
+  words", "Enable OpenDataLoader parsing" and "Remove the original text of
+  translated paragraphs" were already on. Installations that already exist
+  keep whatever they had — a default only changes for users who never touched
+  that setting. The trade-offs documented in the pane now apply as defaults:
+  automatic translation sends one request per opened selection, the structure
+  tree adds parse time, and embedded images add parse time and memory (in the
+  default overlay rendering they are not drawn, because the source page
+  already carries the figures).
+
 ## [1.16.1] - 2026-11-03
 
 ### Changed
