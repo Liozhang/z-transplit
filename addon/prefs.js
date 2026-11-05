@@ -24,8 +24,11 @@
 // section then unregisters; the item-menu stays for re-enabling).
 pref("extensions.zotero.ztransplit.translate.enabled", true);
 // Translate automatically when a reader item/selection opens (needs
-// translate.enabled).
-pref("extensions.zotero.ztransplit.translate.auto", false);
+// translate.enabled). ON by default for the same reason as translate.enabled:
+// a fresh install should show the feature working without hunting for a
+// switch. The cost is one engine request per opened selection, so users on a
+// slow or metered connection can turn it off here or in the item pane.
+pref("extensions.zotero.ztransplit.translate.auto", true);
 // Upper bound of characters sent to the engine per request.
 pref("extensions.zotero.ztransplit.translate.maxChars", 10000);
 
@@ -99,12 +102,17 @@ pref("extensions.zotero.ztransplit.translate.glossary", "");
 pref("extensions.zotero.ztransplit.translate.targetLanguage", "");
 
 // OpenDataLoader parser options (src/core/pdf/OpenDataLoaderPdfClient.ts,
-// src/core/pdf/opendataloader-pdf-parser.ts). Defaults mirror leadero's.
+// src/core/pdf/opendataloader-pdf-parser.ts). enabled/tableEnable/timeout
+// mirror leadero's; useStructTree and returnImages deliberately differ from
+// leadero and ship ON, so a fresh install keeps multi-column reading order
+// and figures intact. Both cost parse time (struct tree on every document,
+// embedded images also on payload size and memory) — the settings pane
+// documents the trade-off and either can be turned off.
 pref("extensions.zotero.ztransplit.pdfParser.opendataloader.enabled", true);
 pref("extensions.zotero.ztransplit.pdfParser.opendataloader.tableEnable", "default");
-pref("extensions.zotero.ztransplit.pdfParser.opendataloader.useStructTree", false);
+pref("extensions.zotero.ztransplit.pdfParser.opendataloader.useStructTree", true);
 pref("extensions.zotero.ztransplit.pdfParser.opendataloader.timeout", 300);
-pref("extensions.zotero.ztransplit.pdfParser.opendataloader.returnImages", false);
+pref("extensions.zotero.ztransplit.pdfParser.opendataloader.returnImages", true);
 // 翻译前把已翻译段落的原文从 PDF 内容流中删除（替代白色遮罩）；失败自动回退遮罩
 pref("extensions.zotero.ztransplit.pdfParser.originalTextRemoval.enabled", true);
 
