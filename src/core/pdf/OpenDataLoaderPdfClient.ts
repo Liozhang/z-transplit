@@ -41,6 +41,7 @@ import { Semaphore } from "../../utils/Semaphore";
 import { debug as log, safeDebug } from "../../utils/logger";
 import { toErrorMessage } from "../../utils/error";
 import { getString } from "../../utils/locale";
+import { ProgressReporter } from "../../utils/progressWindow";
 
 /** Limits concurrent JVM processes to prevent OOM under parallel PDF parsing.
  *  Each JVM consumes ~200-400MB RSS; 2 is a safe ceiling for typical machines. */
@@ -115,14 +116,17 @@ function loadConfig(): OpenDataLoaderPdfConfig {
     tableMethod,
     readingOrder: "xycut",
     useStructTree:
-      (getPref("pdfParser.opendataloader.useStructTree") as boolean) ?? false,
+      (getPref("pdfParser.opendataloader.useStructTree") as boolean) ?? true,
     timeout: (getPref("pdfParser.opendataloader.timeout") as number) ?? 300,
     // returnImages pref now drives the jar's --image-output flag. When true,
     // emit base64 data URIs inline (so the JSON adapter can pick them up into
-    // PdfChartArea.imageDataUri for downstream rendering).
-    imageOutput: (getPref("pdfParser.opendataloader.returnImages") as boolean)
-      ? "embedded"
-      : "off",
+    // PdfChartArea.imageDataUri for downstream rendering). The fallback below
+    // mirrors the declared default in addon/prefs.js (on): only an explicit
+    // `false` turns image output off.
+    imageOutput:
+      (getPref("pdfParser.opendataloader.returnImages") as boolean) !== false
+        ? "embedded"
+        : "off",
   };
 }
 
@@ -679,34 +683,47 @@ async function readPinnedJarMeta(
 }
 
 /**
- * 流水线内触发的下载没有调用方界面——挂一个进度窗口让等待可见。
+ * 流水线内触发的下载没有调用方界面——挂一个进度弹窗让等待可见。
  * 全部 UI 调用尽力而为：窗口故障绝不阻断下载本身。
+ *
+ * 终止分支只有两个：failed（15 秒）与 done（6 秒）。此前真正下载完成时
+ * 下载器只发到 verifying 就返回，没有任何终止事件，弹窗会一直挂在主窗口
+ * 角落——现在 runDownload 在安装成功后补发 done（见 OdlJarDownloader.ts）。
  */
 function makeJarDownloadProgress(): ((p: DownloadProgress) => void) | undefined {
   try {
-    const win = new (Zotero as any).ProgressWindow({
+    const progress = new ProgressReporter({
       window: (Zotero as any).getMainWindow?.() || null,
+      headline: getString("odl-jar-download-window"),
     });
-    win.changeHeadline(getString("odl-jar-download-window"));
-    win.show();
     let lastStep = -1;
     return (p: DownloadProgress) => {
       try {
         if (p.phase === "downloading") {
-          // 每个网络分片都会触发进度事件（24MB 可达数百次），按 10% 步进汇报。
+          // 每个网络分片都会触发进度事件（24MB 可达数百次），按 10% 步进汇报，
+          // 且始终写在同一行上（圆形指示器随百分比填充）。
           const step = Math.floor((p.percent || 0) / 10) * 10;
           if (step === lastStep) return;
           lastStep = step;
-        }
-        if (p.phase === "failed") {
-          win.addDescription(
-            "✗ " + (p.message || getString("odl-error-jar-download-failed")),
+          progress.fraction(
+            p.percent || 0,
+            100,
+            p.message || getString("odl-jar-download-downloading", { percent: p.percent }),
           );
-          win.startCloseTimer?.(15000);
           return;
         }
-        if (p.message) win.addDescription(p.message);
-        if (p.phase === "done") win.startCloseTimer?.(6000);
+        if (p.phase === "failed") {
+          progress.fail(
+            "✗ " + (p.message || getString("odl-error-jar-download-failed")),
+            15000,
+          );
+          return;
+        }
+        if (p.phase === "done") {
+          progress.settle(null, 6000);
+          return;
+        }
+        if (p.message) progress.note(p.message);
       } catch (e) {
         safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
       }

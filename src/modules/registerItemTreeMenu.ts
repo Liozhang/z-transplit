@@ -36,6 +36,10 @@ import { getString } from "../utils/locale";
 import { safeDebug } from "../utils/logger";
 import { toErrorMessage } from "../utils/error";
 import { alertDialog, promptDialog } from "../utils/dialog";
+import {
+  ProgressReporter,
+  type ProgressFraction,
+} from "../utils/progressWindow";
 import { parsePageRangeSpec } from "../core/pdf/translation/pageRange";
 import {
   translateAndSplitWithOpenDataLoader,
@@ -259,18 +263,17 @@ async function runPipeline(
   label?: string,
   pages?: number[],
 ): Promise<void> {
-  const Zotero = (globalThis as any).Zotero;
-  const progress = new Zotero.ProgressWindow({ window: win });
-  progress.changeHeadline(
-    (label ? `${label} ` : "") +
+  const progress = new ProgressReporter({
+    window: win,
+    headline:
+      (label ? `${label} ` : "") +
       getString(
         outcome === "attachment"
           ? "itemtree-progress-attachment"
           : "odl-progress-translating",
       ),
-  );
-  progress.addDescription(sourceItem.getField?.("title") || "");
-  progress.show();
+  });
+  progress.note(sourceItem.getField?.("title") || "");
 
   try {
     // Split flow: reuse an existing translation exactly like the reader
@@ -278,10 +281,10 @@ async function runPipeline(
     if (outcome === "split") {
       const existing = findExistingTranslation(sourceItem);
       if (existing) {
-        progress.addDescription(getString("itemtree-split-reuse"));
+        progress.note(getString("itemtree-split-reuse"));
         const { openSplitView } = await import("../core/pdf/splitview/splitViewFactory");
         await openSplitView(win, sourceItem, existing);
-        progress.startCloseTimer?.(8000);
+        progress.settle(null, 8000);
         return;
       }
     }
@@ -292,8 +295,8 @@ async function runPipeline(
     if (outcome === "attachment" && !pages && hasExistingTranslation(sourceItem)) {
       const existing = findExistingTranslation(sourceItem);
       if (existing && openAttachmentOrAlert(win, existing.id)) {
-        progress.addDescription(getString("itemtree-dedup-open"));
-        progress.startCloseTimer?.(4000);
+        progress.note(getString("itemtree-dedup-open"));
+        progress.settle(null, 4000);
         return;
       }
     }
@@ -309,12 +312,12 @@ async function runPipeline(
         const { openSplitView } = await import("../core/pdf/splitview/splitViewFactory");
         return openSplitView(win2, item, att);
       }) as any,
-      onProgress: (msg: string) => {
-        try {
-          progress.addDescription(msg);
-          progress.show();
-        } catch {
-          /* progress window closed */
+      onProgress: (msg: string, fraction?: ProgressFraction) => {
+        // 批量翻译阶段带分数：走单一进度行；其余阶段是文字行。
+        if (fraction) {
+          progress.fraction(fraction.done, fraction.total, msg);
+        } else {
+          progress.note(msg);
         }
       },
       outcome,
@@ -322,11 +325,11 @@ async function runPipeline(
         openAttachmentOrAlert(win, attachmentId);
       },
     });
-    progress.startCloseTimer?.(8000);
+    progress.settle(null, 8000);
   } catch (e: any) {
     // 10 s, matching the reader entry point — 2 s was too short to read the
     // "✗" line (the modal dialog below is the real carrier, this is backup).
-    progress.startCloseTimer?.(10000);
+    progress.dismiss(10000);
     const raw = toErrorMessage(e);
     // Structured reason first (isJavaMissingCause) — the preflight error's
     // message is a pinned English hint with the localized detail dropped, and
@@ -337,11 +340,7 @@ async function runPipeline(
     }
     const friendly = friendlyOdlError(raw);
     safeDebug(`[Z-Transplit] itemTreeMenu pipeline failed: ${raw}`);
-    try {
-      progress.addDescription("✗ " + friendly);
-    } catch {
-      /* progress window already closed */
-    }
+    progress.fail("✗ " + friendly, 10000);
     alertDialog(getString("app-title"), friendly, win);
   }
 }
@@ -476,18 +475,18 @@ function injectIntoWindow(win: any): boolean {
     // progress while preparing, done/failed lines, and a disclosure message
     // when the document-structure session can't be established at all.
     const runBilingual = async (mode: "interleave" | "transOnly"): Promise<void> => {
-      const Zotero = (globalThis as any).Zotero;
       const zp = win.ZoteroPane || win.wrappedJSObject?.ZoteroPane;
-      const progress = new Zotero.ProgressWindow({ window: win });
-      progress.changeHeadline(getString("app-title"));
-      progress.addDescription(getString("itemtree-launch-progress"));
-      progress.show();
+      const progress = new ProgressReporter({
+        window: win,
+        headline: getString("app-title"),
+      });
+      progress.note(getString("itemtree-launch-progress"));
       try {
         const source = resolveSourcePdfAttachment(
           zp?.itemsView?.getSelectedItems?.() || [],
         );
         if (!source) {
-          progress.startCloseTimer?.(2000);
+          progress.settle(null, 2000);
           return;
         }
         const handle = await startBilingualSessionByItemID({
@@ -495,34 +494,25 @@ function injectIntoWindow(win: any): boolean {
           itemID: source.id,
           mode,
           onProgress: (stats) => {
-            try {
-              progress.addDescription(
-                getString("bilingual-progress", {
-                  done: stats.done,
-                  total: stats.total,
-                }),
-              );
-              progress.show();
-            } catch {
-              /* progress window closed */
-            }
+            // 与阅读器入口同一套路：单一进度行就地改写，终态后不再回弹。
+            progress.fraction(
+              stats.done,
+              stats.total,
+              getString("bilingual-progress", {
+                done: stats.done,
+                total: stats.total,
+              }),
+            );
           },
         });
         if (!handle) {
-          progress.addDescription(getString("bilingual-sdt-missing"));
-          progress.startCloseTimer?.(8000);
+          progress.settle(getString("bilingual-sdt-missing"), 8000);
           return;
         }
-        progress.addDescription(getString("itemtree-launch-done"));
-        progress.startCloseTimer?.(3000);
+        progress.settle(getString("itemtree-launch-done"), 3000);
       } catch (e) {
         safeDebug(`[Z-Transplit] itemTreeMenu bilingual (${mode}) failed: ${e}`);
-        try {
-          progress.addDescription("✗ " + toErrorMessage(e));
-          progress.startCloseTimer?.(8000);
-        } catch {
-          /* progress window already closed */
-        }
+        progress.fail("✗ " + toErrorMessage(e), 8000);
       }
     };
     const interleaveItem = mkItem(

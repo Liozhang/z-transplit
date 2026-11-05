@@ -46,6 +46,7 @@
 import { parsePdfWithOpenDataLoader } from "../backendSelector";
 import { odlAnalysisToAssembly } from "./odlToAssembly";
 import type { FormulaBlock } from "./odlToAssembly";
+import type { ProgressFraction } from "../../translation/types";
 import {
   extractFormulaLatex,
   isFormulaVisionAvailable,
@@ -99,7 +100,8 @@ import { safeDebug } from "../../../utils/logger";
 
 export interface OdlSplitOptions {
   sourceItem: any;
-  onProgress?: (msg: string) => void;
+  /** Phase line, plus an optional fraction (see utils/progressWindow.ts). */
+  onProgress?: (msg: string, fraction?: ProgressFraction) => void;
   /**
    * Split-view opener. Required for outcome "split" (the default); unused for
    * outcome "attachment".
@@ -532,6 +534,10 @@ export async function translateAndSplitWithOpenDataLoader(
           total: totalPages,
           count: assembly.paragraphs.length,
         }),
+        // 非批量引擎（Google/Bing/DeepL）逐页翻译：这是默认引擎的实际路径，
+        // 一份 56 页的文档会汇报 56 次。带上分数走单一进度行，否则弹窗会长出
+        // 56 行几乎相同的「第 N/56 页」，比主窗口还高。
+        { done: i, total: totalPages },
       );
       const { results, status } = await translateParagraphs(
         assembly.texts,

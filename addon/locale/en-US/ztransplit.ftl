@@ -74,6 +74,7 @@ odl-jar-download-window = Downloading the OpenDataLoader parsing component
 odl-jar-download-probe = Testing mirrors…
 odl-jar-download-downloading = Downloading ({ $percent }%)
 odl-jar-download-verifying = Verifying and installing…
+odl-jar-download-done = ✓ The parsing component is ready
 err-jar-load = Could not read the parsing component jar file (invalid path): { $path } ({ $message })
 odl-error-file-path = Invalid file path: the PDF or Java path is not valid. Check the Zotero data directory permissions, or restart Zotero.
 odl-error-network = { $detail }

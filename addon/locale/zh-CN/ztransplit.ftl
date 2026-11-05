@@ -71,6 +71,7 @@ odl-jar-download-window = 正在下载 OpenDataLoader 解析组件
 odl-jar-download-probe = 正在测试可用镜像…
 odl-jar-download-downloading = 正在下载（{ $percent }%）
 odl-jar-download-verifying = 校验并安装…
+odl-jar-download-done = ✓ 解析组件已就绪
 err-jar-load = 无法读取解析组件 jar 文件（路径非法）：{ $path }（{ $message }）
 odl-error-file-path = 文件路径无效：PDF 或 Java 路径不合法。请检查 Zotero 数据目录权限，或重启 Zotero。
 odl-error-network = { $detail }

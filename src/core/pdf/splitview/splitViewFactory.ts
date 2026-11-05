@@ -45,6 +45,10 @@ import { createReaderBrowser, ReaderPane } from "./readerPaneAdapter";
 import { safeDebug } from "../../../utils/logger";
 import { toErrorMessage } from "../../../utils/error";
 import { alertDialog } from "../../../utils/dialog";
+import {
+  ProgressReporter,
+  type ProgressFraction,
+} from "../../../utils/progressWindow";
 import { createAbortController } from "../../../utils/abort";
 import {
   getActiveBilingualModeForItem,
@@ -902,17 +906,16 @@ export function installManagedJavaWithProgress(): Promise<boolean> {
 }
 
 async function runManagedJavaInstall(): Promise<boolean> {
-  const progress = new (Zotero as any).ProgressWindow({
+  const progress = new ProgressReporter({
     window: (Zotero as any).getMainWindow?.() || null,
+    headline: getString("java-progress-install"),
   });
-  progress.changeHeadline(getString("java-progress-install"));
-  progress.addDescription(getString("java-progress-download-prepare"));
-  progress.show();
+  progress.note(getString("java-progress-download-prepare"));
   try {
     const { downloadJRE } = await import("../JavaRuntimeManager");
     // ProgressWindow.addDescription appends a row per call, and the download
     // fires a progress event per network chunk (hundreds for ~40 MB) — report
-    // phase changes and whole 10-percent steps only.
+    // phase changes and whole 10-percent steps only, on ONE in-place row.
     let lastDownloadStep = -1;
     await downloadJRE(17, (p) => {
       try {
@@ -920,21 +923,25 @@ async function runManagedJavaInstall(): Promise<boolean> {
           const step = Math.floor((p.percent || 0) / 10) * 10;
           if (step === lastDownloadStep) return;
           lastDownloadStep = step;
+          progress.fraction(
+            p.percent || 0,
+            100,
+            p.message || `${p.phase} (${p.percent}%)`,
+          );
+          return;
         }
-        progress.addDescription(p.message || `${p.phase} (${p.percent}%)`);
+        if (p.message) progress.note(p.message);
       } catch (e) {
         safeDebug("[Z-Transplit] splitViewFactory: " + e);
         /* best-effort */
       }
     });
-    progress.addDescription(getString("java-progress-retry"));
-    progress.startCloseTimer?.(8000);
+    progress.settle(getString("java-progress-retry"), 8000);
     return true;
   } catch (e: any) {
     zoteroDebug("[Z-Transplit odl] JRE install failed: " + e);
     const failMsg = getString("java-install-failed", { detail: toErrorMessage(e) });
-    progress.addDescription("✗ " + failMsg);
-    progress.startCloseTimer?.(15000);
+    progress.fail("✗ " + failMsg, 15000);
     try {
       (Zotero as any).launchURL?.("https://adoptium.net");
     } catch (e) {
@@ -967,16 +974,9 @@ async function runTranslateAndSplitFromReader(reader: any): Promise<void> {
     safeDebug(
       "[Z-Transplit splitView] translation already in progress, ignoring duplicate request",
     );
-    try {
-      const busy = new (Zotero as any).ProgressWindow();
-      busy.changeHeadline(getString("app-title"));
-      busy.addDescription(getString("splitview-error-in-flight"));
-      busy.show();
-      busy.startCloseTimer?.(4000);
-    } catch (e) {
-      safeDebug("[Z-Transplit] splitViewFactory: " + e);
-      /* best-effort */
-    }
+    new ProgressReporter({
+      headline: getString("app-title"),
+    }).settle(getString("splitview-error-in-flight"), 4000);
     return;
   }
   const sourceItemID: number | undefined = getCurrentReaderItemID(reader);
@@ -1021,15 +1021,12 @@ async function runTranslateAndSplitFromReader(reader: any): Promise<void> {
       return;
     }
     try {
-      const p = new (Zotero as any).ProgressWindow({ window: win });
-      p.changeHeadline(getString("app-title"));
-      p.addDescription(
+      new ProgressReporter({ window: win, headline: getString("app-title") }).settle(
         getString("splitview-progress-reused", {
           title: existing.getField?.("title") || String(existing.id),
         }),
+        3000,
       );
-      p.show();
-      p.startCloseTimer?.(3000);
     } catch (e) {
       safeDebug("[Z-Transplit] splitViewFactory: " + e);
       /* best-effort */
@@ -1037,14 +1034,13 @@ async function runTranslateAndSplitFromReader(reader: any): Promise<void> {
     return;
   }
 
-  let progress: any = null;
+  let progress: ProgressReporter | null = null;
   try {
-    progress = new (Zotero as any).ProgressWindow({
+    progress = new ProgressReporter({
       window: (Zotero as any).getMainWindow?.() || null,
+      headline: getString("odl-progress-translating"),
     });
-    progress.changeHeadline(getString("odl-progress-translating"));
-    progress.addDescription(getString("odl-progress-preparing"));
-    progress.show();
+    progress.note(getString("odl-progress-preparing"));
 
     const { translateAndSplitWithOpenDataLoader } =
       await import("../translation/opendataloaderSplitAdapter");
@@ -1052,66 +1048,46 @@ async function runTranslateAndSplitFromReader(reader: any): Promise<void> {
     activeTranslationController = controller;
     const result = await translateAndSplitWithOpenDataLoader({
       sourceItem,
-      onProgress: (msg: string) => {
-        try {
-          progress.addDescription(msg);
-          // show() is a no-op while the window is up, but re-opens it
-          // (and flushes queued descriptions) after the user closed it —
-          // completion and error lines must not be lost silently.
-          progress.show();
-        } catch (e) {
-          safeDebug("[Z-Transplit] splitViewFactory: " + e);
-          /* best-effort */
+      onProgress: (msg: string, fraction?: ProgressFraction) => {
+        // 批量翻译阶段带分数：单一进度行；其余阶段是文字行。
+        if (fraction) {
+          progress?.fraction(fraction.done, fraction.total, msg);
+        } else {
+          progress?.note(msg);
         }
       },
       openSplitView,
       signal: controller.signal,
     });
 
-    try {
-      // Only claim "opened side by side" when a split tab actually
-      // came up — splitTabID is null when openSplitView failed after
-      // the translation was saved (the adapter then reports that
-      // itself in its progress description).
-      if (result.splitTabID) {
-        progress.addDescription(
-          getString("odl-progress-done-split", {
-            title:
-              (Zotero as any).Items.get(result.translatedAttachmentId)
-                ?.getField?.("title") ||
-              String(result.translatedAttachmentId),
-          }),
-        );
-      }
-      progress.startCloseTimer?.(4000);
-    } catch (e) {
-      safeDebug("[Z-Transplit] splitViewFactory: " + e);
-      /* ignore */
+    // Only claim "opened side by side" when a split tab actually came up —
+    // splitTabID is null when openSplitView failed after the translation was
+    // saved (the adapter then reports that itself in its progress
+    // description).
+    if (result.splitTabID) {
+      progress.note(
+        getString("odl-progress-done-split", {
+          title:
+            (Zotero as any).Items.get(result.translatedAttachmentId)
+              ?.getField?.("title") ||
+            String(result.translatedAttachmentId),
+        }),
+      );
     }
+    progress.settle(null, 4000);
   } catch (e: any) {
     zoteroDebug("[Z-Transplit odl] failed: " + e);
     // User cancellation — not an error, just stop gracefully. Detected
     // by error NAME: the message is localized, so text equality can't
     // discriminate.
     if (e?.name === "ZTransplitCancelled") {
-      try {
-        progress?.addDescription(getString("odl-progress-cancelled"));
-        progress?.startCloseTimer?.(3000);
-      } catch (e) {
-        safeDebug("[Z-Transplit] splitViewFactory: " + e);
-        /* ignore */
-      }
+      progress?.settle(getString("odl-progress-cancelled"), 3000);
       return;
     }
     const rawMsg = toErrorMessage(e);
     // Close the in-flight translation progress so it doesn't linger
     // behind the install dialog.
-    try {
-      progress?.startCloseTimer?.(1000);
-    } catch (e) {
-      safeDebug("[Z-Transplit] splitViewFactory: " + e);
-      /* ignore */
-    }
+    progress?.dismiss(1000);
     // Special-case missing Java: offer to download a bundled JRE
     // instead of a dead-end blocking alert. Structured reason first
     // (isJavaMissingCause) — matching the message text alone misclassifies
@@ -1121,13 +1097,7 @@ async function runTranslateAndSplitFromReader(reader: any): Promise<void> {
       return;
     }
     const friendly = friendlyOdlError(rawMsg);
-    try {
-      progress?.addDescription("✗ " + friendly);
-      progress?.startCloseTimer?.(10000);
-    } catch (e) {
-      safeDebug("[Z-Transplit] splitViewFactory: " + e);
-      /* ignore */
-    }
+    progress?.fail("✗ " + friendly, 10000);
     alertDialog(getString("odl-error-dialog-title"), friendly);
   } finally {
     activeTranslationController = null;
@@ -1153,12 +1123,13 @@ async function launchBilingualFromReader(reader: any, mode: "interleave" | "tran
     }
 
     const win = (Zotero as any).getMainWindow?.() || null;
-    let progress: any = null;
+    let progress: ProgressReporter | null = null;
     try {
-      progress = new (Zotero as any).ProgressWindow({ window: win });
-      progress.changeHeadline(getString("app-title"));
-      progress.addDescription(getString("itemtree-launch-progress"));
-      progress.show();
+      progress = new ProgressReporter({
+        window: win,
+        headline: getString("app-title"),
+      });
+      progress.note(getString("itemtree-launch-progress"));
 
       const lang =
         (getPrefDynamic("translate.targetLanguage") as string | undefined) ??
@@ -1177,36 +1148,29 @@ async function launchBilingualFromReader(reader: any, mode: "interleave" | "tran
         targetLanguage: lang,
         cacheIdentity,
         onProgress: (stats) => {
-          try {
-            progress.addDescription(
-              getString("bilingual-progress", {
-                done: stats.done,
-                total: stats.total,
-              }),
-            );
-            progress.show();
-          } catch {
-            /* progress window closed */
-          }
+          // 单一进度行：就地改写「已译 N/M 段」并填充圆形进度。settle() 之后
+          // 的迟汇报会被丢弃——懒翻译在会话后期仍在触发，那时若再把弹窗打开
+          // 一次，它就再也不会自动消失了。
+          progress?.fraction(
+            stats.done,
+            stats.total,
+            getString("bilingual-progress", {
+              done: stats.done,
+              total: stats.total,
+            }),
+          );
         },
       });
 
       if (!handle) {
-        progress.addDescription(getString("bilingual-sdt-missing"));
-        progress.startCloseTimer?.(6000);
+        progress.settle(getString("bilingual-sdt-missing"), 6000);
         return;
       }
 
-      progress.addDescription(getString("itemtree-launch-done"));
-      progress.startCloseTimer?.(3000);
+      progress.settle(getString("itemtree-launch-done"), 3000);
     } catch (e: any) {
       safeDebug("[Z-Transplit] bilingual reader menu launch failed: " + e);
-      try {
-        progress?.addDescription("✗ " + toErrorMessage(e));
-        progress?.startCloseTimer?.(8000);
-      } catch {
-        /* best-effort */
-      }
+      progress?.fail("✗ " + toErrorMessage(e), 8000);
       await stopBilingualSession();
     }
   } finally {

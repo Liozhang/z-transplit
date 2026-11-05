@@ -99,6 +99,7 @@ export type FluentMessageId =
   | 'odl-error-reader-pdf-timeout'
   | 'odl-error-render-empty'
   | 'odl-error-source-path'
+  | 'odl-jar-download-done'
   | 'odl-jar-download-downloading'
   | 'odl-jar-download-probe'
   | 'odl-jar-download-verifying'

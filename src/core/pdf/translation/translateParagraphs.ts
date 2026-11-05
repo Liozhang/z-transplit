@@ -440,6 +440,9 @@ export async function translateAllPagesBatched(
               done: completed,
               total: chunks.length,
             }),
+            // 分数随行传递：调用方据此在同一行上填充进度指示器，而不是每步
+            // 追加一行（ProgressWindow.addDescription 是append 语义）。
+            { done: completed, total: chunks.length },
           );
         }
       }

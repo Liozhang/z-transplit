@@ -11,6 +11,17 @@
  * (types only; the orchestration functions stay with the pipeline).
  */
 
+/**
+ * Progress of a measurable phase: `done` of `total` units finished. Carried by
+ * the pipeline's onProgress callbacks so a UI layer can render one in-place
+ * progress row (see utils/progressWindow.ts) instead of appending a row per
+ * report.
+ */
+export interface ProgressFraction {
+  done: number;
+  total: number;
+}
+
 /** Result of translating a single paragraph. */
 export interface ParagraphTranslation {
   translated: string;
@@ -80,7 +91,12 @@ export interface BatchTranslationOptions {
   concurrency?: number;
   /** Cooperative cancel signal — checked before each chunk dispatch. */
   signal?: AbortSignal;
-  onProgress?: (msg: string) => void;
+  /**
+   * Phase line, plus an optional fraction for phases that have one (the batch
+   * translation step). Callers render a fraction on a single in-place progress
+   * row and a bare phase line as a plain row — see utils/progressWindow.ts.
+   */
+  onProgress?: (msg: string, fraction?: ProgressFraction) => void;
   /**
    * Persistent-cache identity of the engine configuration (engine|model|
    * credentials|endpoint). When set, paragraph translations are looked up in /

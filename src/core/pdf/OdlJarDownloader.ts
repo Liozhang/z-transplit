@@ -374,7 +374,16 @@ async function runDownload(
       );
       await IOUtils.write(archiveStaging, archive);
       try {
-        return await installJarFromArchive(archiveStaging, meta, paths);
+        const installed = await installJarFromArchive(archiveStaging, meta, paths);
+        // 安装成功必须发终止事件：调用方的进度弹窗靠它自动关闭。此前真正
+        // 下载完成时事件链停在 verifying，弹窗会一直挂在主窗口角落，直到
+        // 用户手动点掉（精简版安装包的首次解析必然走到这里）。
+        onProgress?.({
+          percent: 100,
+          phase: "done",
+          message: getString("odl-jar-download-done"),
+        });
+        return installed;
       } finally {
         await IOUtils.remove(archiveStaging, { ignoreAbsent: true });
       }

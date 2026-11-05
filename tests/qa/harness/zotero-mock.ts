@@ -100,6 +100,42 @@ export function resetReaderEventListeners(): void {
   sharedReaderEventListeners.length = 0;
 }
 
+/**
+ * Build the mock's ItemProgress class, bound to the popup that owns it. A
+ * module-level factory (rather than a class expression inside the getter) so
+ * the row can register itself on its owner — that is how a test reaches the
+ * rows the plugin created.
+ */
+function makeMockItemProgress(owner: {
+  rows: Array<{ texts: string[]; percents: number[] }>;
+}) {
+  return class {
+    texts: string[] = [];
+    percents: number[] = [];
+    constructor(_itemType: unknown, text: string) {
+      // 真实宿主的构造器内部就是调 setText()，这里照做：初始文本与第一次
+      // setText 在记录上不可区分（宿主渲染结果也确实如此）。
+      this.setText(text);
+      owner.rows.push(this);
+    }
+    setText(text: string) {
+      this.texts.push(text);
+    }
+    setProgress(percent: number) {
+      this.percents.push(percent);
+    }
+    setError() {}
+    /** Latest text, the way the host renders the row. */
+    get text(): string {
+      return this.texts[this.texts.length - 1] ?? "";
+    }
+    /** Latest percentage, -1 when setProgress was never called. */
+    get percent(): number {
+      return this.percents[this.percents.length - 1] ?? -1;
+    }
+  };
+}
+
 export class ZoteroMock {
   readonly prefs: PrefMap;
   readonly prefix: string;
@@ -107,6 +143,19 @@ export class ZoteroMock {
   readonly registeredMenus: Array<{ id: string; [k: string]: unknown }> = [];
   readonly debugLines: string[] = [];
   readonly progressWindows: Array<{ headline: string; descriptions: string[] }> = [];
+  /** Live popup instances, newest last — for asserting rows and timers. */
+  readonly progressWindowInstances: any[] = [];
+  /**
+   * Every popup call in order, so a test can assert the sequence (headline →
+   * note → fraction row → settle) rather than only the final state.
+   */
+  readonly progressEvents: Array<
+    | { kind: "headline"; text: string }
+    | { kind: "note"; text: string }
+    | { kind: "show" }
+    | { kind: "timer"; ms: number }
+    | { kind: "close" }
+  > = [];
   locale: string;
   platform: "win" | "mac" | "linux";
   pdfTranslate: any;
@@ -197,19 +246,50 @@ export class ZoteroMock {
       ProgressWindow: class {
         headline = "";
         descriptions: string[] = [];
+        closed = false;
+        shows = 0;
+        closeTimers: number[] = [];
+        /** Rows created through the host's ItemProgress API (progress rows). */
+        rows: Array<{
+          texts: string[];
+          percents: number[];
+          get text(): string;
+          get percent(): number;
+        }> = [];
+        constructor() {
+          self.progressWindowInstances.push(this);
+        }
+        /**
+         * Stand-in for Zotero's ItemProgress: one row whose text is rewritten
+         * in place and whose circular indicator follows setProgress(). Records
+         * every call so a test can assert "one row, updated N times" instead
+         * of "N appended rows".
+         */
+        ItemProgress = makeMockItemProgress(this);
         changeHeadline(h: string) {
           this.headline = h;
           self.progressWindows.push({
             headline: h,
             descriptions: this.descriptions,
           });
+          self.progressEvents.push({ kind: "headline", text: h });
         }
         addDescription(d: string) {
           this.descriptions.push(d);
+          self.progressEvents.push({ kind: "note", text: d });
         }
-        show() {}
-        startCloseTimer() {}
-        close() {}
+        show() {
+          this.shows++;
+          self.progressEvents.push({ kind: "show" });
+        }
+        startCloseTimer(ms?: number) {
+          this.closeTimers.push(ms ?? 2500);
+          self.progressEvents.push({ kind: "timer", ms: ms ?? 2500 });
+        }
+        close() {
+          this.closed = true;
+          self.progressEvents.push({ kind: "close" });
+        }
       },
       Reader: {
         registerEventListener: (type: string, handler: (event: any) => void) => {
