@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.0] - 2026-11-07
+
+### Added
+
+- Menu icons for the five library context-menu entries. Each entry carries its
+  own 16 px stroke icon — a document with swap arrows for full-text
+  translation, a document with a page band for the page-range entry,
+  side-by-side panes for split-screen translation, stacked panes for
+  interleaved bilingual reading, and a single page with text lines for
+  translation-only — drawn with `currentColor`, so the icon follows the text
+  color in both light and dark mode. Gecko renders the checkbox checkmark in
+  the same icon slot, so while split-screen or a bilingual session is live on
+  the selected PDF that entry's icon swaps to a check mark and swaps back when
+  the session ends; the underlying `checked` state is untouched and still
+  serves as the no-CSS fallback. Icons are applied exactly the way Zotero's
+  own MenuManager applies them (`menuitem-iconic` plus
+  `zotero-custom-menu-item` classes and the `--custom-menu-icon-*` custom
+  properties), so no extra stylesheet is needed. Verified on a real Zotero 10
+  through the QA harness.
+
 ## [1.17.0] - 2026-11-05
 
 ### Fixed
@@ -938,6 +958,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Releases before 1.2.0 predate this changelog and are not backfilled.
 
+[1.18.0]: https://github.com/Liozhang/z-transplit/compare/v1.17.0...v1.18.0
+[1.17.0]: https://github.com/Liozhang/z-transplit/compare/v1.16.1...v1.17.0
 [1.16.1]: https://github.com/Liozhang/z-transplit/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/Liozhang/z-transplit/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/Liozhang/z-transplit/compare/v1.14.1...v1.15.0
