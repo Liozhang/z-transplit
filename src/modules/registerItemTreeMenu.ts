@@ -26,6 +26,16 @@
  * so any top-insertion corrupts every native entry's text and visibility —
  * see injectIntoWindow.
  *
+ * Icons (added 2026-11): each entry carries a functional 16px stroke icon
+ * (addon/content/icons/menu-*.svg, currentColor) applied exactly the way
+ * Zotero's MenuManager does it — `menuitem-iconic` + `zotero-custom-menu-item`
+ * classes and the `--custom-menu-icon-light/dark` CSS custom properties,
+ * consumed by Zotero's built-in stylesheet. Gecko renders the checkbox
+ * checkmark in the SAME icon slot, so the three stateful entries swap to
+ * menu-check.svg while active and back to their functional icon while idle
+ * (see onShowing) — the checkbox `checked` attribute stays untouched as the
+ * no-CSS fallback path.
+ *
  * Loaded dynamically by src/hooks.ts (onMainWindowLoad / onStartup), tracked
  * and revoked by onShutdown.
  *
@@ -65,6 +75,16 @@ import {
 
 const MENU_ID = "ztransplit-itemmenu";
 const SEP_ID = "ztransplit-itemmenu-sep";
+
+// 16px stroke icons, one per entry; menu-check.svg replaces a stateful
+// entry's functional icon while it is active (icon slot == checkmark slot).
+const ICON_BASE = "chrome://ztransplit/content/icons/";
+const ICON_TRANSLATE_DOC = ICON_BASE + "menu-translate-doc.svg";
+const ICON_TRANSLATE_PAGES = ICON_BASE + "menu-translate-pages.svg";
+const ICON_SPLIT_COLUMNS = ICON_BASE + "menu-split-columns.svg";
+const ICON_SPLIT_ROWS = ICON_BASE + "menu-split-rows.svg";
+const ICON_TRANS_ONLY = ICON_BASE + "menu-trans-only.svg";
+const ICON_CHECK = ICON_BASE + "menu-check.svg";
 
 interface TrackedWindow {
   win: any;
@@ -345,6 +365,25 @@ async function runPipeline(
   }
 }
 
+/**
+ * Apply a menu icon exactly the way Zotero's MenuManager does
+ * (menuManager.js `_initMenu`): the classes feed Zotero's built-in stylesheet
+ * and the custom properties carry the image URL. Both properties get the same
+ * URL — our icons use currentColor, so one asset serves light and dark mode
+ * (MenuManager's own darkIcon fallback). Idempotent and cheap: onShowing
+ * re-asserts icons on every popupshowing, so any host-side class/property
+ * rewrite self-heals.
+ */
+function setMenuIcon(mi: any, url: string): void {
+  try {
+    mi.classList.add("zotero-custom-menu-item", "menuitem-iconic");
+    mi.style.setProperty("--custom-menu-icon-light", `url(${url})`);
+    mi.style.setProperty("--custom-menu-icon-dark", `url(${url})`);
+  } catch (e) {
+    safeDebug("[Z-Transplit] setMenuIcon: " + e);
+  }
+}
+
 function injectIntoWindow(win: any): boolean {
   try {
     const doc = win.document;
@@ -362,7 +401,12 @@ function injectIntoWindow(win: any): boolean {
     const menupopup = doc.createXULElement("menupopup");
     menu.appendChild(menupopup);
 
-    const mkItem = (id: string, l10nKey: string, handler: () => void): any => {
+    const mkItem = (
+      id: string,
+      l10nKey: string,
+      handler: () => void,
+      icon?: string,
+    ): any => {
       const mi = doc.createXULElement("menuitem");
       mi.id = id;
       mi.setAttribute("label", getString(l10nKey));
@@ -370,8 +414,11 @@ function injectIntoWindow(win: any): boolean {
       // entries Zotero's native checkmark while their state is live. XUL
       // auto-toggles the visual state on click, but the menu closes on click
       // and the next popupshowing re-asserts the truth, so it self-corrects.
+      // With an icon applied the checkmark is hidden (same slot) — the
+      // checked attribute remains as the no-CSS fallback and for a11y state.
       mi.setAttribute("type", "checkbox");
       mi.setAttribute("checked", "false");
+      if (icon) setMenuIcon(mi, icon);
       mi.addEventListener("command", handler);
       return mi;
     };
@@ -415,6 +462,25 @@ function injectIntoWindow(win: any): boolean {
           "checked",
           liveMode === "transOnly" ? "true" : "false",
         );
+
+        // Icon slot = checkmark slot in Gecko, so active stateful entries
+        // carry ICON_CHECK instead of their functional icon; idle ones
+        // re-assert the functional icon. Fixed-icon entries re-assert too —
+        // idempotent writes that self-heal any host-side rewrite.
+        setMenuIcon(translateAttachment, ICON_TRANSLATE_DOC);
+        setMenuIcon(translatePages, ICON_TRANSLATE_PAGES);
+        setMenuIcon(
+          translateSplit,
+          splitOpen ? ICON_CHECK : ICON_SPLIT_COLUMNS,
+        );
+        setMenuIcon(
+          interleaveItem,
+          liveMode === "interleave" ? ICON_CHECK : ICON_SPLIT_ROWS,
+        );
+        setMenuIcon(
+          transOnlyItem,
+          liveMode === "transOnly" ? ICON_CHECK : ICON_TRANS_ONLY,
+        );
       } catch (e) {
         safeDebug("[Z-Transplit] itemTreeMenu onShowing: " + e);
       }
@@ -428,6 +494,7 @@ function injectIntoWindow(win: any): boolean {
         const items: any[] = zp?.itemsView?.getSelectedItems?.() || [];
         void runPipelines(win, resolveAllSourcePdfAttachments(items), "attachment");
       },
+      ICON_TRANSLATE_DOC,
     );
     // 翻译指定页：只取第一个选中的 PDF（多选时各文档页数不同，同一份
     // 范围含义不明）。取消对话框或范围不合法都不启动管线。
@@ -457,6 +524,7 @@ function injectIntoWindow(win: any): boolean {
         }
         void runPipeline(win, source, "attachment", undefined, pages);
       },
+      ICON_TRANSLATE_PAGES,
     );
     const translateSplit = mkItem(
       "ztransplit-itemmenu-split",
@@ -466,6 +534,7 @@ function injectIntoWindow(win: any): boolean {
         const items: any[] = zp?.itemsView?.getSelectedItems?.() || [];
         void runPipelines(win, resolveSplitSources(items), "split");
       },
+      ICON_SPLIT_COLUMNS,
     );
     // Bilingual launch with visible feedback: the reader-menu path shows a
     // progress window, and this path used to run SILENTLY — a reader that
@@ -527,6 +596,7 @@ function injectIntoWindow(win: any): boolean {
         openAttachmentOrAlert(win, source.id);
         await runBilingual("interleave");
       },
+      ICON_SPLIT_ROWS,
     );
     const transOnlyItem = mkItem(
       "ztransplit-itemmenu-trans-only",
@@ -540,6 +610,7 @@ function injectIntoWindow(win: any): boolean {
         openAttachmentOrAlert(win, source.id);
         await runBilingual("transOnly");
       },
+      ICON_TRANS_ONLY,
     );
 
     menupopup.appendChild(translateAttachment);

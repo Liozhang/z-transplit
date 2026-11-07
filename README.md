@@ -198,8 +198,12 @@ itself: the language configuration and the template validation.
   translation-only, read-aloud
 - Reader right-click (PDF view): "Translate and open side by side", "Split-screen
   comparison", "Cancel translation in progress"
-- Library right-click: "Translate full text (save as attachment)" and "Translate and
-  compare side by side" — visible only when the selection contains a PDF
+- Library right-click: a Z-Transplit submenu with five entries — "Translate full
+  text (save as attachment)", "Translate page range…", "Split-screen translation",
+  "Interlinear translation" and "Translation only" — visible only when the
+  selection contains a PDF. Each entry carries its own icon; while split-screen
+  or a bilingual session is live on the selected PDF, that entry's icon swaps
+  to a check mark
 - Edit ▸ Settings ▸ Z-Transplit: engine, credentials, target language, Java and
   OpenDataLoader options
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Z-Transplit 翻译并分屏对照</title>
+  <!--
+    库条目右键菜单「翻译并分屏对照」图标（registerItemTreeMenu）。
+    母题：左右并排的两个长方形，即左右分屏的两个窗格。
+    规格与 menu-translate-doc.svg 一致。
+  -->
+  <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.4" y="3.2" width="5.1" height="9.6" rx="1.2"/>
+    <rect x="8.5" y="3.2" width="5.1" height="9.6" rx="1.2"/>
+  </g>
+</svg>

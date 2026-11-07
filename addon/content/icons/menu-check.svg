@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Z-Transplit 菜单激活对勾</title>
+  <!--
+    库条目右键菜单状态项的激活态图标（registerItemTreeMenu）。
+    用途：图标与勾选标记在 Gecko 菜单里共用同一个图标槽位，二选一。
+    三个状态项（翻译并分屏对照 / 上下对照 / 仅译文）平时显示功能图标，
+    激活时由 onShowing 把图标换成这支对勾，表达「正在进行」。
+    描边略加粗到 1.9，保证勾形在 16px 下与功能图标同等醒目。
+  -->
+  <path d="M3.4 8.8 L6.7 12.1 L12.7 4.9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

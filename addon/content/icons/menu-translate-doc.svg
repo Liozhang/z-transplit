@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Z-Transplit 翻译全文</title>
+  <!--
+    库条目右键菜单「翻译全文（生成译文附件）」图标（registerItemTreeMenu）。
+    母题：文档矩形 + 一支双向对角互换箭头——沿用 translate-20.svg
+    「两种语言互换即翻译」的语义，整页文档表示作用于全文。
+    16px 菜单规格：fill="none"、stroke="currentColor"（跟随菜单文字颜色，
+    深浅色模式自动适配）、stroke-width 1.3、圆头圆角，与 wordcards-16.svg
+    同风格。见 QA 图标审阅页 menu-icons-review。
+  -->
+  <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="2.3" width="10" height="11.4" rx="1.4"/>
+    <path d="M5.4 10.6 L10.6 5.4"/>
+    <path d="M10.6 5.4 H8.5"/>
+    <path d="M10.6 5.4 V7.5"/>
+    <path d="M5.4 10.6 H7.5"/>
+    <path d="M5.4 10.6 V8.5"/>
+  </g>
+</svg>

@@ -23,6 +23,19 @@
  *                                行文本）。用于验证「事情做完后弹窗自己
  *                                消失」这类回归：跑完流水线/双语会话后轮
  *                                询它，窗口数应为 0
+ *   iconcheck {}                 库条目右键菜单图标验证：确保选区含 PDF
+ *                                附件（库里没有就从 fixture 导入一个）、
+ *                                派发 popupshowing 触发插件的图标断言，
+ *                                逐条目报告类名 / CSS 变量 / 图标槽位的
+ *                                计算样式（shadowRoot 可达时），再把菜单
+ *   iconopen {x,y}               选区含 PDF 后把右键菜单真正弹开并保持
+ *                                （供启动器侧做系统级屏幕截取——drawWindow
+ *                                画不进独立的弹出窗口）。返回各条目的类名
+ *                                与 CSS 变量状态
+ *   iconclose {}                 收起 iconopen 弹开的菜单
+ *                                行文本）。用于验证「事情做完后弹窗自己
+ *                                消失」这类回归：跑完流水线/双语会话后轮
+ *                                询它，窗口数应为 0
  */
 (function () {
   /**
@@ -390,5 +403,228 @@
       }
     }
     return { count: out.length, items: out };
+  };
+
+  /**
+   * 库条目右键菜单图标验证（见文件头注释）。三步：
+   *   1) 选区含 PDF：遍历库找第一个 PDF 附件；没有就复制 fixture 到数据
+   *      目录并作为附件导入（幂等：有就不建）。
+   *   2) 派发 popupshowing：插件的可见性门控与图标断言（setMenuIcon）都在
+   *      这个事件里跑，跑完读每个条目的类名与 CSS 变量——这正是
+   *      Zotero MenuManager 的图标注入机制所依赖的两样东西。
+   *   3) 真开菜单截屏：图标槽位（.menu-icon）是匿名/shadow 内容，shadowRoot
+   *      可达时顺带读计算样式的 content / list-style-image；不可达时靠
+   *      截屏做视觉判定。
+   */
+  PROBE_CMDS.iconcheck = async function (arg) {
+    const opts = parseOpts(arg);
+    const win = Zotero.getMainWindow();
+    if (!win) return { error: "no main window" };
+    const doc = win.document;
+    const popup = doc.getElementById("zotero-itemmenu");
+    if (!popup) return { error: "zotero-itemmenu missing" };
+
+    // 1) 选区含 PDF
+    const search = new Zotero.Search();
+    search.libraryID = 1;
+    const ids = await search.search();
+    let pdf = null;
+    for (const id of ids) {
+      const it = await Zotero.Items.getAsync(id);
+      if (it.isAttachment() && it.attachmentContentType === "application/pdf") {
+        pdf = it;
+        break;
+      }
+    }
+    let created = null;
+    if (!pdf) {
+      const FIX = "D:\\github_code\\z-transplit\\scripts\\qa\\fixtures\\attention-reading.pdf";
+      if (!await IOUtils.exists(FIX)) return { error: "fixture missing: " + FIX };
+      const parent = new Zotero.Item("journalArticle");
+      await parent.setField("title", "Icon Check Parent");
+      await parent.saveTx();
+      const att = await Zotero.Attachments.importFromFile({
+        file: FIX,
+        parentItemID: parent.id,
+      });
+      pdf = att;
+      created = { parent: parent.id, attachment: att.id };
+    }
+    try {
+      await win.ZoteroPane.itemsView.selectItem(pdf.id);
+    } catch (e) {
+      return { error: "selectItem: " + e, created };
+    }
+
+    // 2) 触发插件断言，读回条目状态
+    popup.dispatchEvent(new win.Event("popupshowing"));
+    await Zotero.Promise.delay(100);
+    const IDS = [
+      "ztransplit-itemmenu-attachment",
+      "ztransplit-itemmenu-pages",
+      "ztransplit-itemmenu-split",
+      "ztransplit-itemmenu-interleave",
+      "ztransplit-itemmenu-trans-only",
+    ];
+    const entries = IDS.map((id) => {
+      const mi = doc.getElementById(id);
+      if (!mi) return { id, missing: true };
+      const cs = win.getComputedStyle(mi);
+      const slot = mi.shadowRoot
+        ? mi.shadowRoot.querySelector(".menu-icon")
+        : null;
+      const slotCs = slot ? win.getComputedStyle(slot) : null;
+      return {
+        id,
+        label: mi.getAttribute("label"),
+        hidden: mi.getAttribute("hidden"),
+        checked: mi.getAttribute("checked"),
+        iconic: mi.classList.contains("menuitem-iconic"),
+        custom: mi.classList.contains("zotero-custom-menu-item"),
+        varLight: mi.style.getPropertyValue("--custom-menu-icon-light") || null,
+        varLightComputed: cs.getPropertyValue("--custom-menu-icon-light") || null,
+        slotFound: !!slot,
+        slotContent: slotCs ? slotCs.content : null,
+        slotImage: slotCs ? slotCs.listStyleImage : null,
+      };
+    });
+    const menu = doc.getElementById("ztransplit-itemmenu");
+    const submenuHidden = menu ? menu.getAttribute("hidden") : null;
+
+    // 3) 真开菜单截屏（菜单关着时匿名图标槽可能根本不渲染）
+    const file = opts.file || "D:\\zt-qa\\icon-menu.png";
+    let shot = null;
+    try {
+      popup.openPopupAtScreen(300, 200, true);
+      await Zotero.Promise.delay(700);
+      const s = await PROBE_CMDS.shot({ file });
+      shot = s;
+      popup.hidePopup();
+    } catch (e) {
+      shot = { ok: false, error: String(e) };
+    }
+    return { created, selection: { id: pdf.id, title: pdf.getField("title") }, submenuHidden, entries, shot };
+  };
+
+  /** 找库里的第一个 PDF 附件；没有就从 fixture 导入（iconcheck/iconopen 共用）。 */
+  async function ensurePdfSelected(win) {
+    const search = new Zotero.Search();
+    search.libraryID = 1;
+    const ids = await search.search();
+    let pdf = null;
+    for (const id of ids) {
+      const it = await Zotero.Items.getAsync(id);
+      if (it.isAttachment() && it.attachmentContentType === "application/pdf") {
+        pdf = it;
+        break;
+      }
+    }
+    if (!pdf) {
+      const FIX = "D:\\github_code\\z-transplit\\scripts\\qa\\fixtures\\attention-reading.pdf";
+      if (!await IOUtils.exists(FIX)) return { error: "fixture missing: " + FIX };
+      const parent = new Zotero.Item("journalArticle");
+      await parent.setField("title", "Icon Check Parent");
+      await parent.saveTx();
+      pdf = await Zotero.Attachments.importFromFile({
+        file: FIX,
+        parentItemID: parent.id,
+      });
+    }
+    try {
+      await win.ZoteroPane.itemsView.selectItem(pdf.id);
+    } catch (e) {
+      return { error: "selectItem: " + e };
+    }
+    return { pdf };
+  }
+
+  /**
+   * 打开右键菜单的五个条目并保持（配合启动器侧的系统屏幕截取）。
+   *
+   * 为什么不直接开 zotero-itemmenu：它有 28 个原生条目，在 720p 屏上比屏幕
+   * 还高，追加在最底下的子菜单永远在屏幕外，截不到。于是把五个条目临时
+   * 挪进一个独立的空 menupopup（图标类与 CSS 变量随节点走，Zotero 的图标
+   * 样式按类匹配、不按位置匹配，渲染机制不变），弹在屏幕指定位置；拍完后
+   * iconclose 把节点挪回原子菜单。选区照常先备好一个 PDF 附件。
+   */
+  const ICONCHECK_POPUP_ID = "ztransplit-iconcheck-popup";
+  const ICONCHECK_IDS = [
+    "ztransplit-itemmenu-attachment",
+    "ztransplit-itemmenu-pages",
+    "ztransplit-itemmenu-split",
+    "ztransplit-itemmenu-interleave",
+    "ztransplit-itemmenu-trans-only",
+  ];
+  PROBE_CMDS.iconopen = async function (arg) {
+    const opts = parseOpts(arg);
+    const win = Zotero.getMainWindow();
+    if (!win) return { error: "no main window" };
+    const doc = win.document;
+    const popup = doc.getElementById("zotero-itemmenu");
+    if (!popup) return { error: "zotero-itemmenu missing" };
+    const sel = await ensurePdfSelected(win);
+    if (sel.error) return sel;
+    const x = Number(opts.x ?? 300);
+    const y = Number(opts.y ?? 150);
+    popup.dispatchEvent(new win.Event("popupshowing"));
+    await Zotero.Promise.delay(100);
+    // arg: { active: [条目id后缀...] } —— 强制把这些条目的图标换成对勾，
+    // 用于验证激活态图标在图标槽位的渲染。真实激活判断（splitOpen /
+    // liveMode）需要真的跑流水线才能成立，这里只验渲染，不验状态逻辑。
+    if (Array.isArray(opts.active)) {
+      for (const id of opts.active) {
+        const mi = doc.getElementById("ztransplit-itemmenu-" + id);
+        if (mi) {
+          mi.style.setProperty("--custom-menu-icon-light", "url(chrome://ztransplit/content/icons/menu-check.svg)");
+          mi.style.setProperty("--custom-menu-icon-dark", "url(chrome://ztransplit/content/icons/menu-check.svg)");
+        }
+      }
+    }
+    let tmp = doc.getElementById(ICONCHECK_POPUP_ID);
+    if (!tmp) {
+      tmp = doc.createXULElement("menupopup");
+      tmp.id = ICONCHECK_POPUP_ID;
+      doc.documentElement.appendChild(tmp);
+    }
+    const moved = [];
+    for (const id of ICONCHECK_IDS) {
+      const mi = doc.getElementById(id);
+      if (mi) {
+        tmp.appendChild(mi); // 移动（appendChild 对已有节点等于搬家）
+        moved.push(id);
+      }
+    }
+    tmp.openPopupAtScreen(x, y, true);
+    await Zotero.Promise.delay(500);
+    const mi = doc.getElementById(ICONCHECK_IDS[0]);
+    const rect = mi ? mi.getBoundingClientRect() : null;
+    return {
+      open: tmp.state,
+      moved,
+      selection: { id: sel.pdf.id, title: sel.pdf.getField("title") },
+      itemRect: rect
+        ? { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) }
+        : null,
+      dpr: win.devicePixelRatio,
+    };
+  };
+
+  /** 收起 iconopen 弹开的临时弹窗，并把五个条目挪回原右键子菜单。 */
+  PROBE_CMDS.iconclose = async function () {
+    const win = Zotero.getMainWindow();
+    const doc = win && win.document;
+    const popup = doc && doc.getElementById("zotero-itemmenu");
+    const tmp = doc && doc.getElementById(ICONCHECK_POPUP_ID);
+    if (!tmp) return { restored: false, state: popup ? popup.state : null };
+    tmp.hidePopup();
+    const host = popup && popup.querySelector("#ztransplit-itemmenu menupopup");
+    if (host) {
+      for (const id of ICONCHECK_IDS) {
+        const mi = tmp.querySelector("#" + id);
+        if (mi) host.appendChild(mi);
+      }
+    }
+    tmp.remove();
+    return { restored: !!host, state: "closed" };
   };
 })();

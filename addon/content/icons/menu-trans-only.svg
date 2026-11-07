@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Z-Transplit 仅译文双语阅读</title>
+  <!--
+    库条目右键菜单「仅译文双语阅读」图标（registerItemTreeMenu）。
+    母题：单个文档矩形 + 文字行，表示阅读的是纯译文层；
+    与「翻译全文」（带互换箭头）、「翻译指定页」（带页带）区分。
+    规格与 menu-translate-doc.svg 一致。
+  -->
+  <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="2.3" width="10" height="11.4" rx="1.4"/>
+    <path d="M5.6 6.4 H10.4"/>
+    <path d="M5.6 9.0 H10.4"/>
+    <path d="M5.6 11.6 H8.4"/>
+  </g>
+</svg>

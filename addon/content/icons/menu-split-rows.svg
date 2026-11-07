@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Z-Transplit 上下对照双语阅读</title>
+  <!--
+    库条目右键菜单「上下对照双语阅读」图标（registerItemTreeMenu）。
+    母题：上下叠放的两个长方形，即上下双语的两个阅读区。
+    规格与 menu-translate-doc.svg 一致。
+  -->
+  <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.9" y="2.0" width="10.2" height="5.5" rx="1.2"/>
+    <rect x="2.9" y="8.5" width="10.2" height="5.5" rx="1.2"/>
+  </g>
+</svg>

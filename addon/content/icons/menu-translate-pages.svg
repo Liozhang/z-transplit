@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Z-Transplit 翻译指定页</title>
+  <!--
+    库条目右键菜单「翻译指定页」图标（registerItemTreeMenu）。
+    母题：文档矩形 + 一条加粗页带，表示被选中的页码范围；页带下方一条
+    短文字线表示未选中的其余页面。规格与 menu-translate-doc.svg 一致。
+  -->
+  <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="2.3" width="10" height="11.4" rx="1.4"/>
+    <path d="M5.0 8.0 H11.0" stroke-width="2.6"/>
+    <path d="M5.6 10.9 H8.6"/>
+  </g>
+</svg>
