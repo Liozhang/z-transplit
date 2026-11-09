@@ -3,6 +3,48 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.20.0] - 2026-11-09
+
+### Added
+
+- Per-request glossary filtering. The glossary is no longer shipped whole:
+  every model-backed request now injects only the entries whose source term
+  occurs in the text being translated, so a 200-entry table stops spending
+  context on terms a paragraph never mentions. Latin terms match
+  case-insensitively as whole words ("AI" does not hit inside "said"),
+  CJK terms as substrings, a phrase may span a line break, and the PDF
+  extraction artifacts that used to hide a match — presentation-form
+  ligatures (ﬁgure), soft hyphens, a hyphen the typesetter left at a line
+  break — are normalized away first. Terms the text never mentions
+  translate exactly as before, and the cache fingerprint still folds the
+  whole glossary, so editing the table keeps invalidating affected
+  translations. One debug line per request reports how many entries
+  matched, so a glossary that silently matches nothing is diagnosable
+  instead of invisible. The AI engine's per-paragraph batch fallback also
+  carries the filtered glossary now — it used to drop the glossary
+  entirely, contradicting the documented coverage of the single-paragraph,
+  batched and fallback paths alike. The settings pane description, both
+  READMEs and the preferences fallback text document the matching rules
+  and their one deliberate limit: a term's other forms (an English plural,
+  say) need their own entry.
+
+### Changed
+
+- The match fold (lowercase, ligatures expanded, apostrophes unified,
+  whitespace collapsed) moved from the word-card sentence extractor into
+  src/utils/textFold.ts and is now shared by the glossary matcher, so the
+  addon has one definition of "two strings are the same for containment
+  purposes". Behavior is unchanged and stays pinned by the existing
+  sentence-context tests plus new ones for the utility itself.
+
+### Fixed
+
+- The custom engine's "Model" setting has a description. The message was
+  defined as an empty value in both locales, so the English pane showed no
+  help text at all — only the Chinese inline fallback rendered — and every
+  build printed a localization warning about it. The Chinese wording now
+  lives in the FTL with every other field, and English gets its own.
+
 ## [1.19.0] - 2026-11-09
 
 ### Added
