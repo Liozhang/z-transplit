@@ -3,6 +3,46 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.19.0] - 2026-11-09
+
+### Added
+
+- Selection translation on HTML-snapshot readers, and no plugin surface at all
+  on readers the plugin cannot serve. Zotero's reader opens PDF, EPUB and
+  HTML-snapshot attachments, and the Translate pane section, the bilingual
+  block, the reader toolbar button and the reader context-menu submenu used to
+  appear on all three alike — while every one of them except selection
+  translation needs the SDT reading mode or the pdf.js internals, which exist
+  on PDF readers only. A new `src/core/readerKind.ts` resolves a reader's kind
+  (Zotero's `attachmentReaderType`, the content type, the `.pdf` filename
+  fallback) and every reader-facing entry point gates on it: PDF keeps the full
+  feature set; an HTML snapshot keeps selection translation in the Translate
+  section (Zotero's text-selection popup carries the selected text on every
+  kind); EPUB and undeterminable readers get nothing. An undeterminable kind
+  fails closed — a missing feature with a debug-log reason, never a button
+  that errors when clicked.
+
+### Fixed
+
+- The Translate section no longer disappears on PDFs. A reader tab's context
+  pane renders the attachment's PARENT item (upstream
+  `elements/contextPane.js` passes `parentID`'s item when the attachment has
+  one), so the section's `onItemChange`/`onRender` hooks receive a regular
+  item whose reader kind is "none" — keying the reader-kind gate on that item
+  hid the section on every PDF. The gate now resolves the active tab's reader
+  (the same `resolveCurrentReader` the pane itself uses) and only falls back
+  to the item. Found on a real Zotero 10.0.8 through the QA harness and pinned
+  by a unit test.
+- A snapshot reader's selection now reaches the Translate pane.
+  `_selectionRanges` is a pdf.js-view shape that EPUB and snapshot views do
+  not expose, and `resolveSelectionText` dropped the popup event's text
+  whenever the range read could not produce any — leaving selection
+  translation dead on exactly the readers where it still works. The read now
+  separates "nothing selected" (the DOM views' `getSelectionPosition()`
+  returns null) from "selected but unreadable", and the latter takes the
+  popup's text as the source of truth. PDF readers reach neither branch and
+  are unchanged. Also found and re-verified on a real Zotero 10.0.8.
+
 ## [1.18.0] - 2026-11-07
 
 ### Added
@@ -958,6 +998,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Releases before 1.2.0 predate this changelog and are not backfilled.
 
+[1.19.0]: https://github.com/Liozhang/z-transplit/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/Liozhang/z-transplit/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/Liozhang/z-transplit/compare/v1.16.1...v1.17.0
 [1.16.1]: https://github.com/Liozhang/z-transplit/compare/v1.16.0...v1.16.1
