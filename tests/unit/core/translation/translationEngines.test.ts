@@ -1256,14 +1256,17 @@ describe("translate.glossary — 术语表注入", () => {
     );
   }
 
-  it("custom 引擎：术语表接在系统提示之后", async () => {
-    glossaryPrefs({ "translate.glossary": "transformer=变换器\nbroken line" });
+  it("custom 引擎：术语表接在系统提示之后，且只注入本段出现的术语", async () => {
+    glossaryPrefs({
+      "translate.glossary": "transformer=变换器\nembedding=嵌入\nbroken line",
+    });
     chatRoute();
 
     const t = createTranslator("fr-FR");
-    await t("hello", "fr-FR");
+    await t("the transformer is broken", "fr-FR");
     const system = JSON.parse(h.fetchCalls[0].body).messages[0].content;
     expect(system).toContain("- transformer = 变换器");
+    expect(system).not.toContain("- embedding = 嵌入");
     expect(system).toContain("from auto-detect to French");
     expect(system).not.toContain("broken line");
   });
@@ -1279,13 +1282,13 @@ describe("translate.glossary — 术语表注入", () => {
     chatRoute();
 
     const t = createTranslator("zh-CN");
-    await t("hello", "zh-CN");
+    await t("the embedding layer", "zh-CN");
     const messages = JSON.parse(h.fetchCalls[0].body).messages;
     expect(messages).toHaveLength(2);
     expect(messages[0].role).toBe("system");
     expect(messages[0].content).toContain("- embedding = 嵌入");
     expect(messages[1].role).toBe("user");
-    expect(messages[1].content).toContain("hello");
+    expect(messages[1].content).toContain("the embedding layer");
   });
 
   it("无术语表时 ai 引擎不发多余的系统消息", async () => {
@@ -1310,7 +1313,7 @@ describe("translate.glossary — 术语表注入", () => {
       "translate.ai.apiUrl": "https://gw.example/v1",
       "translate.ai.apiKey": "ak-1",
       "translate.ai.model": "qwen-max",
-      "translate.glossary": "LLM=大模型",
+      "translate.glossary": "LLM=大模型\nembedding=嵌入",
     });
     route("chat/completions", () =>
       jsonResponse({
@@ -1319,10 +1322,95 @@ describe("translate.glossary — 术语表注入", () => {
     );
 
     const handle = await createAIBatchTranslator("zh-CN", "en-US");
-    await handle.translate(["x", "y"]);
+    await handle.translate(["the LLM is large", "y"]);
     const system = JSON.parse(h.fetchCalls[0].body).messages[0].content;
     expect(system).toContain("- LLM = 大模型");
+    expect(system).not.toContain("- embedding = 嵌入");
     expect(system).toContain('"segments"'); // 模板派生的批量信封仍在
+  });
+
+  it("ai 引擎：两次请求各注入各段出现的术语", async () => {
+    setPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.apiKey": "ak-1",
+      "translate.ai.model": "qwen-max",
+      "translate.glossary": "transformer=变换器\nembedding=嵌入",
+    });
+    chatRoute();
+
+    const t = createTranslator("zh-CN");
+    await t("the transformer is broken", "zh-CN");
+    let messages = JSON.parse(h.fetchCalls[0].body).messages;
+    expect(messages[0].content).toContain("- transformer = 变换器");
+    expect(messages[0].content).not.toContain("- embedding = 嵌入");
+
+    await t("the embedding layer", "zh-CN");
+    messages = JSON.parse(h.fetchCalls[1].body).messages;
+    expect(messages[0].content).toContain("- embedding = 嵌入");
+    expect(messages[0].content).not.toContain("- transformer = 变换器");
+  });
+
+  it("AI 批量兜底按段携带术语表（修复前整个丢掉）", async () => {
+    glossaryPrefs({
+      "translate.engineType": "ai",
+      "translate.ai.apiUrl": "https://gw.example/v1",
+      "translate.ai.apiKey": "ak-1",
+      "translate.ai.model": "qwen-max",
+      "translate.glossary": "transformer=变换器",
+    });
+    route("chat/completions", () =>
+      jsonResponse({ error: "boom" }, false, 500, "Internal Server Error"),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate([
+      "the transformer is broken",
+      "plain text",
+    ]);
+    expect(result.failedIndices).toEqual([0, 1]);
+    // 兜底调用 = 请求体不带批量信封的那些（批量尝试含 chatJson 自带的
+    // 一次内部重试，具体条数不钉）。
+    const fallbackCalls = h.fetchCalls
+      .map((c) => JSON.parse(c.body))
+      .filter((b) =>
+        !String(b.messages?.[1]?.content || "").startsWith('{"segments"'),
+      );
+    expect(fallbackCalls).toHaveLength(2);
+    // 兜底第 1 段含术语：system 消息带上过滤后的术语表，形态与单段路径一致。
+    const first = fallbackCalls[0].messages;
+    expect(first[0].role).toBe("system");
+    expect(first[0].content).toContain("- transformer = 变换器");
+    expect(first[1].role).toBe("user");
+    expect(first[1].content).toContain("the transformer is broken");
+    // 兜底第 2 段不含术语：不发多余的 system 消息。
+    const second = fallbackCalls[1].messages;
+    expect(second).toHaveLength(1);
+    expect(second[0].role).toBe("user");
+  });
+
+  it("custom 批量兜底按段过滤术语表，公式保护提示仍在", async () => {
+    glossaryPrefs({ "translate.glossary": "transformer=变换器\nembedding=嵌入" });
+    route("chat/completions", () =>
+      jsonResponse({ error: "boom" }, false, 500, "Internal Server Error"),
+    );
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    await handle.translate(["the transformer is broken", "plain text"]);
+    const fallbackCalls = h.fetchCalls
+      .map((c) => JSON.parse(c.body))
+      .filter((b) =>
+        !String(b.messages?.[1]?.content || "").startsWith('{"segments"'),
+      );
+    expect(fallbackCalls).toHaveLength(2);
+    const first = fallbackCalls[0].messages;
+    expect(first[0].role).toBe("system");
+    expect(first[0].content).toContain("- transformer = 变换器");
+    expect(first[0].content).not.toContain("- embedding = 嵌入");
+    expect(first[0].content).toContain("CRITICAL"); // 公式保护提示还在
+    const second = fallbackCalls[1].messages;
+    expect(second[0].role).toBe("system");
+    expect(second[0].content).not.toContain("transformer = 变换器");
   });
 
   it("改动术语表使翻译缓存失效；空白等同未配置", () => {

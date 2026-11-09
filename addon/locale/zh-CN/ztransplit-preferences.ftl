@@ -81,9 +81,11 @@ preferences-ztransplit-glossary =
     .value = 术语表
 preferences-ztransplit-glossary-desc =
     只对 AI 引擎与自定义（OpenAI 兼容）引擎生效。每行一条「原文=译文」，
-    例如：transformer=变换器。命中术语时模型必须使用给定的译法，未列出的
-    词不受影响。最多 200 条；修改术语表后，相关翻译会重新请求（不再命中
-    旧缓存）。
+    例如：transformer=变换器。每次请求只注入待译文本中出现的术语：拉丁术语
+    按大小写不敏感的整词匹配，中文术语按子串匹配，跨行短语不受换行影响；
+    未出现的术语不占提示词，同一术语的其他形式（如英文复数）需另立条目。
+    命中术语时模型必须使用给定的译法，未列出的词不受影响。最多 200 条；
+    修改术语表后，相关翻译会重新请求（不再命中旧缓存）。
 preferences-ztransplit-glossary-error-bad = 术语表格式不合法：每行应为「原文=译文」，且最多 200 条。
 
 ## ── 翻译引擎 ───────────────────────────────────────────────────────────────
@@ -277,6 +279,8 @@ preferences-ztransplit-custom-api-key-desc =
 preferences-ztransplit-custom-model =
     .value = 模型
 preferences-ztransplit-custom-model-desc =
+    可留空。要调用的模型名，例如 gpt-4o-mini。留空时由服务端使用默认模型，
+    翻译质量不受保证。
 preferences-ztransplit-custom-headers =
     .value = 自定义请求头
 preferences-ztransplit-custom-headers-desc =

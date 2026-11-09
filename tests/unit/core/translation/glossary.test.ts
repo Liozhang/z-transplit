@@ -6,13 +6,18 @@
  *      服务注入（跳过坏行），校验层服务面板（坏行整体拒绝）；
  *   2. 分隔符兼容 =、全角冒号、半角冒号，值两侧空白修剪，同源术语最后一个
  *      值生效；
- *   3. 条目上限 200；空术语表不得产生提示块（追加必须是纯无操作）。
+ *   3. 条目上限 200；空术语表不得产生提示块（追加必须是纯无操作）；
+ *   4. 注入按出现过滤（filterGlossaryByText）：拉丁术语大小写不敏感的整词
+ *      匹配、CJK 与纯符号术语子串匹配、PDF 连字与行断连字符先归一；屈折
+ *      形式（复数、时态）按设计不匹配。
  */
 import { describe, expect, it } from "vitest";
 
 import {
   GLOSSARY_MAX_ENTRIES,
   appendGlossary,
+  filterGlossaryByText,
+  glossaryForRequest,
   glossaryPromptBlock,
   parseGlossary,
   splitGlossaryLine,
@@ -124,5 +129,123 @@ describe("glossaryPromptBlock / appendGlossary — 提示注入", () => {
     ]);
     expect(out.startsWith("BASE\n\n")).toBe(true);
     expect(out).toContain("- a = 甲");
+  });
+});
+
+describe("filterGlossaryByText — 按出现过滤（注入层）", () => {
+  const entries = [
+    { source: "transformer", target: "变换器" },
+    { source: "embedding", target: "嵌入" },
+    { source: "变换器", target: "transformer" },
+  ];
+
+  it("只保留在文本中出现的术语，保持术语表原有顺序", () => {
+    expect(
+      filterGlossaryByText(entries, "the embedding layer of the model"),
+    ).toEqual([{ source: "embedding", target: "嵌入" }]);
+    expect(
+      filterGlossaryByText(entries, "变换器与 attention 都很重要"),
+    ).toEqual([{ source: "变换器", target: "transformer" }]);
+  });
+
+  it("大小写不敏感", () => {
+    expect(filterGlossaryByText(entries, "The Transformer is broken")).toEqual([
+      { source: "transformer", target: "变换器" },
+    ]);
+  });
+
+  it("拉丁术语按整词匹配：不命中更长单词内部，也不命中屈折形式", () => {
+    expect(filterGlossaryByText(entries, "he said AI is everywhere")).toEqual(
+      [],
+    );
+    expect(filterGlossaryByText(entries, "the transformers are broken")).toEqual(
+      [],
+    );
+  });
+
+  it("拉丁术语命中带标点的上下文", () => {
+    expect(
+      filterGlossaryByText(entries, "a transformer, an embedding; both fine"),
+    ).toEqual([
+      { source: "transformer", target: "变换器" },
+      { source: "embedding", target: "嵌入" },
+    ]);
+  });
+
+  it("CJK 术语按子串匹配，不要求词边界", () => {
+    expect(filterGlossaryByText(entries, "电力变换器组的损耗")).toEqual([
+      { source: "变换器", target: "transformer" },
+    ]);
+  });
+
+  it("连字先展开：ﬁgure 能命中术语 figure", () => {
+    expect(
+      filterGlossaryByText([{ source: "figure", target: "图" }], "see ﬁgure 3"),
+    ).toEqual([{ source: "figure", target: "图" }]);
+    expect(
+      filterGlossaryByText(
+        [{ source: "efficient", target: "高效" }],
+        "an eﬃcient encoder",
+      ),
+    ).toEqual([{ source: "efficient", target: "高效" }]);
+  });
+
+  it("软连字符与行断连字符先接上：transfor-\\nmer 能命中 transformer", () => {
+    // 硬连字符留在行断处
+    expect(
+      filterGlossaryByText(entries, "the transfor-\nmer is broken"),
+    ).toEqual([{ source: "transformer", target: "变换器" }]);
+    // 软连字符（U+00AD）单独出现
+    expect(
+      filterGlossaryByText(entries, "the transfor\u00ADmer is broken"),
+    ).toEqual([{ source: "transformer", target: "变换器" }]);
+    // 软连字符加行断
+    expect(
+      filterGlossaryByText(entries, "the transfor\u00AD\nmer is broken"),
+    ).toEqual([{ source: "transformer", target: "变换器" }]);
+  });
+
+  it("短语跨空白命中：machine\\nlearning 能命中 machine learning", () => {
+    expect(
+      filterGlossaryByText(
+        [{ source: "machine learning", target: "机器学习" }],
+        "the machine\nlearning  model",
+      ),
+    ).toEqual([{ source: "machine learning", target: "机器学习" }]);
+  });
+
+  it("纯符号术语按子串匹配", () => {
+    expect(
+      filterGlossaryByText([{ source: "→", target: "导致" }], "A→B 的映射"),
+    ).toEqual([{ source: "→", target: "导致" }]);
+  });
+
+  it("折叠后同源的重复术语只保留先出现者", () => {
+    const dupes = [
+      { source: "Transformer", target: "变形者" },
+      { source: "transformer", target: "变换器" },
+    ];
+    expect(filterGlossaryByText(dupes, "the transformer is broken")).toEqual([
+      { source: "Transformer", target: "变形者" },
+    ]);
+  });
+
+  it("空文本、空白文本、空术语表都返回空数组", () => {
+    expect(filterGlossaryByText(entries, "")).toEqual([]);
+    expect(filterGlossaryByText(entries, "   \n ")).toEqual([]);
+    expect(filterGlossaryByText([], "the transformer")).toEqual([]);
+  });
+});
+
+describe("glossaryForRequest — 解析加过滤一把抓", () => {
+  it("解析原始偏好后按文本过滤，坏行跳过", () => {
+    expect(
+      glossaryForRequest("transformer=变换器\nbroken line", "the transformer"),
+    ).toEqual([{ source: "transformer", target: "变换器" }]);
+  });
+
+  it("空偏好等同未配置", () => {
+    expect(glossaryForRequest("", "the transformer")).toEqual([]);
+    expect(glossaryForRequest("  \n ", "the transformer")).toEqual([]);
   });
 });

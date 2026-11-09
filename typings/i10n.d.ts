@@ -211,6 +211,7 @@ export type FluentMessageId =
   | 'preferences-ztransplit-custom-headers-desc'
   | 'preferences-ztransplit-custom-headers-error-bad-line'
   | 'preferences-ztransplit-custom-model'
+  | 'preferences-ztransplit-custom-model-desc'
   | 'preferences-ztransplit-data-dir-placeholder'
   | 'preferences-ztransplit-deepl-api-key'
   | 'preferences-ztransplit-deepl-api-key-desc'

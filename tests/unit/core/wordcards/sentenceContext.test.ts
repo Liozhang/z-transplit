@@ -6,11 +6,11 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { foldForMatch } from "../../../../src/utils/textFold";
 import {
   groupItemsIntoLines,
   joinLinesToText,
   linesForSelection,
-  normalizeForMatch,
   pickSentence,
   sentenceFromItems,
   captureSentenceContext,
@@ -27,11 +27,15 @@ function line(y: number, xMin: number, xMax: number, text: string): PdfTextLine 
   return { y, xMin, xMax, text };
 }
 
-describe("normalizeForMatch", () => {
+// The fold itself moved to utils/textFold (one definition for every
+// containment check in the addon); its own contract is pinned there and in
+// tests/unit/utils/textFold.test.ts. This block stays as the delegation proof:
+// pickSentence's matching still folds exactly this way.
+describe("foldForMatch — 句子匹配所用的折叠（已迁至 utils/textFold）", () => {
   it("folds case, apostrophes, ligatures and whitespace", () => {
-    expect(normalizeForMatch("Don’t STOP")).toBe("don't stop");
-    expect(normalizeForMatch("eﬃcient")).toContain("efficient");
-    expect(normalizeForMatch("  a\tb ")).toBe("a b");
+    expect(foldForMatch("Don’t STOP")).toBe("don't stop");
+    expect(foldForMatch("eﬃcient")).toContain("efficient");
+    expect(foldForMatch("  a\tb ")).toBe("a b");
   });
 });
 

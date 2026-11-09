@@ -31,6 +31,7 @@
 
 import { safeDebug } from "../../utils/logger";
 import { splitSentences } from "../readAloud/sentenceSplitter";
+import { foldForMatch } from "../../utils/textFold";
 
 /** Cap on one stored sentence — review display text, not a document quote. */
 export const SENTENCE_MAX_CHARS = 500;
@@ -79,28 +80,13 @@ export interface SelectionPositionLike {
 // Matching normalization
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Ligature expansions so "ﬁx" still matches "fix". */
-const LIGATURES: Record<string, string> = {
-  "ﬁ": "fi",
-  "ﬂ": "fl",
-  "ﬀ": "ff",
-  "ﬃ": "ffi",
-  "ﬄ": "ffl",
-};
-
 /**
- * Match form: lowercase, apostrophes unified, ligatures expanded, whitespace
- * collapsed. Used for containment checks (span/whole-text), never for index
- * math — slicing always happens on the original string.
+ * The match form lives in utils/textFold.ts (foldForMatch): lowercase,
+ * ligatures expanded, apostrophes unified, whitespace collapsed. One
+ * definition for every containment check in the addon, shared with the
+ * glossary matcher — used for span/whole-text containment, never for index
+ * math (slicing always happens on the original string).
  */
-export function normalizeForMatch(text: string): string {
-  let out = "";
-  for (const ch of text || "") {
-    const expansion = LIGATURES[ch];
-    out += expansion !== undefined ? expansion.toLowerCase() : ch.toLowerCase();
-  }
-  return out.replace(/['’]/g, "'").replace(/\s+/g, " ").trim();
-}
 
 /** Is the char at either side of a raw-text match a letter/digit/underscore? */
 function isWordChar(ch: string | undefined): boolean {
@@ -295,11 +281,11 @@ export function pickSentence(
   anchorLines?: string[],
 ): string | null {
   if (!text || !word) return null;
-  const wordForm = normalizeForMatch(word);
+  const wordForm = foldForMatch(word);
   if (!wordForm) return null;
 
   const anchors = (anchorLines ?? [])
-    .map((line) => normalizeForMatch(line))
+    .map((line) => foldForMatch(line))
     .filter((line) => line.length > 0);
   // Word-level overlap: a VISUAL line routinely spans a sentence boundary
   // (previous sentence's tail + next one's head), so "sentence contains the
@@ -312,9 +298,9 @@ export function pickSentence(
   let best: { sentence: string; covered: number } | null = null;
   for (const span of splitSentences(text)) {
     const sentence = text.slice(span.start, span.end).trim();
-    if (!sentence || !normalizeForMatch(sentence).includes(wordForm)) continue;
+    if (!sentence || !foldForMatch(sentence).includes(wordForm)) continue;
     if (!anchors.length) return sentence.slice(0, SENTENCE_MAX_CHARS);
-    const sentenceForm = normalizeForMatch(sentence);
+    const sentenceForm = foldForMatch(sentence);
     const covered = anchorWords.filter((w) => sentenceForm.includes(w)).length;
     if (!best || covered > best.covered) {
       best = { sentence: sentence.slice(0, SENTENCE_MAX_CHARS), covered };
@@ -328,7 +314,7 @@ export function pickSentence(
     const at = text.indexOf(anchor);
     if (at >= 0) {
       const hit = expandAroundRawMatch(text.slice(0, at + anchor.length + FALLBACK_EXPANSION_CHARS), word);
-      if (hit && normalizeForMatch(hit).includes(wordForm)) return hit;
+      if (hit && foldForMatch(hit).includes(wordForm)) return hit;
     }
   }
   return expandAroundRawMatch(text, word);

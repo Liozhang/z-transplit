@@ -95,10 +95,14 @@ preferences-ztransplit-glossary =
 preferences-ztransplit-glossary-desc =
     Applies to the AI engine and the custom (OpenAI-compatible) engine only.
     One entry per line as "source=translation", for example
-    transformer=transformer. When a term appears, the model must use the
-    listed translation; other words are unaffected. At most 200 entries;
-    changing the glossary re-requests affected translations (they no longer
-    hit the old cache).
+    transformer=transformer. Each request injects only the terms that occur
+    in the text being translated — Latin terms match case-insensitively as
+    whole words, CJK terms as substrings, and a phrase may span a line
+    break — so entries the text never mentions cost nothing. A term's other
+    forms (an English plural, say) need their own entry. When a term
+    appears, the model must use the listed translation; other words are
+    unaffected. At most 200 entries; changing the glossary re-requests
+    affected translations (they no longer hit the old cache).
 preferences-ztransplit-glossary-error-bad = Invalid glossary: each line should be "source=translation", and at most 200 entries.
 
 ## ── Translation engines ────────────────────────────────────────────────────
@@ -316,6 +320,8 @@ preferences-ztransplit-custom-api-key-desc =
 preferences-ztransplit-custom-model =
     .value = Model
 preferences-ztransplit-custom-model-desc =
+    Optional. The model name to call, e.g. gpt-4o-mini. When empty, the
+    server picks its default model, with no guarantee on translation quality.
 preferences-ztransplit-custom-headers =
     .value = Custom headers
 preferences-ztransplit-custom-headers-desc =

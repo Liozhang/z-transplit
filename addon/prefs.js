@@ -88,8 +88,9 @@ pref("extensions.zotero.ztransplit.translations.nameTemplate", "");
 pref("extensions.zotero.ztransplit.translate.output.maxTokens", 0);
 
 // 术语表（translate.glossary）：一行一条「原文=译文」，AI 与自定义引擎的
-// 每个请求把术语表注入系统提示。留空 = 不注入。修改后相关翻译重新请求
-// （缓存指纹包含术语表）。
+// 每个请求把术语表注入系统提示。注入按出现过滤：只注入待译文本中出现的
+// 术语（拉丁整词、中文子串，见 src/core/translation/glossary.ts）。
+// 留空 = 不注入。修改后相关翻译重新请求（缓存指纹包含整张术语表）。
 pref("extensions.zotero.ztransplit.translate.glossary", "");
 
 // Target language for PDF split-view translation ("" = follow Zotero locale).

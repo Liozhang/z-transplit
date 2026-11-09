@@ -51,6 +51,7 @@ import {
 import { resolveModelBudgets } from "../ai/modelCatalog";
 import {
   appendGlossary,
+  glossaryForRequest,
   glossaryPromptBlock,
   parseGlossary,
 } from "./glossary";
@@ -774,8 +775,10 @@ async function translateWithAI(
       // 显式预算就是上限：空回重试不得越过用户设的输出预算。
       emptyCompletionRetryMaxTokens: opts.maxOutputTokens,
     });
+    // 术语表按本段实际内容过滤：这段出现了哪些术语就钉哪些，未出现的不占
+    // 提示词（命中数记入调试日志）。
     const glossaryBlock = glossaryPromptBlock(
-      parseGlossary(opts.glossary || ""),
+      glossaryForRequest(opts.glossary || "", text),
     );
 
     // AI 端点同样有配额与并发限流；单段路径包一次限流退避，避免批量并发
@@ -850,7 +853,7 @@ async function translateWithCustom(
             role: "system",
             content: appendGlossary(
               formulaPreservingPrompt(targetDesc, sourceDesc),
-              parseGlossary(opts.glossary || ""),
+              glossaryForRequest(opts.glossary || "", text),
             ),
           },
           { role: "user", content: text },
@@ -1552,18 +1555,13 @@ export async function createAIBatchTranslator(
   // "custom" keeps its fixed batch wording; "ai" derives the batch prompt from
   // the user's own template so a custom prompt still governs every segment
   // (rendered once with a symbolic {{text}} role — see prompts.ts).
+  // 术语表不在这里拼：它按每次调用的实际待译内容过滤（见下面 translate()
+  // 开头的 prompt），一批只为自己的段落里出现的术语付上下文。
   const template = resolvePromptTemplate(cfg.aiPrompt);
-  const glossaryEntries = parseGlossary(cfg.glossary || "");
-  const prompt = appendGlossary(
-    isAI
-      ? batchJsonPromptFromTemplate(template, targetDesc, sourceDesc)
-      : batchJsonPrompt(targetDesc, sourceDesc),
-    glossaryEntries,
-  );
-  const singlePrompt = appendGlossary(
-    formulaPreservingPrompt(targetDesc, sourceDesc),
-    glossaryEntries,
-  );
+  const batchPromptBase = isAI
+    ? batchJsonPromptFromTemplate(template, targetDesc, sourceDesc)
+    : batchJsonPrompt(targetDesc, sourceDesc);
+  const singlePromptBase = formulaPreservingPrompt(targetDesc, sourceDesc);
 
   // ── Token budgets ──
   // Two hard constraints: contextWindow (input + output must fit) and
@@ -1615,6 +1613,14 @@ export async function createAIBatchTranslator(
     signal?: AbortSignal,
   ): Promise<BatchTranslateResult> => {
     const inputJson = JSON.stringify({ segments: texts });
+
+    // 术语表按本次批量的实际内容过滤：整表注入会让每一批都为不出现的术语
+    // 付上下文；命中数由 glossaryForRequest 记入调试日志。同一批内的所有
+    // 段落共享这份过滤结果，段间译法因此保持一致。
+    const prompt = appendGlossary(
+      batchPromptBase,
+      glossaryForRequest(cfg.glossary || "", texts.join("\n")),
+    );
 
     // Batch phase — up to 1 + MAX_BATCH_RETRIES attempts on the SAME chunk.
     // A non-compliant result (HTTP error, empty content, JSON parse/schema
@@ -1729,14 +1735,24 @@ export async function createAIBatchTranslator(
         failedIndices.push(i);
         continue;
       }
+      // 兜底同样按段过滤：这一段出现哪些术语就钉哪些。AI 兜底此前整个丢掉
+      // 术语表（与 1.14.0 宣称的「单段、批量、逐段兜底三路覆盖」不符），
+      // 这里补上，形态与单段路径一致——术语表独占一条 system 消息。
+      const paraGlossary = glossaryForRequest(cfg.glossary || "", texts[i]);
+      const paraBlock = glossaryPromptBlock(paraGlossary);
       try {
         const result = await executeWithIdleTimeout(
           () =>
             isAI
               ? client.chat({
                   // The user's template governs the fallback too: the rendered
-                  // template IS the request, same as the single-paragraph path.
+                  // template IS the request, same as the single-paragraph path —
+                  // and, like that path, the glossary rides its own system
+                  // message ahead of it.
                   messages: [
+                    ...(paraBlock
+                      ? [{ role: "system" as const, content: paraBlock }]
+                      : []),
                     {
                       role: "user",
                       content: renderPrompt(template, {
@@ -1757,7 +1773,10 @@ export async function createAIBatchTranslator(
                 })
               : client.chat({
                   messages: [
-                    { role: "system", content: singlePrompt },
+                    {
+                      role: "system",
+                      content: appendGlossary(singlePromptBase, paraGlossary),
+                    },
                     { role: "user", content: texts[i] },
                   ],
                   maxTokens:

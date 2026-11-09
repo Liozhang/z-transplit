@@ -192,6 +192,29 @@ itself: the language configuration and the template validation.
 - Requests go out per paragraph (no batch JSON), same as any other model backend
   (self-hosted Ollama, vLLM, a gateway, …).
 
+### The glossary
+
+The "Glossary" field in the settings pane (Edit ▸ Settings ▸ Z-Transplit) pins
+how domain terms are translated: one `source=translation` pair per line, for
+example `transformer=变换器` (a full-width or half-width colon also works as
+the separator).
+
+- Applies to the AI engine and the custom (OpenAI-compatible) engine only.
+  Machine-translation endpoints (Google, Bing, DeepL) have no prompt to inject
+  into and are unaffected.
+- Every request is filtered against the text being translated: only the terms
+  that occur in it are injected. Latin terms match case-insensitively as whole
+  words, CJK terms as substrings, and a phrase may span a line break; ligatures
+  and line-break hyphens from PDF extraction are normalized first.
+- Terms the text never mentions cost nothing — a 200-entry table no longer
+  dilutes every request. A term's other forms (an English plural, say) need
+  their own entry.
+- When a term appears, the model must use the listed translation; words not
+  listed translate normally.
+- At most 200 entries; a malformed line is rejected as a whole by the pane.
+- The cache fingerprint folds the whole glossary, so editing it re-requests
+  the affected translations instead of serving the old results.
+
 ## Entry Points
 
 - The reader's / item's "Translate" section: selection translation, bilingual,
