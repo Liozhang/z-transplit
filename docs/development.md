@@ -181,7 +181,26 @@ node scripts/qa/real-machine.mjs shoot                   # 结束
 现有补充命令针对 Zotero 10 SDT 阅读模式的 iframe 文档（`probe.js` 的 `selectText`
 选的是 pdf.js 文本层，SDT 模式下该层被隐藏，选不中）。
 
-排版/引擎相关的真机发现都建议带上 `docs/screenshots/` 截图归档。
+阅读器类型门控的补充命令：
+
+- `kindGate {kind}`（`pdf`｜`snapshot`｜`epub`）：从 `<QA_ROOT>\fixtures\`
+  导入并打开对应类型的附件，回报「翻译」区块的渲染与隐藏态、双语控制条、
+  工具栏双语按钮、阅读器右键子菜单在真实宿主里的呈现，以及宿主自己算出的
+  划词浮层参数。快照类型还会驱动一次真实选区（模拟 `_gotPointerUp` 后派发
+  `selectionchange`），验证选区文本端到端送达面板。fixture 缺省在
+  `<QA_ROOT>\fixtures\qa-reader-kind.<ext>`；EPUB 夹具由
+  `python -I scripts/qa/make_epub_fixture.py scripts/qa/fixtures/qa-reader-kind.epub`
+  生成（最小合法 EPUB 3，仓库内已提交）。
+- `shotWindow {path}`：进程内 `drawWindow` 截取主窗口存 PNG。启动器侧的
+  `PrintWindow` 对部分 Gecko 合成层不可靠——实测阅读器画面能抓到、右侧上下文
+  面板抓不到；`drawWindow` 画的是屏幕真实合成的结果。
+
+两个真机教训（都已钉进单元测试）：阅读器标签页的条目面板渲染的是附件的父
+条目，区块门控必须先解析当前标签页的阅读器实例；快照阅读器没有
+`_selectionRanges`，选区文本只由划词弹窗事件承载。
+
+排版/引擎相关的真机发现都建议带上 `docs/screenshots/` 截图归档（本轮阅读器
+类型门控的四张在 `docs/screenshots/reader-kind/`）。
 
 ### README 截图再生成
 

@@ -44,11 +44,16 @@ import {
 } from "../../../../../src/core/pdf/splitview/splitViewFactory";
 import { stateMap } from "../../../../../src/core/pdf/splitview/splitViewSync";
 
-/** 触发一次右键菜单构建，收集全部 append 载荷。 */
+/**
+ * 触发一次右键菜单构建，收集全部 append 载荷。
+ *
+ * reader 桩默认是 PDF 阅读器（Zotero 的 ReaderInstance.type）：本文件的契约
+ * 用例全部面向 PDF；阅读器类型门控的用例显式传其他类型覆盖。
+ */
 function fireViewContextMenu(reader: any): any[] {
   const appended: any[] = [];
   z!.fireReaderEvent("createViewContextMenu", {
-    reader,
+    reader: { type: "pdf", ...reader },
     append: (...items: any[]) => appended.push(...items),
   });
   return appended;
@@ -206,5 +211,23 @@ describe("registerReaderContextMenu — append 载荷契约", () => {
     // 流程结束：控制器清空，取消组随之消失。
     const settled = fireViewContextMenu({ itemID: 11, tabID: "tab-src" });
     expect(settled[0].groups).toHaveLength(2);
+  });
+
+  it("非 PDF 阅读器不追加子菜单（EPUB / 快照 / 未知类型）", () => {
+    // 分屏与双语两条链路都绑定 PDF（pdf.js 窗格 + SDT 阅读模式），宿主却对
+    // 每种阅读器都会派发 createViewContextMenu；类型门控让子菜单根本不出现，
+    // 而不是出现后点击才报错（见 src/core/readerKind.ts）。
+    expect(fireViewContextMenu({ itemID: 11, type: "epub", tabID: "tab-epub" })).toEqual([]);
+    expect(
+      fireViewContextMenu({ itemID: 12, type: "snapshot", tabID: "tab-snap" }),
+    ).toEqual([]);
+    // 类型取不到（reader 无 type、条目查不到）→ fail closed，同样不追加。
+    // 绕过助手：它会给 reader 桩默认合入 type: "pdf"。
+    const appended: any[] = [];
+    z!.fireReaderEvent("createViewContextMenu", {
+      reader: { itemID: 13, tabID: "tab-x" },
+      append: (...items: any[]) => appended.push(...items),
+    });
+    expect(appended).toEqual([]);
   });
 });

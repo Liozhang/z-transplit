@@ -25,6 +25,7 @@ import { getPref, getPrefDynamic, setPref } from "../utils/prefs";
 import { createAbortController } from "../utils/abort";
 import { resolveCurrentReader } from "./translatePane";
 import { probeReaderCapabilities } from "../core/capabilities";
+import { getReaderKind, type ReaderKind } from "../core/readerKind";
 import {
   startBilingualSession,
   stopBilingualSession,
@@ -519,6 +520,19 @@ export function registerBilingualReaderToolbar(): void {
     try {
       const { doc, append } = event;
       if (!doc || typeof append !== "function") return;
+      // The bilingual session and read-aloud behind this button are PDF-only
+      // (SDT reading mode + PDF text layer). Zotero fires renderToolbar on
+      // every reader kind — EPUB and snapshot included — so the kind decides
+      // whether the button exists at all rather than letting it error later.
+      const kind = getReaderKind(event?.reader);
+      if (kind !== "pdf") {
+        safeDebug(
+          "[Z-Transplit] bilingualControl: toolbar button skipped (reader kind: " +
+            kind +
+            ")",
+        );
+        return;
+      }
       append(buildReaderToolbarButton(doc));
     } catch (e) {
       safeDebug("[Z-Transplit] bilingualControl: reader toolbar button build failed: " + e);
@@ -556,10 +570,32 @@ export function mountBilingualControl(options: {
   doc: Document;
   body: HTMLElement;
   itemID?: number;
+  /**
+   * Reader kind of the item the block is mounted for. The bilingual session
+   * and read-aloud are PDF-only (SDT reading mode + PDF text layer), so any
+   * other kind mounts NOTHING and gets a no-op handle — a snapshot item keeps
+   * the translate pane's selection translation without this block's dead
+   * controls. Defaults to "pdf" for callers that have no kind at hand.
+   */
+  readerKind?: ReaderKind;
 }): BilingualControlHandle {
   const { doc, body } = options;
+  const kind = options.readerKind ?? "pdf";
   const existing = mounted.get(body);
   if (existing) return existing;
+  if (kind !== "pdf") {
+    // Fail closed and loudly-in-the-log: a bilingual block on a non-PDF reader
+    // could only ever error when used. The no-op is NOT remembered in
+    // `mounted`, so a body that later renders a PDF item still gets a real
+    // block (in production a body never changes kind — readers are bound to
+    // one attachment per tab — this only keeps the map honest).
+    safeDebug(
+      "[Z-Transplit] bilingualControl: block not mounted (reader kind: " +
+        kind +
+        ")",
+    );
+    return { destroy() {} };
+  }
 
   const styleEl = ensureStyle(doc, body);
 

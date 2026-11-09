@@ -39,9 +39,23 @@ export interface RegisteredPane {
 
 export interface ReaderSelectionStub {
   tabID: number;
-  selectionRanges: Array<{ text: string }>;
+  selectionRanges?: Array<{ text: string }>;
   /** Attachment itemID the reader runs on (translatePane parent/attachment matching). */
   itemID?: number;
+  /**
+   * Reader kind Zotero would report on this instance (`ReaderInstance.type`).
+   * Defaults to "pdf": every existing stub models a PDF reader, and the
+   * reader-kind gates under test override it explicitly (e.g. "epub").
+   */
+  type?: "pdf" | "epub" | "snapshot";
+  /**
+   * Model a DOM view (EPUB / HTML snapshot): the primary view exposes NO
+   * `_selectionRanges` (that array is a pdf.js-view shape) but does expose
+   * `getSelectionPosition()` — upstream dom-view.tsx returns null when the
+   * selection is collapsed. `domSelection` decides which.
+   */
+  domView?: boolean;
+  domSelection?: boolean;
 }
 
 export class PrefMap {
@@ -181,10 +195,20 @@ export class ZoteroMock {
   private getReaderInstance(): any {
     if (!this.readerStub) return null;
     if (!this.readerInstance) {
+      const stub = this.readerStub;
+      // DOM views (EPUB / snapshot) expose a live-selection probe instead of
+      // the pdf.js `_selectionRanges` array; see the stub field docs.
+      const primaryView = stub.domView
+        ? {
+            getSelectionPosition: () =>
+              stub.domSelection ? { type: "css", value: "p:nth-of-type(1)" } : null,
+          }
+        : { _selectionRanges: stub.selectionRanges };
       this.readerInstance = {
-        itemID: this.readerStub.itemID,
+        itemID: stub.itemID,
+        type: stub.type ?? "pdf",
         _internalReader: {
-          _primaryView: { _selectionRanges: this.readerStub.selectionRanges },
+          _primaryView: primaryView,
         },
       };
     }

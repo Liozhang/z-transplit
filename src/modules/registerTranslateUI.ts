@@ -22,7 +22,13 @@ import { getPref } from "../utils/prefs";
 import { getLocaleID } from "../utils/locale";
 import { safeDebug } from "../utils/logger";
 import { checkTranslationReadiness } from "../core/translation/featureReadiness";
-import { mountTranslatePane } from "../ui/translatePane";
+import {
+  getReaderKind,
+  readerKindFromItem,
+  supportsSelectionTranslation,
+  type ReaderKind,
+} from "../core/readerKind";
+import { mountTranslatePane, resolveCurrentReader } from "../ui/translatePane";
 
 /** Pane ID registered with Zotero.ItemPaneManager. */
 export const TRANSLATE_PANE_ID = "ztransplit-translate";
@@ -51,6 +57,28 @@ function addonID(): string {
 /** L10n ids as Zotero's Fluent overlay sees them (messages are build-prefixed). */
 const HEADER_L10N_ID = getLocaleID("pane-translate");
 const SIDENAV_L10N_ID = getLocaleID("pane-translate-sidenav");
+
+/**
+ * The reader kind a section render/change should gate on.
+ *
+ * NOT the item: a reader tab's context pane renders the attachment's PARENT
+ * item (Zotero's contextPane element passes `parentID`'s item when the
+ * attachment has one — upstream elements/contextPane.js#_addItemContext), so
+ * for a normal library item the `item` these hooks receive is a journalArticle
+ * whose reader kind is "none". Resolve the active tab's reader instead —
+ * exactly the resolution the translate pane itself uses
+ * (resolveCurrentReader) — and fall back to the item for the rare parentless
+ * attachment whose pane rendered before the reader registered.
+ */
+function sectionReaderKind(doc: Document, item: any): ReaderKind {
+  try {
+    const reader = resolveCurrentReader(doc);
+    if (reader) return getReaderKind(reader);
+  } catch (e) {
+    safeDebug("[Z-Transplit] registerTranslateUI: reader resolve failed: " + e);
+  }
+  return readerKindFromItem(item);
+}
 
 /**
  * Register the 「翻译」 item-pane section.
@@ -113,13 +141,27 @@ export async function registerTranslateUI(): Promise<boolean> {
       },
       onItemChange: ({
         tabType,
+        doc,
+        item,
         setEnabled,
       }: {
         tabType: string;
+        doc: Document;
+        item: any;
         setEnabled: (enabled: boolean) => void;
       }) => {
-        // Reader only — the source text comes from the PDF reader's selection.
-        setEnabled(tabType === "reader");
+        // Reader only — the source text comes from the reader's selection.
+        // AND only for reader kinds this plugin can serve: PDF (full feature
+        // set) and HTML snapshots (selection translation — Zotero's selection
+        // popup event carries the text on every kind). EPUB and undeterminable
+        // readers get no pane at all rather than a pane whose bilingual and
+        // read-aloud halves can never work there (see core/readerKind).
+        if (tabType !== "reader") {
+          setEnabled(false);
+          return;
+        }
+        const kind = sectionReaderKind(doc, item);
+        setEnabled(supportsSelectionTranslation(kind));
       },
       onRender: ({
         doc,
@@ -142,13 +184,19 @@ export async function registerTranslateUI(): Promise<boolean> {
         panes.set(body, handle);
         // Bilingual control block renders BELOW the translate pane root (the
         // pane mounts synchronously; this dynamic import appends afterwards);
-        // its destroy is folded into the same per-body teardown.
+        // its destroy is folded into the same per-body teardown. The block is
+        // PDF-only (SDT reading mode + PDF text layer for read-aloud), so the
+        // reader kind travels with the mount and the block refuses non-PDF
+        // readers itself — a snapshot keeps selection translation only.
+        // Note Zotero's setEnabled only HIDES a section, it does not skip
+        // onRender, so the kind must be honoured at mount time too.
         try {
           void import("../ui/bilingualControl").then((bc) => {
             const bcHandle = bc.mountBilingualControl({
               doc,
               body,
               itemID: item?.id,
+              readerKind: sectionReaderKind(doc, item),
             });
             const prev = panes.get(body);
             panes.set(body, {

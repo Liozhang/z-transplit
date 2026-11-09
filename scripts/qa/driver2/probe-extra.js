@@ -32,7 +32,15 @@
  *                                （供启动器侧做系统级屏幕截取——drawWindow
  *                                画不进独立的弹出窗口）。返回各条目的类名
  *                                与 CSS 变量状态
- *   iconclose {}                 收起 iconopen 弹开的菜单
+ *   iconclose {}                 收起 iconopen 弹开的临时弹窗，并把五个条目挪回原右键子菜单
+ *   kindGate {kind, path}        阅读器类型门控验证（readerKind.ts）：导入并
+ *                                打开 pdf/snapshot/epub 附件，回报「翻译」区块
+ *                                渲染与隐藏态、双语控制条、工具栏按钮、右键
+ *                                子菜单在真实宿主里的呈现。fixture 缺省取
+ *                                <QA_ROOT>\fixtures\qa-reader-kind.<ext>
+ *                                （epub 由 scripts/qa/make_epub_fixture.py 生成）
+ *   shotWindow {path}             进程内 drawWindow 截取主窗口存 PNG（启动器
+ *                                侧 PrintWindow 对部分合成层不可靠时用）
  *                                行文本）。用于验证「事情做完后弹窗自己
  *                                消失」这类回归：跑完流水线/双语会话后轮
  *                                询它，窗口数应为 0
@@ -626,5 +634,402 @@
     }
     tmp.remove();
     return { restored: !!host, state: "closed" };
+  };
+
+  /**
+   * shotWindow {path}  用 Zotero 自己的 drawWindow 把主窗口画进 canvas 并
+   * 存成 PNG。PrintWindow（启动器侧）对某些 Gecko 合成层不可靠——实测阅读器
+   * 画面能抓到、右侧上下文面板抓不到；进程内 drawWindow 画的是屏幕真实合成
+   * 的结果。path 缺省 <QA_ROOT>\drawwindow-shot.png。
+   */
+  PROBE_CMDS.shotWindow = async function (arg) {
+    const opts = parseOpts(arg);
+    const win = Zotero.getMainWindow();
+    const doc = win && win.document;
+    if (!doc) return { error: "no main window" };
+    const out =
+      opts.path || PathUtils.join("D:\\zt-qa", "drawwindow-shot.png");
+    const w = win.innerWidth || 1440;
+    const h = win.innerHeight || 900;
+    const canvas = doc.createElementNS(
+      "http://www.w3.org/1999/xhtml",
+      "canvas",
+    );
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    // 白色底：drawWindow 的 backgroundColor 参数对透明区域生效。
+    ctx.drawWindow(win, 0, 0, w, h, "white");
+    const dataURL = canvas.toDataURL("image/png");
+    const base64 = dataURL.slice(dataURL.indexOf(",") + 1);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    await IOUtils.write(out, bytes);
+    const st = await IOUtils.stat(out);
+    return { out, size: st.size, w, h };
+  };
+
+  /**
+   * kindGate {kind, path}  阅读器类型门控真机验证（src/core/readerKind.ts）。
+   *
+   * 导入并打开指定类型的附件，回报插件四个读者入口在真实宿主里的呈现：
+   *
+   *   - 「翻译」区块（ztransplit-translate）：是否渲染、是否被 setEnabled
+   *     置为 hidden、双语控制条（.ztransplit-bc-bar）是否存在
+   *   - 阅读器工具栏双语按钮（.ztransplit-bc-toolbar，renderToolbar 追加）
+   *   - 阅读器右键子菜单（createViewContextMenu 监听器真实跑一遍）
+   *   - 阅读器实例自报的 type 与附件 contentType
+   *
+   * 期望矩阵：pdf → 区块可见且带双语条、工具栏按钮在、子菜单在；
+   * snapshot → 区块可见但无双语条、工具栏按钮不在、子菜单不在；
+   * epub → 区块不渲染（onItemChange 未启用）。fixture 路径缺省时按
+   * <QA_ROOT>\fixtures 下的既定文件名取。
+   */
+  const KIND_FIXTURES = {
+    pdf: "qa-reader-kind.pdf",
+    snapshot: "qa-reader-kind.html",
+    epub: "qa-reader-kind.epub",
+  };
+  const kindGateItems = {};
+
+  PROBE_CMDS.kindGate = async function (arg) {
+    const opts = parseOpts(arg);
+    const kind = String(opts.kind || "");
+    const fixture = KIND_FIXTURES[kind];
+    if (!fixture) return { error: "kind must be pdf|snapshot|epub", got: kind };
+
+    const win = Zotero.getMainWindow();
+    const doc = win && win.document;
+    const ZoteroPane = win.ZoteroPane;
+    const Zotero_Tabs = win.Zotero_Tabs;
+    const file =
+      opts.path || PathUtils.join("D:\\zt-qa", "fixtures", fixture);
+    if (!(await IOUtils.exists(file))) {
+      return { error: "fixture missing", file };
+    }
+
+    // 一个父条目 + 每类一个附件；同一会话内重复调用复用已导入的附件。
+    if (!kindGateItems.parent) {
+      const parent = new Zotero.Item("journalArticle");
+      parent.setField("title", "QA reader-kind sample");
+      kindGateItems.parent = await parent.saveTx();
+    }
+    if (!kindGateItems[kind]) {
+      const att = await Zotero.Attachments.importFromFile({
+        file,
+        parentItemID: kindGateItems.parent,
+        title: "QA reader-kind " + kind,
+      });
+      kindGateItems[kind] = att.id;
+    }
+    const attID = kindGateItems[kind];
+
+    // 单选 + 打开：多选时 Zotero 显示"N items in this view"，item-details
+    // 根本不渲染，自定义区块也就无从出现（与 probe.js#reader 同惯例）。
+    ZoteroPane.selectItem(attID);
+    await Zotero.Promise.delay(300);
+    await ZoteroPane.viewAttachment(attID);
+
+    // 等阅读器就绪（轮询 tab → reader），再留一段 settle 时间让工具栏与
+    // 条目面板渲染完。
+    let reader = null;
+    for (let i = 0; i < 40; i++) {
+      await Zotero.Promise.delay(250);
+      reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+      if (reader && reader.itemID === attID) break;
+    }
+    await Zotero.Promise.delay(2000);
+
+    // 提到前台：启动器侧做系统级屏幕截取时，QA 窗口可能被用户自己的窗口盖住。
+    try {
+      win.focus();
+    } catch {
+      /* headless / no window manager */
+    }
+    // 加宽窗口：QA profile 的默认窗宽窄，条目面板(翻译区块)会被挤出可见
+    // 区域。PrintWindow 按窗口矩形捕获，超出屏幕的部分也能拍到。
+    try {
+      win.resizeTo(1440, 900);
+      await Zotero.Promise.delay(600);
+    } catch {
+      /* resize refused */
+    }
+    await Zotero.Promise.delay(500);
+
+    const tabID = Zotero_Tabs.selectedID;
+
+    // 上下文面板在 QA profile 里默认折叠，而 item-details 的自定义区块要等
+    // 面板展开、进入视口后才渲染（上游 itemDetails 的交叉观察器）。展开并
+    // 轮询等待区块体出现（与 probe.js#openContextPane 同思路）。注意只能
+    // 用一种方式展开：先置 collapsed=false 再去点切换按钮会把面板重新折上。
+    const contextPane = doc.getElementById("zotero-context-pane");
+    const zcp = win.ZoteroContextPane;
+    let expandAction = "already-open";
+    if (contextPane?.collapsed || zcp?.collapsed) {
+      if (zcp) {
+        zcp.collapsed = false;
+        if (typeof zcp.update === "function") zcp.update();
+        expandAction = "property";
+      }
+      await Zotero.Promise.delay(800);
+      // 仍折叠（属性设置被忽略）才改用按钮点击——用户的方式。
+      const stillCollapsed =
+        doc.getElementById("zotero-context-pane")?.collapsed ||
+        win.ZoteroContextPane?.collapsed;
+      if (stillCollapsed) {
+        const btn = doc.getElementById("zotero-tb-context-pane");
+        if (btn) {
+          btn.click();
+          expandAction = "button";
+        }
+        await Zotero.Promise.delay(800);
+      }
+    }
+    let paneRendered = false;
+    for (let i = 0; i < 40; i++) {
+      const details = doc.getElementById(tabID + "-context");
+      if (details?.querySelector(".ztransplit-tp")) {
+        paneRendered = true;
+        break;
+      }
+      await Zotero.Promise.delay(250);
+    }
+    // 把「翻译」区块滚进可视区：上下文面板默认停在顶部 Info 区，区块在下方，
+    // 截图与人工查看都看不见。附件预览等异步内容会在 settle 期间展开、把区块
+    // 又挤出去，所以收集状态前再滚一次。
+    const scrollToSection = () => {
+      try {
+        const details = doc.getElementById(tabID + "-context");
+        const sectionEl = Array.from(
+          details?.querySelectorAll("item-pane-custom-section") || [],
+        ).find((c) => (c.dataset.pane || "").includes("transplit"));
+        sectionEl?.scrollIntoView({ block: "start" });
+      } catch {
+        /* scroll refused */
+      }
+    };
+    scrollToSection();
+    await Zotero.Promise.delay(600);
+    scrollToSection();
+    await Zotero.Promise.delay(600);
+
+    // 快照：驱动一次真实选区，验证「选区翻译」端到端可用。DOM 视图监听
+    // iframe 文档的 selectionchange（上游 dom-view.tsx），选中后宿主走
+    // onSetSelectionPopup → renderTextSelectionPopup 事件 → 插件的选区同步
+    // 监听器把文本送进面板（PDF 走的是同一条监听器，只是文本层不同）。
+    let selectionDrive = null;
+    if (kind === "snapshot") {
+      try {
+        const pv = reader?._internalReader?._primaryView;
+        const iw = pv?._iframeWindow;
+        const idoc = pv?._iframeDocument ?? iw?.document;
+        const para = idoc?.querySelector("p, h1, h2, li");
+        const node = para?.firstChild;
+        if (iw && idoc && node && node.textContent) {
+          // 上游 dom-view 的 _tryUseTool 只在 _gotPointerUp 为真时才弹划词
+          // 浮层（真实指针抬起后设置），程序化派发前先模拟这个状态。
+          if (pv) pv._gotPointerUp = true;
+          const range = idoc.createRange();
+          const len = Math.min(60, node.textContent.length);
+          range.setStart(node, 0);
+          range.setEnd(node, len);
+          const sel = iw.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          idoc.dispatchEvent(new iw.Event("selectionchange", { bubbles: true }));
+          selectionDrive = {
+            driven: true,
+            chars: len,
+            sample: node.textContent.slice(0, 50),
+          };
+        } else {
+          selectionDrive = { driven: false, reason: "no text node in view" };
+        }
+      } catch (e) {
+        selectionDrive = { driven: false, error: String(e) };
+      }
+      await Zotero.Promise.delay(2000);
+      // 诊断：宿主是否算出了划词浮层（annotation.text 在这里），以及插件监听
+      // 器是否登记在案——用于区分「宿主没处理选区」与「插件没收到事件」。
+      try {
+        const internal = reader?._internalReader?.wrappedJSObject ?? reader?._internalReader;
+        const popup =
+          internal?._state?.primaryViewSelectionPopup ??
+          internal?._state?.secondaryViewSelectionPopup ??
+          null;
+        const listeners = Array.from(Zotero.Reader._registeredListeners || []);
+        selectionDrive.hostPopup = popup
+          ? {
+              text: (popup.annotation?.text || "").slice(0, 80),
+              hasRect: Array.isArray(popup.rect),
+            }
+          : null;
+        selectionDrive.popupListeners = listeners.filter(
+          (l) => l.type === "renderTextSelectionPopup",
+        ).length;
+        selectionDrive.paneTextNow = (
+          doc
+            .getElementById(tabID + "-context")
+            ?.querySelector(".ztransplit-tp-source-text")?.textContent || ""
+        ).slice(0, 120);
+      } catch (e) {
+        selectionDrive.diagError = String(e);
+      }
+    }
+
+    reader = Zotero.Reader.getByTabID(tabID);
+    const attachment = Zotero.Items.get(attID);
+
+    // ── 「翻译」区块 ──
+    // 阅读器标签页的条目面板不在标签页容器里，而在全局的 context-pane 中：
+    // item-details#{tabID}-context（上游 elements/contextPane.js 的
+    // _addItemContext 创建，deck 切换显示）。库标签页的面板则是
+    // item-details#zotero-item-details。按当前标签页类型选对容器再查，
+    // 否则会命中另一个标签页的区块。
+    const contextDetails = doc.getElementById(tabID + "-context");
+    const tabContainer = contextDetails || doc.getElementById(tabID) || doc;
+    const scoped = Array.from(
+      tabContainer.querySelectorAll("item-pane-custom-section"),
+    ).filter((c) => (c.dataset.pane || "").includes("transplit"));
+    const global = Array.from(
+      doc.querySelectorAll("item-pane-custom-section"),
+    ).filter((c) => (c.dataset.pane || "").includes("transplit"));
+    const section = scoped[0] || null;
+    const sectionInfo = section
+      ? {
+          found: true,
+          hidden: section.hidden,
+          bilingualBar: !!section.querySelector(".ztransplit-bc-bar"),
+          bilingualToggle: !!section.querySelector(".ztransplit-bc-toggle"),
+          paneRoot: !!section.querySelector(".ztransplit-tp"),
+          textLength: (section.textContent || "").length,
+          textSample: (section.textContent || "").slice(0, 200),
+          buttons: Array.from(section.querySelectorAll("button"), (b) => [
+            b.className,
+            String(b.textContent || "").slice(0, 40),
+          ]).slice(0, 12),
+        }
+      : { found: false };
+    // 诊断：全局可见的同类区块数（库标签页的隐藏区块不计入判定）。
+    const allSections = global.map((c) => ({
+      inActiveTab: tabContainer.contains(c),
+      hidden: c.hidden,
+      bilingualBar: !!c.querySelector(".ztransplit-bc-bar"),
+    }));
+
+    // 诊断：每个区块的祖先链（标签名 + id/class），以及当前标签页容器的
+    // 身份——用来确认 item-pane 到底挂在哪个容器里。
+    const chain = (el) => {
+      const out = [];
+      let node = el;
+      while (node && node !== doc.body) {
+        out.push(
+          node.tagName +
+            (node.id ? "#" + node.id : "") +
+            (node.className && typeof node.className === "string"
+              ? "." + node.className.split(/\s+/).filter(Boolean).slice(0, 2).join(".")
+              : ""),
+        );
+        node = node.parentElement;
+      }
+      return out;
+    };
+    const sectionChains = global.map((c) => chain(c));
+    const tabContainerInfo = {
+      requested: tabID,
+      resolved:
+        tabContainer === doc
+          ? "(document fallback)"
+          : tabContainer.id || tabContainer.tagName,
+      tag: tabContainer.tagName,
+      hasItemPane: !!tabContainer.querySelector("item-pane"),
+      libraryViews: Array.from(
+        doc.querySelectorAll("library-view"),
+        (v) => v.tabID ?? null,
+      ),
+    };
+
+    // ── 阅读器工具栏双语按钮（renderToolbar 追加进阅读器 iframe 文档）──
+    let toolbarButton = null;
+    const readerDoc =
+      reader?._iframeWindow?.document ??
+      reader?._internalReader?._iframeWindow?.document ??
+      null;
+    if (readerDoc) {
+      const btn = readerDoc.querySelector(".ztransplit-bc-toolbar");
+      toolbarButton = btn
+        ? { found: true, title: btn.getAttribute("title") }
+        : { found: false };
+    } else {
+      toolbarButton = { found: false, reason: "reader document unreachable" };
+    }
+
+    // ── 阅读器右键子菜单：把 createViewContextMenu 监听器真实跑一遍 ──
+    const registered = Array.from(Zotero.Reader._registeredListeners || []);
+    const cv = registered.filter((x) => x.type === "createViewContextMenu");
+    const appended = [];
+    if (reader) {
+      for (const entry of cv) {
+        try {
+          await entry.handler({ reader, append: (o) => appended.push(o) });
+        } catch (e) {
+          appended.push({ label: "LISTENER-ERROR", _err: String(e) });
+        }
+      }
+    }
+    const menuLabels = appended.flatMap((item) =>
+      Array.isArray(item.groups) ? item.groups.flat().flat() : [item],
+    ).map((m) => m.label);
+
+    return {
+      kind,
+      attachmentID: attID,
+      contentType: attachment?.attachmentContentType ?? null,
+      readerOpen: !!reader,
+      readerType: reader?.type ?? null,
+      readerItemID: reader?.itemID ?? null,
+      tabType: Zotero_Tabs.selectedType ?? null,
+      tabID,
+      paneRendered,
+      contextPane: {
+        collapsed: doc.getElementById("zotero-context-pane")?.collapsed ?? null,
+        expandAction,
+      },
+      section: sectionInfo,
+      sourceText: section
+        ? (section.querySelector(".ztransplit-tp-source-text")?.textContent ||
+            "").slice(0, 300)
+        : null,
+      selectionDrive,
+      allSections,
+      sectionChains,
+      tabContainerInfo,
+      paneGeometry: (() => {
+        const cp = doc.getElementById("zotero-context-pane");
+        const inner = doc.getElementById("zotero-context-pane-inner");
+        const details = doc.getElementById(tabID + "-context");
+        const rect = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+        };
+        return {
+          window: { w: win.innerWidth, h: win.innerHeight },
+          contextPane: rect(cp),
+          contextPaneInner: rect(inner),
+          itemDetails: rect(details),
+          itemDetailsVisible: details
+            ? !!(details.offsetWidth || details.offsetHeight)
+            : null,
+        };
+      })(),
+      toolbarButton,
+      menu: {
+        listenerCount: cv.length,
+        appended: appended.length,
+        labels: menuLabels,
+      },
+    };
   };
 })();

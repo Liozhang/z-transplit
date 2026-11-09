@@ -41,6 +41,7 @@ import {
 } from "./types";
 import { getString } from "../../../utils/locale";
 import { getPrefDynamic } from "../../../utils/prefs";
+import { getReaderKind } from "../../readerKind";
 import { createReaderBrowser, ReaderPane } from "./readerPaneAdapter";
 import { safeDebug } from "../../../utils/logger";
 import { toErrorMessage } from "../../../utils/error";
@@ -520,6 +521,22 @@ export function registerReaderContextMenu(): void {
     _readerContextMenuHandler = (event: any) => {
       const { reader, append } = event;
       if (!append || !reader) return;
+
+      // Both entry groups are PDF-bound: the split view drives two pdf.js
+      // panes, and the bilingual session needs the SDT reading mode. Zotero
+      // fires createViewContextMenu on every reader kind — EPUB and snapshot
+      // included — so the kind decides whether the submenu exists at all
+      // rather than letting its entries fail when clicked (see
+      // core/readerKind). An undeterminable kind skips too (fail closed).
+      const kind = getReaderKind(reader);
+      if (kind !== "pdf") {
+        safeDebug(
+          "[Z-Transplit splitView] reader menu skipped (reader kind: " +
+            kind +
+            ")",
+        );
+        return;
+      }
 
       // Group 1: conditional cancel — only shown while a translation is in
       // progress (empty groups are filtered out below; a rendered empty group

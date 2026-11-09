@@ -454,14 +454,23 @@ export function resolveCurrentReader(doc: Document, itemID?: number): any {
  * — with `_secondaryView` as a documented secondary attempt. `undefined`
  * (rather than an empty array) is what distinguishes "API missing" from
  * "nothing selected", which is what keeps the empty state honest.
+ *
+ * When the ranges array is absent the reader is a DOM view (EPUB / HTML
+ * snapshot): `_selectionRanges` is a pdf.js-view shape those views never had.
+ * They do expose a live-selection probe — `getSelectionPosition()` returns
+ * null when nothing is selected — which separates "nothing selected" (report
+ * empty, the honest resting state) from "selected, but this reader cannot
+ * hand us the text" (report unsupported; the selection popup event carries
+ * the text instead — see resolveSelectionText).
  */
 function readSelection(doc: Document, itemID?: number): SelectionRead {
   const reader = resolveCurrentReader(doc, itemID);
   if (!reader) return { kind: "no-reader" };
 
   let ranges: any[] | undefined;
+  let internal: any;
   try {
-    const internal = reader._internalReader;
+    internal = reader._internalReader;
     if (!internal) return { kind: "no-reader" };
     ranges = internal._primaryView?._selectionRanges;
     if (ranges === undefined) ranges = internal._secondaryView?._selectionRanges;
@@ -470,7 +479,23 @@ function readSelection(doc: Document, itemID?: number): SelectionRead {
     return { kind: "unsupported" };
   }
 
-  if (!Array.isArray(ranges)) return { kind: "unsupported" };
+  if (!Array.isArray(ranges)) {
+    // DOM view (EPUB / snapshot): no ranges array. A live selection there
+    // means the popup event is the text's only carrier; no live selection
+    // means the honest answer is "nothing selected".
+    const view = internal._primaryView ?? internal._secondaryView;
+    const probe = view?.getSelectionPosition;
+    if (typeof probe === "function") {
+      try {
+        return probe.call(view) ? { kind: "unsupported" } : { kind: "empty" };
+      } catch (e) {
+        safeDebug(
+          "[Z-Transplit] translatePane: DOM selection probe failed: " + e,
+        );
+      }
+    }
+    return { kind: "unsupported" };
+  }
 
   const text = ranges
     .map((r: any) => r?.text)
@@ -1397,6 +1422,16 @@ export function mountTranslatePane(
    * lookup (old card re-displayed, no translation) for a new sentence
    * selection (2026-10-09 user report). When the two disagree we log it so the
    * trigger can be diagnosed from debug output.
+   *
+   * The one reader family where the ranges read can NEVER produce text —
+   * EPUB and HTML-snapshot views expose no `_selectionRanges` — reports
+   * "unsupported" forever, and the popup event is then the only signal the
+   * selection ever produces. Dropping the popup text there would make
+   * selection translation silently dead on exactly the readers where it
+   * still works (real-machine verified on Zotero 10.0.8), so for that read
+   * kind the popup text is the source of truth. Readers that do expose the
+   * API keep their existing authority untouched: "empty" (cleared) and
+   * "text" (ranges) never reach this branch.
    */
   function resolveSelectionText(read: SelectionRead): string {
     const rangeText = read.kind === "text" ? read.text : "";
@@ -1408,6 +1443,9 @@ export function mountTranslatePane(
           JSON.stringify(lastPopupText.slice(0, 80)) +
           ") — trusting the popup text",
       );
+      return lastPopupText;
+    }
+    if (!rangeText && lastPopupText && read.kind === "unsupported") {
       return lastPopupText;
     }
     return rangeText;

@@ -52,6 +52,7 @@ const K = {
   placeholder: "ztransplit-pane-translate-placeholder",
   resultPlaceholder: "ztransplit-pane-translate-result-placeholder",
   emptySelection: "ztransplit-pane-translate-empty-selection",
+  selectionUnsupported: "ztransplit-pane-translate-selection-unsupported",
   tooLong: "ztransplit-pane-translate-error-too-long",
   notReady: "ztransplit-pane-translate-error-not-ready",
   service: "ztransplit-pane-translate-error-service",
@@ -431,6 +432,37 @@ describe("B16 选区读数过期时以弹窗文本为准（2026-10-09 回归）"
     await flush();
     expect(ctx.text(ctx.body)).toContain(K.emptySelection);
     expect(ctx.text(ctx.body)).not.toContain("hello");
+  });
+
+  it("快照阅读器（DOM 视图）：弹窗文本送达面板，选区翻译可用", async () => {
+    // HTML 快照的阅读器没有 _selectionRanges（那是 pdf.js 视图的形状），
+    // 选区文本只由划词弹窗事件承载。读取分支必须在这种情况下采用弹窗文本，
+    // 否则快照上的选区翻译是死的（真机 Zotero 10.0.8 复现过）。
+    ctx = setup(AUTO_PREFS, null);
+    ctx.z.reader = { tabID: 1, type: "snapshot", domView: true, domSelection: true };
+    routeOK(ctx.fm);
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    await flush();
+    // 有 live 选区但弹窗还没到：披露（读不到），不是「未选中」。
+    expect(ctx.text(ctx.body)).toContain(K.selectionUnsupported);
+
+    ctx.z.fireSelectionPopup("快照阅读器里选中的句子");
+    await settleAfterPopup();
+    expect(ctx.text(ctx.body)).toContain("快照阅读器里选中的句子");
+    // 自动翻译开着：选区内即译，请求体带的就是弹窗文本。
+    expect(ctx.fm.calls.length).toBe(1);
+    expect(ctx.fm.calls[0].body).toContain("快照阅读器里选中的句子");
+  });
+
+  it("快照阅读器（DOM 视图）：无 live 选区时是诚实的「未选中」", async () => {
+    // getSelectionPosition() 返回 null（选区折叠）→ 读数 empty：静态显示
+    // 「未选中文本」，而不是骗人的「接口不支持，请升级 Zotero」。
+    ctx = setup(ENGINE_PREFS, null);
+    ctx.z.reader = { tabID: 1, type: "snapshot", domView: true, domSelection: false };
+    mountTranslatePane({ doc: ctx.doc, body: ctx.body });
+    await flush();
+    expect(ctx.text(ctx.body)).toContain(K.emptySelection);
+    expect(ctx.text(ctx.body)).not.toContain(K.selectionUnsupported);
   });
 });
 

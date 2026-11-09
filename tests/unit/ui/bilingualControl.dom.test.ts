@@ -14,6 +14,8 @@
  *   - 启动期间三个按钮禁用，结束后恢复可点（退出复位到存储的默认模式）
  *   - 开关文案固定（bilingual-enable 键），会话状态由 aria-pressed 表达；
  *     模式按钮无半透明态，当前模式用中性按压态高亮
+ *   - 阅读器类型门控：快照条目不挂载双语块（PDF 专属能力），工具栏按钮
+ *     同样只追加给 PDF 阅读器
  *
  * speechSynthesis 用Fake：cancel/finish 的 onend 一律落在后续宏任务（与真实
  * 平台一致），因此 stale-onend 竞态在本测试中真实复现。
@@ -22,9 +24,14 @@ import { JSDOM } from "jsdom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   mountBilingualControl,
+  registerBilingualReaderToolbar,
+  unregisterBilingualReaderToolbar,
   type BilingualControlHandle,
 } from "../../../src/ui/bilingualControl";
-import { createZoteroMock } from "../../qa/harness/zotero-mock";
+import {
+  createZoteroMock,
+  resetReaderEventListeners,
+} from "../../qa/harness/zotero-mock";
 import * as pdfReaderTts from "../../../src/core/readAloud/pdfReaderTts";
 import { exitBilingualSession } from "../../../src/core/pdf/sdt/sdtBridge";
 
@@ -168,7 +175,7 @@ function setup(prefs: Record<string, unknown> = {}): Ctx {
   (dom.window as any).speechSynthesis = synth;
   (dom.window as any).SpeechSynthesisUtterance = FakeUtterance;
 
-  const handle = mountBilingualControl({ doc, body, itemID: 1 });
+  const handle = mountBilingualControl({ doc, body, itemID: 1, readerKind: "pdf" });
 
   const button = (label: string): HTMLButtonElement => {
     const btn = [...doc.querySelectorAll("button")].find((b: any) =>
@@ -482,5 +489,95 @@ describe("双语控制条：会话与面板生命周期", () => {
     ctx.click("bilingual-enable"); // 再点 = 退出
     await flush();
     expect(ctx.togglePressed()).toBe("false");
+  });
+});
+
+describe("双语控制条：阅读器类型门控", () => {
+  let z: ReturnType<typeof createZoteroMock> | null = null;
+
+  beforeEach(() => {
+    resetReaderEventListeners();
+  });
+
+  afterEach(() => {
+    unregisterBilingualReaderToolbar();
+    resetReaderEventListeners();
+    z?.uninstall();
+    z = null;
+  });
+
+  it("快照条目不挂载任何 DOM，destroy 无害", () => {
+    const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+    const doc = dom.window.document;
+    const body = doc.createElement("div");
+    doc.body.appendChild(body);
+
+    const handle = mountBilingualControl({
+      doc: doc as any,
+      body: body as any,
+      itemID: 2,
+      readerKind: "snapshot",
+    });
+
+    // 双语块根元素（ztransplit-bc-root）与样式都不出现。
+    expect(doc.querySelector(".ztransplit-bc-root")).toBeNull();
+    expect(doc.querySelector("style")).toBeNull();
+    expect(body.childNodes).toHaveLength(0);
+    expect(() => handle.destroy()).not.toThrow();
+    dom.window.close();
+  });
+
+  it("PDF 条目正常挂载（对照：门控只挡非 PDF）", () => {
+    const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+    const doc = dom.window.document;
+    const body = doc.createElement("div");
+    doc.body.appendChild(body);
+
+    const handle = mountBilingualControl({
+      doc: doc as any,
+      body: body as any,
+      itemID: 3,
+      readerKind: "pdf",
+    });
+    expect(doc.querySelector(".ztransplit-bc-root")).not.toBeNull();
+    handle.destroy();
+    dom.window.close();
+  });
+
+  it("工具栏按钮只追加给 PDF 阅读器", () => {
+    z = createZoteroMock({ locale: "zh-CN" });
+    z.install();
+    registerBilingualReaderToolbar();
+
+    const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+    const doc = dom.window.document;
+
+    const appended: any[] = [];
+    const append = (el: any) => appended.push(el);
+
+    // EPUB 阅读器：不追加（双语与朗读在其上均不可用）。
+    z!.fireReaderEvent("renderToolbar", {
+      reader: { type: "epub" },
+      doc,
+      append,
+    });
+    expect(appended).toHaveLength(0);
+
+    // 快照阅读器：同样不追加。
+    z!.fireReaderEvent("renderToolbar", {
+      reader: { type: "snapshot" },
+      doc,
+      append,
+    });
+    expect(appended).toHaveLength(0);
+
+    // PDF 阅读器：追加。
+    z!.fireReaderEvent("renderToolbar", {
+      reader: { type: "pdf" },
+      doc,
+      append,
+    });
+    expect(appended).toHaveLength(1);
+    dom.window.close();
   });
 });

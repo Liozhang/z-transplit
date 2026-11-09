@@ -207,6 +207,25 @@ itself: the language configuration and the template validation.
 - Edit ▸ Settings ▸ Z-Transplit: engine, credentials, target language, Java and
   OpenDataLoader options
 
+## Supported Attachments
+
+Zotero opens PDF, EPUB and HTML-snapshot attachments in its reader, and every
+other attachment type (docx, images, audio/video, plain text, …) in no reader
+at all; notes are separate items edited in the note editor. The plugin serves
+the reader kinds accordingly:
+
+- **PDF** — the full feature set (selection translation, full-text translation,
+  split view, bilingual interleave, translation-only, read-aloud).
+- **HTML snapshot** — selection translation in the reader's Translate section
+  only: Zotero's text-selection popup carries the selected text on every reader
+  kind, so that path works. The bilingual session, read-aloud and split view
+  are PDF-only (Zotero 10's SDT reading mode and the pdf.js internals), so the
+  snapshot's section shows selection translation without them.
+- **EPUB and everything else** — not served: the Translate section, the reader
+  toolbar button and the reader context-menu submenu do not appear, rather
+  than appearing and failing.
+
+
 ## Development
 
 Architecture notes, the porting history, and the build / quality-gate / release
