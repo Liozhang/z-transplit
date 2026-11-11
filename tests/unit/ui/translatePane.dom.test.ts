@@ -24,7 +24,6 @@ import { mountTranslatePane } from "../../../src/ui/translatePane";
 import {
   clearTranslationCache,
   engineCacheIdentity,
-  resetGoogleFallbackForTests,
 } from "../../../src/core/translation/translationEngines";
 import {
   cacheKey,
@@ -236,10 +235,9 @@ describe("B16 阅读器翻译面板：选区与自动翻译", () => {
     expect(ctx.buttons(K.copy).length).toBe(1);
   });
 
-  it("Google 降级激活时，成功译文下方附来源提示", async () => {
-    // google 引擎端点失败 → 会话内自动走 Bing 网页接口。译文照常渲染，
-    // 但来源要对用户可见：降级激活期间成功结果下方附一行提示。
-    resetGoogleFallbackForTests();
+  it("Google 失败即失败：不静默改走 Bing，错误照实呈现", async () => {
+    // 用户选的是 Google。端点不可达时译文不得由另一家接口顶替——面板显示
+    // 错误，用户自己去设置里换引擎，或把「网络区域」改成中国大陆。
     const GOOGLE_PREFS = {
       ...ENGINE_PREFS,
       "translate.engineType": "google",
@@ -249,33 +247,21 @@ describe("B16 阅读器翻译面板：选区与自动翻译", () => {
     delete (GOOGLE_PREFS as any)["translate.custom.model"];
     ctx = setup(GOOGLE_PREFS, ["hello"]);
     ctx.fm.route("**/translate_a/single**").reply(500, { message: "blocked" });
-    ctx.fm.route("**/www.bing.com/translator**").reply(
-      200,
-      '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
-        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
-        '<div id="rich_tta" data-iid="translator.5023"></div></html>',
-      { "content-type": "text/html" },
-    );
-    ctx.fm.route("**/ttranslatev3**").reply(200, [
-      [
-        {
-          detectedLanguage: { language: "en" },
-          translations: [{ text: "你好", to: "zh-Hans" }],
-        },
-      ],
-    ]);
-
+    // Bing 网页端点的路由故意不注册：真被调用只会 404，本测试随之失败——
+    // 这就是「不得兜底」的断言。
     mountTranslatePane({ doc: ctx.doc, body: ctx.body });
     ctx.click(K.action);
-    const deadline = Date.now() + 3000;
-    while (ctx.fm.calls.length < 3 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 30));
-    }
+    await flush();
     await flush();
 
-    expect(ctx.text(ctx.body)).toContain("你好");
-    expect(ctx.text(ctx.body)).toContain("ztransplit-pane-translate-fallback-note");
-    resetGoogleFallbackForTests();
+    // 只打了 Google 一次，没有任何第二次请求
+    expect(ctx.fm.calls.length).toBe(1);
+    expect(ctx.fm.calls[0].url).toContain("translate_a/single");
+    // 错误态：走通用错误行（桩环境 getString 回落为键本身，错误详情不进正文），
+    // 而不是渲染出一段译文
+    expect(ctx.text(ctx.body)).toContain(K.genericError);
+    expect(ctx.text(ctx.body)).not.toContain(K.resultPlaceholder);
+    expect(ctx.buttons(K.retry).length).toBe(1);
   });
 });
 

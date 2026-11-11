@@ -149,12 +149,19 @@ reused verbatim by every other entry point.
 
 | Engine | API key | Notes |
 | --- | --- | --- |
-| Google | optional | Free endpoint, automatic Bing-web fallback |
+| Google | optional | Free endpoint; a failure is reported as-is |
 | Bing | required | Azure Translator REST API |
+| Bing web | — | Keyless; the engine to pick where Google is unreachable |
 | DeepL | required | free / pro endpoint toggle |
 | AI | endpoint required, key optional | OpenAI-compatible chat/completions with a user-owned prompt template |
 | Custom | required | OpenAI-compatible chat/completions |
 | zotero-pdf-translate | — | Delegates to the plugin when detected |
+
+No engine substitutes for another. When the selected engine cannot be reached the
+translation fails with that engine's own error — never a quiet retry against a
+different provider — so the settings always describe what actually answered. On a
+network where Google is blocked, pick Bing web above, or set the network region to
+mainland China in the settings pane, which recommends it.
 
 ### Configuring the AI engine
 

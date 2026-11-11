@@ -1257,7 +1257,15 @@ PROBE_CMDS.prefs = async function (engine) {
   }
 
   const groups = {};
-  for (const id of ["google", "bing", "deepl", "ai", "custom", "pdftranslate"]) {
+  for (const id of [
+      "google",
+      "bing",
+      "bing-web",
+      "deepl",
+      "ai",
+      "custom",
+      "pdftranslate",
+    ]) {
     const g = doc.getElementById("ztransplit-pref-engine-" + id);
     groups[id] = g ? !g.hidden : "missing";
   }
@@ -1266,7 +1274,15 @@ PROBE_CMDS.prefs = async function (engine) {
     engineValue: doc.getElementById("ztransplit-pref-engine-type")?.value,
     groups: (() => {
       const o = {};
-      for (const id of ["google", "bing", "deepl", "ai", "custom", "pdftranslate"]) {
+  for (const id of [
+      "google",
+      "bing",
+      "bing-web",
+      "deepl",
+      "ai",
+      "custom",
+      "pdftranslate",
+    ]) {
         const g = doc.getElementById("ztransplit-pref-engine-" + id);
         o[id] = g ? !g.hidden : "missing";
       }

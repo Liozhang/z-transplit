@@ -6,9 +6,12 @@
  * "is a model configured?" question disappears and each engine declares its
  * own credential requirements.
  *
- *   - google               → always ready (keyless free endpoint + keyless
- *                            Bing web fallback need no configuration; the
- *                            optional API key only upgrades it)
+ *   - google               → always ready (the keyless free endpoint needs no
+ *                            configuration; the optional API key only upgrades
+ *                            it). Reachability is a runtime question, not a
+ *                            configuration one: an unreachable endpoint fails
+ *                            the request with Google's own error instead of
+ *                            silently switching engines.
  *   - bing-web             → always ready (keyless by contract; nothing to
  *                            configure)
  *   - bing / deepl         → need translate.<engine>.apiKey
@@ -72,8 +75,9 @@ export function checkTranslationReadiness(
 
   switch (engine) {
     case "google":
-      // Default engine: the keyless free endpoint (with keyless Bing web
-      // fallback) needs no configuration; the optional API key only upgrades it.
+      // Default engine: the keyless free endpoint needs no configuration; the
+      // optional API key only upgrades it. (No fallback to lean on — an
+      // unreachable endpoint is a runtime failure, reported as such.)
       return { ready: true, missing: [] };
     case "bing-web":
       // Keyless by contract — same readiness shape as Google's keyless path.

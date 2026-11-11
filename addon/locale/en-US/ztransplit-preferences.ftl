@@ -165,11 +165,12 @@ preferences-ztransplit-show-key =
 preferences-ztransplit-google-api-key =
     .value = Google API key
 preferences-ztransplit-google-api-key-desc =
-    Optional. When empty, the keyless free endpoint is used, falling back to
-    the keyless Bing web endpoint on failure; with a key, the official API is
-    used instead, with better quota and stability. An invalid key produces no
-    explicit warning — it just shows up as failed translations — so leaving
-    this empty is usually the lower-maintenance choice.
+    Optional. When empty, the keyless free endpoint is used; with a key, the
+    official API is used instead, with better quota and stability. When the
+    endpoint is unreachable the translation fails with Google's own error —
+    the plugin never quietly retries another provider. For a keyless engine
+    that is reachable, pick Bing web above, or set the network region to
+    mainland China.
 
 ## Bing
 preferences-ztransplit-bing-api-key =

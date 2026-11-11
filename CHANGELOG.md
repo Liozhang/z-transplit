@@ -5,6 +5,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- The Google engine's silent fallback to the keyless Bing web endpoint. It was
+  added so the default engine would still answer on a network where Google is
+  blocked, and it did — but it also meant a user who selected Google and got a
+  translation had no way to know which provider had actually answered. The
+  reported symptom was exactly that: switching the engine to Google mid-session
+  still produced translations, so the switch looked like it had not taken
+  effect. A failed Google request now fails with Google's own error (timeout,
+  429, 5xx), on every paragraph, with no session-sticky marker and no second
+  provider behind the user's back. Switching engines is the user's decision:
+  the settings pane's network-region selector recommends the keyless Bing web
+  engine for mainland China, and that engine is now listed in both READMEs
+  next to the others. The now-dead fallback note in the selection pane and the
+  two Fluent messages that described it are gone.
+
 ### Fixed
 
 - The session translation cache ignored the glossary and the custom headers.

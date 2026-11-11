@@ -26,7 +26,6 @@ translation-error-pdf-translate-failed = zotero-pdf-translate 翻译失败
 translation-error-bing-not-configured = Bing 翻译未配置 API 密钥
 translation-error-deepl-not-configured = DeepL 翻译未配置 API 密钥
 translation-error-custom-url-missing = 自定义翻译接口地址未配置
-translation-error-google-fallback-failed = Google 翻译失败（{ $googleError }）；Bing 网页兜底也失败（{ $bingError }）
 translation-error-unknown = 未知错误
 translation-error-bing-token-unavailable = 无法获取 Bing 翻译令牌（页面结构可能已变化）
 translation-error-bing-rejected = Bing 拒绝了请求（{ $status }）

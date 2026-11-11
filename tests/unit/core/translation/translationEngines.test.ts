@@ -33,8 +33,6 @@ import {
   getEngineConfig,
   clearTranslationCache,
   resetBingWebSession,
-  resetGoogleFallbackForTests,
-  isGoogleFallbackActive,
   createTranslator,
   createAIBatchTranslator,
   supportsBatching,
@@ -82,7 +80,6 @@ beforeEach(() => {
   setPrefs({});
   clearTranslationCache();
   resetBingWebSession();
-  resetGoogleFallbackForTests();
   delete Z.PDFTranslate;
 
   vi.stubGlobal("fetch", (url: string, init: any = {}) => {
@@ -341,118 +338,39 @@ describe("engine wire contracts", () => {
     await expect(t("bad", "zh-CN")).rejects.toThrow("engine boom");
   });
 
-  it("google failure falls back to the keyless Bing web endpoint", async () => {
-    resetBingWebSession();
+  it("google failure fails: no silent second provider, one request only", async () => {
+    // 用户选的是 Google。端点不可达时必须看到 Google 自己的错误，而不是
+    // 一段来路不明的译文。Bing 网页路由故意不注册：真被调用只会 404，
+    // 本测试随之失败——这就是「不得兜底」的断言。
     setPrefs({ "translate.engineType": "google" });
     route("translate_a/single", () =>
       jsonResponse({ message: "blocked" }, false, 500, "Internal Server Error"),
     );
-    route("www.bing.com/translator", () => {
-      const html =
-        '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
-        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
-        '<div id="rich_tta" data-iid="translator.5023"></div></html>';
-      return {
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        url: "https://cn.bing.com/translator",
-        text: async () => html,
-      } as any;
-    });
-    route("ttranslatev3", () =>
-      jsonResponse([
-        [
-          {
-            detectedLanguage: { language: "en" },
-            translations: [{ text: "你好", to: "zh-Hans" }],
-          },
-        ],
-      ]),
-    );
 
     const t = createTranslator("zh-CN");
-    expect(await t("hello", "zh-CN")).toBe("你好");
-
-    // Call order: google (fails) → bing token page → ttranslatev3.
-    expect(h.fetchCalls).toHaveLength(3);
-    expect(h.fetchCalls[1].url).toContain("www.bing.com/translator");
-    // Live-page request shape: IG/IID/SFX + token/key all in the QUERY STRING.
-    const postUrl = h.fetchCalls[2].url;
-    expect(postUrl).toContain(
-      "ttranslatev3?isVertical=1&IG=CE47A2D005A84FF09AA51E7D3B6C25F1",
-    );
-    expect(postUrl).toContain("IID=translator.5023");
-    expect(postUrl).toContain("SFX=0");
-    expect(postUrl).toContain("token=abuseToken123");
-    expect(postUrl).toContain("key=1690000000000");
-    // Body carries only the translation payload — auth never rides in the body.
-    const body = new URLSearchParams(h.fetchCalls[2].body);
-    expect(body.get("to")).toBe("zh-Hans"); // zh-CN mapped to Bing web id
-    // Live endpoint rejects fromLang=auto ({"statusCode":400}); an EXPLICIT
-    // "auto" is mapped to "auto-detect" by toBingWebLang. This fallback chain
-    // passes NO source language at all — since 2026-09-30 that path is handled
-    // by the local script-range detection (detectBingWebSourceLang), which
-    // classifies the Latin-script sample as "en".
-    expect(body.get("fromLang")).toBe("en");
-    expect(body.get("text")).toBe("hello");
-    expect(body.get("token")).toBeNull();
-    expect(body.get("key")).toBeNull();
+    await expect(t("hello", "zh-CN")).rejects.toThrow("HTTP 500");
+    expect(h.fetchCalls).toHaveLength(1);
+    expect(h.fetchCalls[0].url).toContain("translate_a/single");
   });
 
-  it("google failure is sticky for the session: later paragraphs skip the dead endpoint", async () => {
-    // 大陆默认配置的真实形态：Google 端点不可达，兜底链路每段都要先付一次
-    // 10 秒超时。第一次失败后标记置上，本会话后续请求直连 Bing 网页端——
-    // 50 段的全文翻译因此从 500 秒纯等待降到 1 次。
-    resetBingWebSession();
+  it("google failure is not sticky: every paragraph asks Google again", async () => {
+    // 反向护栏：没有会话级「Google 不可达」标记，故障期间每一段都如实付一次
+    // 超时并拿到错误。用户要免等待就自己换引擎（设置面板的网络区域，或直接
+    // 选 Bing 网页端），插件不替他换。
     setPrefs({ "translate.engineType": "google" });
     route("translate_a/single", () =>
       jsonResponse({ message: "blocked" }, false, 500, "Internal Server Error"),
     );
-    route("www.bing.com/translator", () => {
-      const html =
-        '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
-        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
-        '<div id="rich_tta" data-iid="translator.5023"></div></html>';
-      return {
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        url: "https://cn.bing.com/translator",
-        text: async () => html,
-      } as any;
-    });
-    route("ttranslatev3", () =>
-      jsonResponse([
-        [
-          {
-            detectedLanguage: { language: "en" },
-            translations: [{ text: "你好", to: "zh-Hans" }],
-          },
-        ],
-      ]),
-    );
 
     const t = createTranslator("zh-CN");
-
-    // 第一段：Google 失败 → 拿令牌 → 翻译（3 次请求）
-    expect(await t("hello", "zh-CN")).toBe("你好");
-    expect(isGoogleFallbackActive()).toBe(true);
-    const afterFirst = h.fetchCalls.length;
-
-    // 第二段：不再试探 Google，Bing 会话已缓存，直接一发翻译请求
-    expect(await t("world", "zh-CN")).toBe("你好");
-    const secondRound = h.fetchCalls.slice(afterFirst);
-    expect(secondRound.some((c) => c.url.includes("translate_a/single"))).toBe(
-      false,
-    );
-    expect(secondRound).toHaveLength(1);
-    expect(secondRound[0].url).toContain("ttranslatev3");
+    await expect(t("hello", "zh-CN")).rejects.toThrow("HTTP 500");
+    await expect(t("world", "zh-CN")).rejects.toThrow("HTTP 500");
+    expect(
+      h.fetchCalls.filter((c) => c.url.includes("translate_a/single")),
+    ).toHaveLength(2);
   });
 
-  it("a successful google round keeps probing google on every paragraph", async () => {
-    // 反向护栏：Google 可用时绝不能变得黏滞——否则 outage 恢复后本会话再也
-    // 不回官方端点。每次调用都应重新打 Google。
+  it("a successful google round keeps hitting google on every paragraph", async () => {
     setPrefs({ "translate.engineType": "google" });
     route("translate_a/single", () =>
       jsonResponse([[["你好", "hello", null, null, 1]], null, "en"]),
@@ -461,68 +379,34 @@ describe("engine wire contracts", () => {
     const t = createTranslator("zh-CN");
     expect(await t("hello", "zh-CN")).toBe("你好");
     expect(await t("world", "zh-CN")).toBe("你好");
-    expect(isGoogleFallbackActive()).toBe(false);
     expect(h.fetchCalls.filter((c) => c.url.includes("translate_a/single"))).toHaveLength(2);
   });
 
-  it("switching away from the google engine clears the sticky fallback marker", async () => {
-    // 用户切到别的引擎（或改回 google）后，一次旧故障不应把本会话钉死在
-    // Bing 上到重启为止：创建非 google 引擎的翻译器时清除标记。
-    resetBingWebSession();
+  it("switching engines has no fallback state to clear", async () => {
+    // 旧的粘性降级标记随兜底链路一起移除：切走再切回 Google，端点每次都被
+    // 重新探测，不存在「被一次旧故障钉死在别的引擎上」的状态。
     setPrefs({ "translate.engineType": "google" });
     route("translate_a/single", () =>
       jsonResponse({ message: "blocked" }, false, 500, "Internal Server Error"),
     );
-    route("www.bing.com/translator", () => {
-      const html =
-        '<html><script>var _G={Region:"CN",IG:"CE47A2D005A84FF09AA51E7D3B6C25F1"};' +
-        'var params_AbusePreventionHelper = [1690000000000,"abuseToken123",3600000];</script>' +
-        '<div id="rich_tta" data-iid="translator.5023"></div></html>';
-      return {
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        url: "https://cn.bing.com/translator",
-        text: async () => html,
-      } as any;
-    });
-    route("ttranslatev3", () =>
-      jsonResponse([
-        [
-          {
-            detectedLanguage: { language: "en" },
-            translations: [{ text: "你好", to: "zh-Hans" }],
-          },
-        ],
-      ]),
-    );
 
     const t = createTranslator("zh-CN");
-    expect(await t("hello", "zh-CN")).toBe("你好");
-    expect(isGoogleFallbackActive()).toBe(true);
-    const bingHits = h.fetchCalls.filter((c) => c.url.includes("ttranslatev3")).length;
-    expect(bingHits).toBeGreaterThan(0);
+    await expect(t("hello", "zh-CN")).rejects.toThrow("HTTP 500");
 
-    // 切到 bing-web 再切回来：标记已清，google 端点重新被探测（仍然失败，
-    // 于是再走一次 Bing——但 google 不再被跳过）。
     setPrefs({ "translate.engineType": "bing-web" });
     createTranslator("zh-CN");
-    expect(isGoogleFallbackActive()).toBe(false);
 
     setPrefs({ "translate.engineType": "google" });
     const t2 = createTranslator("zh-CN");
     const before = h.fetchCalls.filter((c) => c.url.includes("translate_a/single")).length;
-    await t2("world", "zh-CN");
+    await expect(t2("world", "zh-CN")).rejects.toThrow("HTTP 500");
     const after = h.fetchCalls.filter((c) => c.url.includes("translate_a/single")).length;
     expect(after).toBe(before + 1); // google 端点被重新探测
   });
 
   it("bing web rejection (statusCode 400) refreshes the session and retries once", async () => {
     resetBingWebSession();
-    setPrefs({ "translate.engineType": "google" });
-    route("translate_a/single", () =>
-      jsonResponse({ message: "blocked" }, false, 500, "Internal Server Error"),
-    );
+    setPrefs({ "translate.engineType": "bing-web" });
     let tokenPageHits = 0;
     route("www.bing.com/translator", () => {
       tokenPageHits++;
@@ -562,25 +446,20 @@ describe("engine wire contracts", () => {
     expect(lastUrl.searchParams.get("SFX")).toBe("0");
   });
 
-  it("unreachable Google AND Bing surfaces a combined error", async () => {
+  it("unreachable google surfaces google's own error, not a substitute", async () => {
+    // 端点不可达 + 限流两种形态都只呈现 Google 自己的错误。Bing 路由故意
+    // 不注册：被调用只会 404，测试随之失败。
     setPrefs({ "translate.engineType": "google" });
     route("translate_a/single", () =>
       jsonResponse({}, false, 429, "Too Many Requests"),
     );
-    route("www.bing.com/translator", () =>
-      jsonResponse({}, false, 503, "Service Unavailable"),
-    );
-    route("ttranslatev3", () =>
-      jsonResponse({}, false, 503, "Service Unavailable"),
-    );
 
     const t = createTranslator("zh-CN");
-    await expect(t("hello", "zh-CN")).rejects.toThrow(
-      /translation-error-google-fallback-failed/,
-    );
+    await expect(t("hello", "zh-CN")).rejects.toThrow("HTTP 429");
+    expect(h.fetchCalls).toHaveLength(1);
   });
 
-  it("HTTP failures surface with status + body (via the fallback chain)", async () => {
+  it("HTTP failures surface with status + body", async () => {
     setPrefs({ "translate.engineType": "google" });
     route("translate_a/single", () =>
       jsonResponse(

@@ -29,7 +29,6 @@ translation-error-pdf-translate-failed = zotero-pdf-translate translation failed
 translation-error-bing-not-configured = Bing translation has no API key configured
 translation-error-deepl-not-configured = DeepL translation has no API key configured
 translation-error-custom-url-missing = Custom translation API URL is not configured
-translation-error-google-fallback-failed = Google translation failed ({ $googleError }); the Bing fallback also failed ({ $bingError })
 translation-error-unknown = Unknown error
 translation-error-bing-token-unavailable = Could not obtain the Bing translation token (the page structure may have changed)
 translation-error-bing-rejected = Bing rejected the request ({ $status })

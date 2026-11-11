@@ -47,6 +47,8 @@ interface Harness {
   doc: any;
   /** Switch the engine menulist and fire the events preferences.js listens to. */
   selectEngine(value: string): void;
+  /** Switch the network-region menulist (same event pair as the engine list). */
+  selectRegion(value: string): void;
   /** Read the pref map the stub Zotero.Prefs backed. */
   prefs: Map<string, unknown>;
 }
@@ -90,6 +92,14 @@ function setupHarness(opts: { pdfTranslate?: boolean; prefs?: Record<string, unk
     selectEngine(value: string) {
       const list = doc.getElementById("ztransplit-pref-engine-type");
       if (!list) throw new Error("engine menulist not found");
+      list.value = value;
+      for (const type of ["select", "command"]) {
+        list.dispatchEvent(new window.Event(type, { bubbles: true }));
+      }
+    },
+    selectRegion(value: string) {
+      const list = doc.getElementById("ztransplit-pref-region");
+      if (!list) throw new Error("region menulist not found");
       list.value = value;
       for (const type of ["select", "command"]) {
         list.dispatchEvent(new window.Event(type, { bubbles: true }));
@@ -1187,6 +1197,57 @@ describe("B17 设置 pane：AI 服务商预设", () => {
     expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("deepseek");
     fireInputAndChange(h, "ztransplit-pref-ai-url", "https://my-gateway.internal/v1");
     expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("none");
+    h.dom.window.close();
+  });
+});
+
+describe("B17 设置 pane：网络区域推荐值（镜像 region.ts）", () => {
+  it("选「中国大陆」：按 region.ts 的推荐值写入引擎与 Azure 区域", async () => {
+    const { REGION_PROFILES } = await import("../../../src/utils/region");
+    const h = setupHarness({
+      prefs: {
+        [`${PREFIX}translate.engineType`]: "google",
+        [`${PREFIX}translate.bing.region`]: "",
+      },
+    });
+    h.selectRegion("cn");
+    expect(h.prefs.get(`${PREFIX}translate.engineType`)).toBe(
+      REGION_PROFILES.cn.translateEngine,
+    );
+    expect(h.prefs.get(`${PREFIX}translate.bing.region`)).toBe(
+      REGION_PROFILES.cn.bingRegion,
+    );
+    // 引擎下拉与字段组立即跟上（不等 XUL 的反向同步）
+    expect(h.doc.getElementById("ztransplit-pref-engine-type")!.value).toBe(
+      REGION_PROFILES.cn.translateEngine,
+    );
+    h.dom.window.close();
+  });
+
+  it("用户显式选过的引擎不被区域推荐值推翻", () => {
+    const h = setupHarness({
+      prefs: {
+        [`${PREFIX}translate.engineType`]: "deepl",
+        [`${PREFIX}translate.bing.region`]: "",
+      },
+    });
+    h.selectRegion("cn");
+    expect(h.prefs.get(`${PREFIX}translate.engineType`)).toBe("deepl");
+    // Azure 区域仍是出厂默认，照写
+    expect(h.prefs.get(`${PREFIX}translate.bing.region`)).toBe("chinanorth");
+    h.dom.window.close();
+  });
+
+  it("选「全球」：把出厂默认的引擎拉回 google", () => {
+    const h = setupHarness({
+      prefs: {
+        [`${PREFIX}translate.engineType`]: "google",
+        [`${PREFIX}translate.bing.region`]: "",
+      },
+    });
+    h.selectRegion("global");
+    expect(h.prefs.get(`${PREFIX}translate.engineType`)).toBe("google");
+    expect(h.prefs.get(`${PREFIX}translate.bing.region`)).toBe("global");
     h.dom.window.close();
   });
 });

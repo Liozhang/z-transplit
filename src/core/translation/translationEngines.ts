@@ -9,7 +9,8 @@
  *                 the source/target language into the prompt and refuses to
  *                 translate while the template is invalid.
  *   - "google"  → Google Translate HTTP API (default; free endpoint or Cloud
- *                 Translation; falls back to keyless Bing web on failure)
+ *                 Translation). A failure is reported as-is — the engine never
+ *                 silently retries another provider behind the user's back.
  *   - "custom"  → OpenAI-compatible chat-completions endpoint with a fixed
  *                 formula-preserving prompt (translate.custom.apiUrl/apiKey/
  *                 model) via src/core/ai/openaiCompat.ts. Also the only engine
@@ -17,7 +18,9 @@
  *   - "bing"    → Azure Cognitive Services Translator
  *   - "bing-web" → keyless Bing web translator. Selectable since 2026-09-30:
  *                 it is the only keyless engine reachable in mainland China,
- *                 so it has to be a user choice, not just a hardcoded fallback
+ *                 so it is the engine a China user picks explicitly (the
+ *                 settings pane's network-region selector recommends it) —
+ *                 never a silent substitute for a failing engine
  *                 (ported from z-search's 2026-09-28 change).
  *   - "deepl"   → DeepL API
  *   - "zotero-pdf-translate" → external plugin bridge
@@ -185,24 +188,6 @@ function toDeepLTargetLang(code: string): string {
  * of failures reports quickly.
  */
 const MT_ENDPOINT_TIMEOUT_MS = 10000;
-
-/**
- * Session-sticky "Google direct is unavailable" marker, set the first time the
- * google engine's request fails. See the use site in createTranslator for why
- * it exists (per-attempt timeout × every paragraph of a paper). Exported
- * reset is for tests; the UI reads it through isGoogleFallbackActive().
- */
-let googleDirectUnavailable = false;
-
-/** True once the google engine has fallen back to Bing web this session. */
-export function isGoogleFallbackActive(): boolean {
-  return googleDirectUnavailable;
-}
-
-/** Test seam: drop the sticky marker so the next translator probes again. */
-export function resetGoogleFallbackForTests(): void {
-  googleDirectUnavailable = false;
-}
 
 /**
  * Per-request timeout for the model-backed engines ("ai"). Generous compared to
@@ -1108,13 +1093,7 @@ export function createTranslator(
   sourceLanguage?: string,
 ): ParagraphTranslator {
   const cfg = getEngineConfig();
-  // 切走 Google 引擎即清除会话降级标记：回来时重新探测，不被一次旧故障
-  // 困在 Bing 里到重启为止。降级只在 google 引擎自身的失败处置里置位。
-  if (cfg.engineType !== "google") {
-    googleDirectUnavailable = false;
-  }
   const inner = createTranslatorUncached(targetLanguage, sourceLanguage);
-
 
   // L-23: fold the configuration that changes the RESULT into the cache key —
   // engine, model, credential tail, endpoint, prompt template — so switching
@@ -1224,7 +1203,12 @@ function createTranslatorUncached(
         return result.translatedText || "";
       };
     case "google": {
-      const googleOnly = async (text: string) => {
+      // Google 失败就是失败：不静默改走别的引擎。用户选了 Google，不可达时
+      // 必须看到 Google 的错误（超时 / 429 / 5xx），否则他会以为选中的引擎
+      // 在工作，而译文其实来自另一家——这正是「引擎不可达却照样出译文」的
+      // 由来。换引擎是用户的选择：设置面板的「网络区域」选中国大陆会把推荐
+      // 引擎改成免密钥可达的 Bing 网页端，也可以直接选它。
+      return async (text: string) => {
         const result = await translateWithGoogle(
           text,
           targetLanguage,
@@ -1238,54 +1222,6 @@ function createTranslatorUncached(
             result.error || getString("translation-error-google-failed"),
           );
         return result.translatedText!;
-      };
-      const bingWebOrThrow = async (
-        text: string,
-        googleErr: unknown,
-      ): Promise<string> => {
-        const bing = await translateWithBingWeb(
-          text,
-          targetLanguage,
-          sourceLanguage,
-        );
-        if (!bing.success) {
-          throw new Error(
-            getString("translation-error-google-fallback-failed", {
-              googleError:
-                googleErr instanceof Error
-                  ? googleErr.message
-                  : String(googleErr),
-              bingError:
-                bing.error || getString("translation-error-unknown"),
-            }),
-            { cause: googleErr },
-          );
-        }
-        return bing.translatedText!;
-      };
-      // Default-engine resilience: when Google is unreachable (network block,
-      // rate limit, outage) fall back to the keyless Bing web endpoint, which
-      // is reachable in regions Google is not. Applies to both the keyless and
-      // the keyed Google paths — it only ever fires after Google failed.
-      //
-      // The failure is sticky for the session: a blocked endpoint costs
-      // KEYLESS_ENDPOINT_TIMEOUT_MS per attempt, so without the marker a
-      // 50-paragraph paper in mainland China pays 50 × 10s of pure waiting
-      // before the same Bing fallback that answers in under a second. After
-      // the first failure we go straight to Bing. This is reactive (observed
-      // failure), never predictive — it does not guess where the user is, the
-      // same stance as region's "auto infers nothing" — and a Zotero restart
-      // probes Google again, so an outage that ends is picked up.
-      return async (text: string) => {
-        if (googleDirectUnavailable) {
-          return bingWebOrThrow(text, new Error("google unavailable"));
-        }
-        try {
-          return await googleOnly(text);
-        } catch (googleErr) {
-          googleDirectUnavailable = true;
-          return bingWebOrThrow(text, googleErr);
-        }
       };
     }
     case "bing":

@@ -141,10 +141,10 @@ preferences-ztransplit-show-key =
 preferences-ztransplit-google-api-key =
     .value = Google API 密钥
 preferences-ztransplit-google-api-key-desc =
-    可以留空。留空时使用免密钥的免费端点，失败后会自动改用免密钥的 Bing 网页
-    接口兜底；填写密钥后改走官方接口，配额和稳定性更好。密钥无效不会弹出提示，
-    只会表现为翻译失败，因此留空通常是更省心的选择。
-
+    可以留空。留空时使用免密钥的免费端点；填写密钥后改走官方接口，配额和稳定性
+    更好。端点不可达时翻译会直接失败并显示 Google 自己的错误，不会悄悄改走别的
+    接口——需要免密钥又可达的引擎，请选「Bing 网页翻译（免密钥）」，也可以在
+    「网络区域」里选中国大陆。
 ## Bing
 preferences-ztransplit-bing-api-key =
     .value = Bing API 密钥

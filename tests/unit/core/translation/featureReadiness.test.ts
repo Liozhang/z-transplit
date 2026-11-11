@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("checkTranslationReadiness", () => {
-  it("google is always ready (keyless endpoint + keyless Bing fallback)", () => {
+  it("google is always ready (keyless endpoint needs no configuration)", () => {
     expect(checkTranslationReadiness(reader({}))).toEqual({
       ready: true,
       missing: [],

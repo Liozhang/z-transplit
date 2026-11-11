@@ -364,7 +364,7 @@
         >选择文本翻译使用的引擎。切换引擎不会清除其它引擎已经填写的密钥，随时可以切回；只有当前选中的引擎会被使用。</description>
       </vbox>
 
-      <!-- google：apiKey 可空，留空走免费端点 + Bing 兜底 -->
+      <!-- google：apiKey 可空，留空走免费端点；失败即失败，不静默换引擎 -->
       <vbox id="ztransplit-pref-engine-google" class="ztransplit-engine">
         <hbox class="ztransplit-row" align="center">
           <label
@@ -393,7 +393,7 @@
           <description
             class="ztransplit-desc"
             data-l10n-id="preferences-ztransplit-google-api-key-desc"
-          >可以留空。留空时使用免密钥的免费端点，失败后会自动改用免密钥的 Bing 网页接口兜底；填写密钥后改走官方接口，配额和稳定性更好。密钥无效不会弹出提示，只会表现为翻译失败，因此留空通常是更省心的选择。</description>
+          >可以留空。留空时使用免密钥的免费端点；填写密钥后改走官方接口，配额和稳定性更好。端点不可达时翻译会直接失败并显示 Google 自己的错误，不会悄悄改走别的接口——需要免密钥又可达的引擎，请选「Bing 网页翻译（免密钥）」，或在「网络区域」里选中国大陆。</description>
         </vbox>
       </vbox>
 
