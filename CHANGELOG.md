@@ -45,6 +45,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The PDF translation pipeline resolved the engine configuration once per
+  PARAGRAPH instead of once per run. `makeTranslator` called
+  `createTranslator()` inside the per-paragraph callback, so every paragraph
+  re-read the preferences, and a user who switched engines in the settings while
+  a document was translating got a document whose early paragraphs came from one
+  provider and whose later paragraphs came from another — one PDF, two
+  translators. The cache identity was re-read per page for the same reason, so
+  the first half of the document could hit the old cache while the second half
+  wrote into the new one. Both are now resolved once, before the first
+  paragraph, in the new pdf/translation/runTranslator.ts; the batch path
+  already resolved once and is unchanged in behaviour.
+
 - The bilingual view's translation blocks all read at one size and one weight,
   so a heading's translation looked like body text and a caption's looked like a
   heading. Each translation now derives its typography from the computed style

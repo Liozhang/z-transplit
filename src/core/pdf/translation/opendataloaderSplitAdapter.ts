@@ -55,8 +55,8 @@ import { rasterizeRegionToDataURL } from "./ZoteroPdfRasterizer";
 import {
   translateParagraphs,
   translateAllPagesBatched,
-  type ParagraphTranslator,
 } from "./translateParagraphs";
+import { makeRunTranslator } from "./runTranslator";
 import { renderLayoutPreserving, renderOverlayTranslated } from "./LayoutPreservingRenderer";
 import { mergePageBytes } from "./pdfMerge";
 import {
@@ -80,7 +80,6 @@ import {
   removeOriginalText,
 } from "../OriginalTextRemovalClient";
 import {
-  createTranslator,
   supportsBatching,
   createAIBatchTranslator,
   engineCacheIdentity,
@@ -276,17 +275,6 @@ async function readCjkVariants(
     readVariant(FONT_OVERRIDE_BASENAMES.boldItalic, "BoldItalic"),
   ]);
   return { bold, italic, boldItalic };
-}
-
-// ─── Translator (engine-backed; formula-preserving prompt included) ──
-
-function makeTranslator(
-  targetLanguage: string,
-  sourceLanguage?: string,
-): ParagraphTranslator {
-  return async (text, _tgt, _src) => {
-    return createTranslator(targetLanguage, sourceLanguage)(text, targetLanguage, sourceLanguage);
-  };
 }
 
 /**
@@ -496,6 +484,11 @@ export async function translateAndSplitWithOpenDataLoader(
     .map((_, i) => i)
     .filter((i) => isPageSelected(i + 1));
 
+  // 缓存身份同样每次运行只取一次：它由引擎、模型、凭据、提示词、术语表、
+  // 请求头与 Azure 区域折成，逐页重算会让同一篇文档的前后页落在不同身份上
+  // （改一次设置，前半命中旧缓存、后半写进新缓存）。
+  const cacheIdentity = engineCacheIdentity();
+
   if (supportsBatching()) {
     const batchHandle = await createAIBatchTranslator(targetLanguage);
     // 只送选中页：translateAllPagesBatched 按位置散回，选中的页按顺序映射
@@ -510,7 +503,7 @@ export async function translateAndSplitWithOpenDataLoader(
         outputBudgetChars: batchHandle.outputBudgetChars,
         onProgress,
         signal: opts.signal,
-        cacheIdentity: engineCacheIdentity(),
+        cacheIdentity,
       },
     );
     translatedSets = assemblies.map((assembly, i) =>
@@ -520,7 +513,9 @@ export async function translateAndSplitWithOpenDataLoader(
     );
     failedTranslations = batchResult.failedCount;
   } else {
-    const translator = makeTranslator(targetLanguage);
+    // 每次运行只建一次 translator：引擎配置在这一刻定型，整篇文档共用
+    // （见 pdf/translation/runTranslator）。
+    const translator = makeRunTranslator(targetLanguage);
     translatedSets = [];
     for (let i = 0; i < totalPages; i++) {
       const assembly = assemblies[i];
@@ -545,7 +540,7 @@ export async function translateAndSplitWithOpenDataLoader(
         targetLanguage,
         undefined,
         4,
-        { cacheIdentity: engineCacheIdentity() },
+        { cacheIdentity },
       );
       translatedSets.push(results);
       failedTranslations += status.filter((s) => s && s.failed).length;
