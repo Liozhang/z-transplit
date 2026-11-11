@@ -19,13 +19,14 @@
 
 import { getPrefDynamic, setPrefDynamic } from "./prefs";
 import { safeDebug } from "./logger";
+import { initializeRegionFromLocale } from "./region";
 
 /**
  * 当前偏好结构版本。追加迁移时随之递增。
  * 版本键名以字面量形式写在下方两处调用里（结构检查 S4 按字面量清点偏好键，
  * 常量间接引用会让它误报「声明未读取」）；改动键名时两处同步。
  */
-export const CURRENT_PREF_VERSION = 1;
+export const CURRENT_PREF_VERSION = 2;
 
 /**
  * 单个迁移步骤。`from` 是本步执行前的版本，`to` 是执行后的版本；按数组
@@ -54,7 +55,35 @@ const MIGRATIONS: PrefMigration[] = [
       /* 基线标记，无操作 */
     },
   },
+  // ── v1 → v2（按界面语言推定初始网络区域）────────────────────────────────
+  // 出厂默认引擎是 Google，而大陆网络下它不可达；此前只有用户自己打开设置选
+  // 一次「中国大陆」才会换成 Bing 网页端。这一步在首次启动时按 Zotero 的界面
+  // 语言补上这个初始值（简体中文 → 中国大陆 → bing-web，其余 → 全球 →
+  // google），并把推定结果写进 region 偏好——设置面板里看得见、可改。
+  // 只跑一次：用户此手动过区域，region 不再是 auto，推定不再发生。
+  {
+    from: 1,
+    to: 2,
+    description:
+      "Resolve the undeclared network region from Zotero's UI locale " +
+      "(zh-CN → mainland China → keyless Bing web; anything else → global → Google)",
+    run: () => {
+      initializeRegionFromLocale(zoteroLocale());
+    },
+  },
 ];
+
+/** Zotero 的界面语言；宿主没有该全局（vitest）时返回 undefined。 */
+function zoteroLocale(): string | undefined {
+  try {
+    const l =
+      (typeof Zotero === "undefined" ? undefined : (Zotero as any)?.locale) ??
+      (globalThis as any)?.Zotero?.locale;
+    return typeof l === "string" ? l : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * 执行全部待运行的迁移。每次启动调用都安全：已存版本等于

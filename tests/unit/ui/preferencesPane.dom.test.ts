@@ -1253,6 +1253,40 @@ describe("B17 设置 pane：网络区域推荐值（镜像 region.ts）", () => 
     expect(h.prefs.get(`${PREFIX}translate.bing.region`)).toBe("global");
     h.dom.window.close();
   });
+
+  it("大陆 → 全球：上一次由区域推荐写进去的引擎被换回 google", async () => {
+    // 这正是「支持 Google 的区域用 Google」：插件自己写进 bing-web 的值，
+    // 换区域时必须跟着换，否则用户选全球却拿不到 Google。
+    const h = setupHarness({
+      prefs: {
+        [`${PREFIX}translate.engineType`]: "google",
+        [`${PREFIX}translate.bing.region`]: "",
+      },
+    });
+    h.selectRegion("cn");
+    expect(h.prefs.get(`${PREFIX}translate.engineType`)).toBe("bing-web");
+    h.selectRegion("global");
+    expect(h.prefs.get(`${PREFIX}translate.engineType`)).toBe("google");
+    expect(h.prefs.get(`${PREFIX}translate.bing.region`)).toBe("global");
+    h.dom.window.close();
+  });
+
+  it("大陆 → 全球：用户自己改过的引擎不被换掉", () => {
+    const h = setupHarness({
+      prefs: {
+        [`${PREFIX}translate.engineType`]: "google",
+        [`${PREFIX}translate.bing.region`]: "",
+      },
+    });
+    h.selectRegion("cn");
+    // 用户在区域推荐之后自己改成 DeepL
+    h.prefs.set(`${PREFIX}translate.engineType`, "deepl");
+    h.selectRegion("global");
+    expect(h.prefs.get(`${PREFIX}translate.engineType`)).toBe("deepl");
+    // Azure 订阅区域是插件按 cn 写的，照旧跟着换
+    expect(h.prefs.get(`${PREFIX}translate.bing.region`)).toBe("global");
+    h.dom.window.close();
+  });
 });
 
 describe("B17 设置 pane：AI 测试连接按钮", () => {

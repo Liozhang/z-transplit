@@ -168,9 +168,17 @@ reused verbatim by every other entry point.
 
 No engine substitutes for another. When the selected engine cannot be reached the
 translation fails with that engine's own error — never a quiet retry against a
-different provider — so the settings always describe what actually answered. On a
-network where Google is blocked, pick Bing web above, or set the network region to
-mainland China in the settings pane, which recommends it.
+different provider — so the settings always describe what actually answered.
+
+The "Network region" setting decides the initial engine. On first launch it follows
+Zotero's interface language: a Simplified Chinese interface is treated as mainland
+China (the Google endpoint is unreachable there, so the keyless Bing web engine
+becomes the default), any other interface language as global (Google stays the
+default). The inferred value is written into the setting, where you can change it
+at any time. Afterwards the plugin only writes a region's recommendations into
+settings still at their factory defaults, or into the ones the previous region's
+recommendation wrote — an engine you picked yourself is never overridden. No IP
+lookup and no timezone guessing: only the interface language you chose yourself.
 
 ### Configuring the AI engine
 

@@ -738,6 +738,9 @@
     "translate.engineType",
     "translate.bing.region",
   ];
+  // 上次已知的区域选择。XUL 的 preference 绑定在 command 之前就可能已落盘，
+  // 不能靠回读 pref 拿「切换前」的值；这里由面板加载时初始化、每次切换后更新。
+  var lastRegion = "auto";
 
   function regionRecommendation(region, key) {
     var profile = REGION_PROFILES[region];
@@ -746,17 +749,24 @@
   }
 
   /**
-   * 套用区域推荐值，返回实际写入的键。守门与 src/utils/region.ts 一致：
-   * 只有当前值仍等于出厂默认的键才会被改写——用户显式选过的引擎不被推翻。
+   * 套用区域推荐值，返回实际写入的键。守门与 src/utils/region.ts 一致，两级：
+   * 当前值仍等于出厂默认（用户没碰过），或等于上一个区域的推荐值（上次是插件
+   * 写的，这次换区域跟着换）——否则「选全球却拿不到 Google」。用户自选的值两级
+   * 都不匹配，永不被推翻。
    */
-  function applyRegionRecommendations(region) {
+  function applyRegionRecommendations(region, fromRegion) {
     var written = [];
     if (!REGION_PROFILES[region]) return written;
+    var previous = REGION_PROFILES[fromRegion] || null;
     REGION_RECOMMENDED_KEYS.forEach(function (key) {
       var current = getPref(key);
       var currentText =
         current === undefined || current === null ? "" : String(current);
-      if (currentText !== REGION_SHIPPED_DEFAULTS[key]) return;
+      var ours = previous ? regionRecommendation(fromRegion, key) : null;
+      var mayWrite =
+        currentText === REGION_SHIPPED_DEFAULTS[key] ||
+        (ours !== null && currentText === ours);
+      if (!mayWrite) return;
       var next = regionRecommendation(region, key);
       if (currentText === next) return;
       setPref(key, next);
@@ -785,7 +795,8 @@
         region = "auto";
       }
     }
-    var written = applyRegionRecommendations(region);
+    var written = applyRegionRecommendations(region, lastRegion);
+    lastRegion = region;
     // 推荐值可能改写了引擎：让引擎下拉与字段分组立即跟上（Zotero 的
     // preference 反向同步时机不保证，这里显式回读 pref）。
     if (written.indexOf("translate.engineType") !== -1 && els.engineList) {
@@ -1470,6 +1481,15 @@
     els.aiTestStatus = $("ztransplit-pref-ai-test-status");
     els.regionList = $("ztransplit-pref-region");
     els.regionNote = $("ztransplit-pref-region-note");
+    // 上一次已知的区域选择：首次启动按界面语言推定过（prefMigrations v1→v2），
+    // 也可能被用户手动改过。从 pref 读一次作为切换起点，之后由 onRegionPicked 维护。
+    if (els.regionList) {
+      try {
+        lastRegion = String(getPref("region") || "auto");
+      } catch (e) {
+        lastRegion = "auto";
+      }
+    }
     els.pdfTranslateItem = $("ztransplit-pref-engine-item-pdftranslate");
     els.aiPromptInput = $("ztransplit-pref-ai-prompt");
     els.aiPromptError = $("ztransplit-pref-ai-prompt-error");

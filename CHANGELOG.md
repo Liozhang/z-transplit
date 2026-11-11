@@ -43,6 +43,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   next to the others. The now-dead fallback note in the selection pane and the
   two Fluent messages that described it are gone.
 
+### Changed
+
+- The initial network region now follows Zotero's interface language instead of
+  always starting at "automatic". A Simplified Chinese interface is treated as
+  mainland China, where the Google endpoint is unreachable, so the keyless Bing
+  web engine becomes the default; any other interface language is treated as
+  global and keeps Google. Previously a mainland user who never opened the
+  settings got Google by default and saw a timeout on every paragraph — the
+  silent fallback that used to hide this is gone, so the default had to follow
+  the region. No IP lookup and no timezone guessing: only the interface language
+  the user chose themselves, and the inferred value is written into the region
+  setting where it stays visible and changeable.
+
+- Switching network region now also rewrites the settings the PREVIOUS region's
+  recommendation had written. The gate used to accept only values still at their
+  factory defaults, so a user who picked "Mainland China" (engine written to the
+  keyless Bing web engine) and later picked "Global" kept Bing web — the region
+  switch silently did nothing, which is exactly what "regions where Google works
+  use Google" is meant to prevent. An engine the user picked themselves is still
+  never overridden; only values the plugin wrote on the region's behalf follow
+  the switch.
+
 ### Fixed
 
 - The PDF translation pipeline resolved the engine configuration once per

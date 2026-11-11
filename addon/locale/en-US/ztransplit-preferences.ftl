@@ -123,18 +123,19 @@ preferences-ztransplit-region-global =
 preferences-ztransplit-region-cn =
     .label = Mainland China
 preferences-ztransplit-region-desc =
-    Declare your network environment and the plugin writes that region's
-    recommended values into settings still at their factory defaults (for
-    example, mainland China defaults to the keyless Bing web engine). Engines
-    you picked explicitly are never overridden by the region choice; keeping
-    "Automatic" changes nothing.
-    If you are in mainland China: the Google endpoint is unreachable, so with
-    "Automatic" every paragraph waits out one timeout before falling back to
-    the Bing web endpoint — pick "Mainland China" to skip that wait.
+    On first launch the initial value follows Zotero's interface language: a
+    Simplified Chinese interface is treated as mainland China (the Google
+    endpoint is unreachable there, so the keyless Bing web engine becomes the
+    default), any other interface language as global (Google stays the default).
+    The inferred value is written right here and you can change it at any time.
+    Once a region is selected, its recommended values are written into two kinds
+    of settings: those still at their factory defaults, and those the previous
+    region's recommendation wrote (they follow the switch, so picking "Global"
+    gets Google back). An engine you picked yourself is never overridden.
 preferences-ztransplit-region-note-applied =
     Recommendations applied for the selected region: settings still at their
-    factory defaults were rewritten; engines you picked explicitly were left
-    untouched.
+    factory defaults, or written by the previous region's recommendation, were
+    rewritten; engines you picked yourself were left untouched.
 preferences-ztransplit-region-note-nochange =
     Nothing changed: the relevant settings already match the selected region's
     recommendations, or you customized them.
