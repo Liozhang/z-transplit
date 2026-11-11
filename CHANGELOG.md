@@ -45,6 +45,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The bilingual view's translation blocks all read at one size and one weight,
+  so a heading's translation looked like body text and a caption's looked like a
+  heading. Each translation now derives its typography from the computed style
+  of the original paragraph it sits under: the original's size scaled by 0.92
+  and capped at 24px (the translation stays the second voice, and a display-size
+  title does not produce a second title), the weight and the slant as-is, and
+  the ink when it stays readable — the interleave layer already mutes with
+  opacity, so a light-grey original would compound into illegible ink, and any
+  colour whose contrast against white falls below WCAG AA for normal text is
+  dropped in favour of the inherited ink. The font family is deliberately NOT
+  inherited: an embedded PDF face may cover Latin only, and handing it to a
+  Chinese translation renders tofu. Deriving once per block is enough — a block
+  element is created exactly once per paragraph per session, and every later
+  re-render (read-aloud highlighting, a mode switch) rewrites only its children.
+
 - The session translation cache ignored the glossary and the custom headers.
   Its key carried the engine, model, credential tail, endpoint, prompt
   template, language pair and text — but not the two settings that change what

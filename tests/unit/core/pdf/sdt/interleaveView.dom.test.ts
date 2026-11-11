@@ -380,3 +380,107 @@ describe("interleaveView：两模式样式分层（样式契约）", () => {
     expect(text).toMatch(/\.ztransplit-sent-active\s*\{[^}]*background:/);
   });
 });
+
+describe("interleaveView：译文继承相邻原文段落的计算样式", () => {
+  let fx: Fixture | undefined;
+
+  beforeEach(() => {
+    fx = makeSession();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    fx = undefined;
+  });
+
+  /** 段落内联样式即 jsdom 的计算样式来源，足以驱动派生规则。 */
+  function styleOriginal(
+    el: HTMLElement,
+    decl: Record<string, string>,
+  ): void {
+    for (const [k, v] of Object.entries(decl)) el.style.setProperty(k, v);
+  }
+
+  it("标题段落：译文按标题字号收窄到上限，字重与倾斜跟随，字体不跟随", async () => {
+    const { container, originals } = fx!;
+    styleOriginal(originals[0], {
+      "font-size": "30px",
+      "font-weight": "700",
+      "font-style": "italic",
+      "font-family": "Times New Roman",
+      color: "rgb(20, 20, 20)",
+    });
+    await build(fx!.session);
+    const bi = biOf(container, "a");
+    // 30 × 0.92 = 27.6，超过上限，取上限
+    expect(bi.style.fontSize).toBe("24px");
+    expect(bi.style.fontWeight).toBe("700");
+    expect(bi.style.fontStyle).toBe("italic");
+    expect(bi.style.color).toBe("rgb(20, 20, 20)");
+    // 字体族明确不继承：原文那套可能是子集衬线或符号字形，给了中文译文就是豆腐块
+    expect(bi.style.fontFamily).toBe("");
+  });
+
+  it("正文字号乘 0.92，未设字重的段落不写行内字重", async () => {
+    const { container, originals } = fx!;
+    styleOriginal(originals[0], { "font-size": "16px" });
+    await build(fx!.session);
+    const bi = biOf(container, "a");
+    expect(bi.style.fontSize).toBe("14.7px");
+    // jsdom 对未设字重的段落回报 normal——等于基线值，不应落成行内声明
+    expect(bi.style.fontWeight).toBe("");
+    // 未设样式的另一段保持基线（jsdom 的字号回报 medium，解析不出像素）
+    expect(biOf(container, "b").style.fontSize).toBe("");
+  });
+
+  it("浅灰原文不把颜色传给译文（对照层还有一层不透明度），字号照旧派生", async () => {
+    const { container, originals } = fx!;
+    styleOriginal(originals[0], {
+      "font-size": "18px",
+      color: "rgb(200, 200, 200)",
+    });
+    await build(fx!.session);
+    const bi = biOf(container, "a");
+    expect(bi.style.color).toBe("");
+    expect(bi.style.fontSize).toBe("16.6px");
+  });
+
+  it("取不到计算样式时保持基线，不抛错", async () => {
+    const { container } = fx!;
+    const spy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation(() => ({}) as CSSStyleDeclaration);
+    try {
+      await build(fx!.session);
+    } finally {
+      spy.mockRestore();
+    }
+    const bi = biOf(container, "a");
+    expect(bi.style.fontSize).toBe("");
+    expect(bi.style.color).toBe("");
+  });
+
+  it("朗读高亮重建块内容后，派生样式仍在", async () => {
+    const { container, originals } = fx!;
+    styleOriginal(originals[0], {
+      "font-size": "20px",
+      "font-weight": "700",
+    });
+    const handle = await build(fx!.session);
+    const bi = biOf(container, "a");
+    expect(bi.style.fontSize).toBe("18.4px");
+    expect(bi.style.fontWeight).toBe("700");
+    // 先给一段译文，再驱动朗读高亮——高亮只重建块的子节点
+    ((LazyTranslateQueue as unknown as { lastHooks: any }).lastHooks).onDone(
+      "a",
+      "第一句。第二句。",
+    );
+    handle.highlightTranslatedSentence("a", 0);
+    expect(bi.querySelector(".ztransplit-sent-active")).toBeTruthy();
+    expect(bi.textContent).toContain("第一句");
+    // 行内声明挂在块自身上，不随子节点重建丢失
+    expect(bi.style.fontSize).toBe("18.4px");
+    expect(bi.style.fontWeight).toBe("700");
+    await handle.dispose();
+  });
+});

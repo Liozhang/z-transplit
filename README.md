@@ -116,6 +116,13 @@ it answers in kind. The highlight moves with the selection and clears when you
 click empty space. Translation-only mode takes no part in the linking — the
 original is hidden wholesale, so there is no other side to correspond to.
 
+Each translation also takes its paragraph's typography from the original above
+it: the size is the original's scaled down (so the translation stays the second
+voice, with a cap so a display-size title does not produce a second title), the
+weight and the slant follow, and the ink follows when it stays readable. What is
+deliberately not inherited is the font family — an embedded PDF face may cover
+Latin only, and handing it to a Chinese translation would render tofu.
+
 ![Interleaved bilingual](docs/screenshots/bilingual-interleave.png)
 
 ### 5. Translation-only Mode

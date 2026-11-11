@@ -71,6 +71,7 @@ import {
 } from "../../translation/translationCache";
 import type { BatchTranslator } from "../../translation/types";
 import { splitSentences } from "../../readAloud/sentenceSplitter";
+import { adoptOriginalStyle } from "./translationStyle";
 
 export type BilingualMode = "interleave" | "transOnly";
 
@@ -289,7 +290,16 @@ export async function buildInterleave(
   /** Blocks adopted into the session after start (manual translation). */
   const manualBlocks: SdtBlock[] = [];
 
-  const makeBlockEl = (block: Pick<SdtBlock, "refPath">): HTMLElement => {
+  /**
+   * Create one translation block. The original paragraph is optional: every
+   * real call site has it, and the signature stays total so a future caller
+   * without one still gets a valid block on the CSS baseline.
+   */
+  const makeBlockEl = (block: {
+    refPath: string;
+    /** The original paragraph this translation sits under. */
+    el?: HTMLElement;
+  }): HTMLElement => {
     const el = doc.createElement("div");
     el.className = BI_CLASS;
     el.dataset.refPath = block.refPath;
@@ -297,6 +307,17 @@ export async function buildInterleave(
     ph.className = "ztransplit-bi-placeholder";
     ph.textContent = getString("bilingual-placeholder");
     el.appendChild(ph);
+    // The translation takes the original paragraph's typography (size scaled
+    // down, weight, slant, a readable ink) so a heading's translation reads as
+    // a heading's and a caption's as a caption's. font-family is deliberately
+    // not inherited — see sdt/translationStyle. A paragraph we could not
+    // introspect simply keeps the CSS baseline.
+    //
+    // Derived once per block, here: a block element is created exactly once
+    // per refPath per session, and every later re-render (read-aloud
+    // highlighting, a mode switch) rewrites only its children, so the inline
+    // declarations above outlive them.
+    if (block.el) adoptOriginalStyle(el, block.el);
     return el;
   };
 
@@ -546,7 +567,7 @@ export async function buildInterleave(
 
   const ensureManualBlock = (target: ManualTarget): void => {
     if (injected.has(target.refPath)) return;
-    const el = makeBlockEl(target);
+    const el = makeBlockEl({ refPath: target.refPath, el: target.original });
     target.original.after(el);
     injected.set(target.refPath, el);
     texts.set(target.refPath, target.text);
