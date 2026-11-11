@@ -62,6 +62,17 @@ const MODEL_BUDGET_RULES: readonly ModelBudgetRule[] = [
   { pattern: /deepseek-reasoner/, budgets: { contextWindowTokens: 65536, maxOutputTokens: 32768 } },
   // deepseek-chat（V3）：64k 输入 / 8192 输出。
   { pattern: /deepseek/, budgets: { contextWindowTokens: 65536, maxOutputTokens: 8192 } },
+  // StepFun step-2-16k：16K 输入（模型名即上下文档位，官方文档 16K ≈ 8000 汉字）。
+  // 表内原先没有 step 规则，该模型落 128000 兜底——16 倍高估，批量请求必然超窗。
+  // 输出上限官方未公布，按 4096 保守取值（16K 窗口要同时容纳输入与输出）。
+  { pattern: /step-2-16k/, budgets: { contextWindowTokens: 16384, maxOutputTokens: 4096 } },
+  // Moonshot v1 系列按档位区分（模型名即上下文档位）：8k / 32k / 128k，
+  // 输出上限均为 4096。设置面板的「Kimi」预填的正是 moonshot-v1-8k，
+  // 此前被 /kimi|moonshot/ 家族规则一律按 131072/8192 计——8 倍高估输入、
+  // 2 倍高估输出，默认批量预算就能超出它 8192 的真实窗口。
+  { pattern: /moonshot-v1-8k/, budgets: { contextWindowTokens: 8192, maxOutputTokens: 4096 } },
+  { pattern: /moonshot-v1-32k/, budgets: { contextWindowTokens: 32768, maxOutputTokens: 4096 } },
+  { pattern: /moonshot-v1-128k/, budgets: { contextWindowTokens: 131072, maxOutputTokens: 8192 } },
   // GLM-4.6：200k 输入；输出按 32k 保守取值（峰值 128k）。
   { pattern: /glm-4\.6/, budgets: { contextWindowTokens: 200000, maxOutputTokens: 32768 } },
   // GLM-4.5：128k 输入；输出按 32k 保守取值（峰值 96k）。
@@ -72,7 +83,8 @@ const MODEL_BUDGET_RULES: readonly ModelBudgetRule[] = [
   { pattern: /qwen3/, budgets: { contextWindowTokens: 131072, maxOutputTokens: 32768 } },
   // Qwen 其余（2.5 等）：128k 输入 / 8192 输出。
   { pattern: /qwen/, budgets: { contextWindowTokens: 131072, maxOutputTokens: 8192 } },
-  // Kimi 与 Moonshot：128k 输入；输出按 8192 保守取值。
+  // Kimi 与 Moonshot 其余型号（kimi-k2 等新家族）：128k 输入；输出按 8192 保守取值。
+  // 分档规则在上面，家族兜底留在最后。
   { pattern: /kimi|moonshot/, budgets: { contextWindowTokens: 131072, maxOutputTokens: 8192 } },
 ];
 

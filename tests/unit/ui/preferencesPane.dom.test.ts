@@ -1163,6 +1163,32 @@ describe("B17 设置 pane：AI 服务商预设", () => {
     expect(ids.slice(1)).toEqual(AI_PROVIDER_PRESETS.map((p) => p.id));
     h.dom.window.close();
   });
+
+  it("手改接口地址：下拉按新地址反查回显，输入框内容不被改写", () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "https://my-gateway.internal/v1" },
+    });
+    expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("none");
+    // 用户粘贴一个预设地址（尾斜杠也要能反查）；XUL 的 preference 绑定此刻
+    // 还没落盘，回显读的是输入框的当前值。
+    fireInputAndChange(h, "ztransplit-pref-ai-url", "https://api.deepseek.com/v1/");
+    expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("deepseek");
+    // 回显只改下拉，不回填输入框——用户正在往里打字
+    expect(h.doc.getElementById("ztransplit-pref-ai-url")!.value).toBe(
+      "https://api.deepseek.com/v1/",
+    );
+    h.dom.window.close();
+  });
+
+  it("手改地址离开预设表：下拉回到「不预设」", () => {
+    const h = setupAiHarness({
+      prefs: { [`${PREFIX}translate.ai.apiUrl`]: "https://api.deepseek.com/v1" },
+    });
+    expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("deepseek");
+    fireInputAndChange(h, "ztransplit-pref-ai-url", "https://my-gateway.internal/v1");
+    expect(h.doc.getElementById("ztransplit-pref-ai-provider")!.value).toBe("none");
+    h.dom.window.close();
+  });
 });
 
 describe("B17 设置 pane：AI 测试连接按钮", () => {

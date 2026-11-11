@@ -194,6 +194,8 @@ describe("engine wire contracts", () => {
     expect(call.headers["Ocp-Apim-Subscription-Region"]).toBe("eastasia");
     expect(call.url).toContain("from=&");
     expect(JSON.parse(call.body)).toEqual([{ Text: "hello" }]);
+    // Azure 端点也要有超时：无 signal 的请求会挂到操作系统网络超时。
+    expect(call.signal).toBeDefined();
   });
 
   it("bing without a key fails fast with a configuration error", async () => {
@@ -229,6 +231,8 @@ describe("engine wire contracts", () => {
       "application/x-www-form-urlencoded",
     );
     expect(new URLSearchParams(call.body).get("source_lang")).toBe("EN");
+    // DeepL 同样带超时（免费版配额紧，429 退避另见专测）。
+    expect(call.signal).toBeDefined();
   });
 
   it("deepl auto source omits source_lang; pro host by default", async () => {
@@ -272,6 +276,8 @@ describe("engine wire contracts", () => {
     expect(body.messages[0].content).toContain("from auto-detect to French");
     expect(body.messages[0].content).toContain("{v0}");
     expect(body.messages[1]).toEqual({ role: "user", content: "hello" });
+    // 与 AI 引擎同一档超时：自定义端点面向本地网关，无 signal 会挂到操作系统超时。
+    expect(call.signal).toBeDefined();
   });
 
   it("custom endpoint already ending in /chat/completions is not double-suffixed", async () => {
@@ -1170,6 +1176,129 @@ describe("translation cache", () => {
     await t("text", "zh-TW");
     expect(h.fetchCalls).toHaveLength(2);
   });
+
+  // 回归：会话缓存键曾不含术语表与自定义请求头。改术语表后持久缓存指纹变了
+  // （正确未命中），会话缓存却仍命中，同一段返回的是改动前的译文——与 README
+  // 「修改后相关翻译重新请求，不会读到旧结果」相反。
+  it("editing the glossary invalidates the cached translation", async () => {
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      "translate.glossary": "transformer=变换器",
+    });
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "译文" } }] }),
+    );
+
+    const t1 = createTranslator("zh-CN");
+    expect(await t1("the transformer", "zh-CN")).toBe("译文");
+    await t1("the transformer", "zh-CN"); // 同一配置：命中缓存
+    expect(h.fetchCalls).toHaveLength(1);
+
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      "translate.glossary": "transformer=变压器",
+    });
+    const t2 = createTranslator("zh-CN");
+    await t2("the transformer", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(2); // 新术语表 → 重新请求
+    expect(JSON.parse(h.fetchCalls[1].body).messages[0].content).toContain(
+      "transformer = 变压器",
+    );
+  });
+
+  it("editing the custom headers invalidates the cached translation", async () => {
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+    });
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "x" } }] }),
+    );
+
+    const t1 = createTranslator("zh-CN");
+    await t1("hello", "zh-CN");
+    await t1("hello", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1);
+
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      "translate.custom.headers": "X-Tenant-Id: team-a",
+    });
+    const t2 = createTranslator("zh-CN");
+    await t2("hello", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(2); // 换网关 → 重新请求
+    expect(h.fetchCalls[1].headers["X-Tenant-Id"]).toBe("team-a");
+  });
+
+  it("a blank glossary or headers equals none: the cache key does not change", async () => {
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+    });
+    route("chat/completions", () =>
+      jsonResponse({ choices: [{ message: { content: "x" } }] }),
+    );
+
+    const t1 = createTranslator("zh-CN");
+    await t1("hello", "zh-CN");
+    await t1("hello", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1);
+
+    // 空串与纯空白都表示「无术语表 / 无自定义头」：键不能变，否则一次毫无
+    // 意义的重译（与 engineCacheIdentity 的同名契约一致）。
+    setPrefs({
+      "translate.engineType": "custom",
+      "translate.custom.apiUrl": "https://gw.example/v1",
+      "translate.custom.apiKey": "ck-1",
+      "translate.custom.model": "llama3",
+      "translate.glossary": "  \n ",
+      "translate.custom.headers": "\n",
+    });
+    const t2 = createTranslator("zh-CN");
+    await t2("hello", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1); // 仍是同一配置 → 命中
+  });
+
+  it("bing region is part of the session cache key", async () => {
+    setPrefs({
+      "translate.engineType": "bing",
+      "translate.bing.apiKey": "bk-1",
+      "translate.bing.region": "eastasia",
+    });
+    route("cognitive.microsofttranslator", () =>
+      jsonResponse([{ translations: [{ text: "Hola" }] }]),
+    );
+
+    const t1 = createTranslator("es-ES");
+    await t1("hello", "es-ES");
+    await t1("hello", "es-ES");
+    expect(h.fetchCalls).toHaveLength(1);
+
+    setPrefs({
+      "translate.engineType": "bing",
+      "translate.bing.apiKey": "bk-1",
+      "translate.bing.region": "chinanorth",
+    });
+    const t2 = createTranslator("es-ES");
+    await t2("hello", "es-ES");
+    expect(h.fetchCalls).toHaveLength(2); // 换订阅区域 → 重新请求
+    expect(h.fetchCalls[1].headers["Ocp-Apim-Subscription-Region"]).toBe(
+      "chinanorth",
+    );
+  });
 });
 
 describe("translate.output.maxTokens — 输出预算", () => {
@@ -1505,5 +1634,60 @@ describe("translate.*.headers — 自定义请求头", () => {
     expect(withHeaders).not.toBe(base);
     customChatPrefs({ "translate.custom.headers": "X-Tenant-Id: other" });
     expect(engineCacheIdentity()).not.toBe(withHeaders);
+  });
+});
+
+describe("engineCacheIdentity — 机器翻译端点维度", () => {
+  it("Azure 非默认订阅区域入指纹；global 与空值保持原样", () => {
+    setPrefs({
+      "translate.engineType": "bing",
+      "translate.bing.apiKey": "bk-1",
+    });
+    const base = engineCacheIdentity();
+
+    // 空串与 global 都表示「全球资源」：不得改变身份（否则升级即整体重译）。
+    setPrefs({
+      "translate.engineType": "bing",
+      "translate.bing.apiKey": "bk-1",
+      "translate.bing.region": "global",
+    });
+    expect(engineCacheIdentity()).toBe(base);
+    setPrefs({
+      "translate.engineType": "bing",
+      "translate.bing.apiKey": "bk-1",
+      "translate.bing.region": "",
+    });
+    expect(engineCacheIdentity()).toBe(base);
+
+    // 另一个区域是另一个 Translator 端点，可能跑不同版本的模型。
+    setPrefs({
+      "translate.engineType": "bing",
+      "translate.bing.apiKey": "bk-1",
+      "translate.bing.region": "chinanorth",
+    });
+    expect(engineCacheIdentity()).not.toBe(base);
+  });
+
+  it("机器翻译凭据不入指纹，端点档位差异入指纹", () => {
+    setPrefs({
+      "translate.engineType": "deepl",
+      "translate.deepl.apiKey": "dk-1",
+    });
+    const base = engineCacheIdentity();
+
+    // 换账号不改变译文，折叠它只会迫使整库重译。
+    setPrefs({
+      "translate.engineType": "deepl",
+      "translate.deepl.apiKey": "dk-2",
+    });
+    expect(engineCacheIdentity()).toBe(base);
+
+    // 免费/Pro 是不同端点，必须区分。
+    setPrefs({
+      "translate.engineType": "deepl",
+      "translate.deepl.apiKey": "dk-2",
+      "translate.deepl.useFree": "true",
+    });
+    expect(engineCacheIdentity()).not.toBe(base);
   });
 });

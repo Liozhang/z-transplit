@@ -891,6 +891,22 @@
     applyAiProviderPreset(id);
   }
 
+  /**
+   * 手改接口地址：下拉按新地址反查回显。只改下拉、不碰输入框——用户正在往里
+   * 打字，回填会打断输入；地址写完了（粘贴一个预设地址）下拉立刻跟上，
+   * 不会停在误导性的「不预设」上。读输入框的当前值而不是 pref：XUL 的
+   * preference 绑定要等失焦才落盘。
+   */
+  function onAiUrlChanged() {
+    if (!els.aiProviderList) return;
+    var url = els.aiUrlInput ? String(els.aiUrlInput.value || "") : "";
+    try {
+      els.aiProviderList.value = detectAiPresetId(url);
+    } catch (e) {
+      /* 忽略：反查失败只影响回显 */
+    }
+  }
+
   // ── AI 测试连接 ────────────────────────────────────────────────────────
   // 与 Java/解析组件两节同一套路：面板脚本无法 import 主包，测试逻辑（发一个
   // 最小请求并按 HTTP status 分类）在主包的 connectionTest.ts 里，经
@@ -1540,6 +1556,11 @@
       // 字段。两个事件都听，与引擎/区域同一套路。
       els.aiProviderList.addEventListener("select", onAiProviderPicked);
       els.aiProviderList.addEventListener("command", onAiProviderPicked);
+    }
+    if (els.aiUrlInput) {
+      // 手改地址也要让下拉跟上（反查回显，见 onAiUrlChanged）。
+      els.aiUrlInput.addEventListener("input", onAiUrlChanged);
+      els.aiUrlInput.addEventListener("change", onAiUrlChanged);
     }
     if (els.aiTestBtn) {
       els.aiTestBtn.addEventListener("command", onAiTest);

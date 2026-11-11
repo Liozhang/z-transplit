@@ -189,8 +189,10 @@ itself: the language configuration and the template validation.
   An empty field restores the built-in default template.
 - The cache invalidates by template fingerprint — editing one character forces a
   re-translation instead of serving results from the old prompt.
-- Requests go out per paragraph (no batch JSON), same as any other model backend
-  (self-hosted Ollama, vLLM, a gateway, …).
+- Full-text and bilingual translation pack several paragraphs into one request
+  (structured JSON output), and the batch prompt is derived from your template,
+  so a custom template governs every segment. A selection translation goes out
+  per paragraph.
 
 ### The glossary
 

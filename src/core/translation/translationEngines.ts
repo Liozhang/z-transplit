@@ -177,12 +177,14 @@ function toDeepLTargetLang(code: string): string {
 }
 
 /**
- * Timeout used for the keyless HTTP endpoints (Google free endpoint, Bing web).
- * A blocked/unreachable endpoint (e.g. Google in mainland China) must fail fast
- * so the fallback chain can take over instead of hanging on the OS network
- * timeout (~60-120s per paragraph).
+ * Timeout used for the machine-translation HTTP endpoints (Google free and
+ * Cloud, Azure Translator, DeepL, Bing web). A blocked/unreachable endpoint
+ * (e.g. Google in mainland China) must fail fast so the user sees the real
+ * error instead of hanging on the OS network timeout (~60-120s per paragraph).
+ * 10s is generous for a translate call and short enough that a whole document
+ * of failures reports quickly.
  */
-const KEYLESS_ENDPOINT_TIMEOUT_MS = 10000;
+const MT_ENDPOINT_TIMEOUT_MS = 10000;
 
 /**
  * Session-sticky "Google direct is unavailable" marker, set the first time the
@@ -401,7 +403,7 @@ async function translateWithGoogle(
         `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(opts.apiKey)}`,
         {},
         body,
-        KEYLESS_ENDPOINT_TIMEOUT_MS,
+        MT_ENDPOINT_TIMEOUT_MS,
       );
       const data = (await resp.json()) as any;
       const translated = data?.data?.translations?.[0]?.translatedText;
@@ -417,7 +419,7 @@ async function translateWithGoogle(
         encodeURIComponent(tgt) +
         `&dt=t&q=` +
         encodeURIComponent(text);
-      const resp = await httpGet(url, KEYLESS_ENDPOINT_TIMEOUT_MS);
+      const resp = await httpGet(url, MT_ENDPOINT_TIMEOUT_MS);
       const data = (await resp.json()) as any;
       // Response shape: [[["translated","original",...]],null,"srcLang"]
       const sentences = data?.[0] ?? [];
@@ -460,6 +462,7 @@ async function translateWithBing(
         "Ocp-Apim-Subscription-Region": opts.region,
       },
       body,
+      MT_ENDPOINT_TIMEOUT_MS,
     );
     const data = (await resp.json()) as any;
     const translated = data?.[0]?.translations?.[0]?.text;
@@ -548,7 +551,7 @@ async function fetchBingWebSession(): Promise<BingWebSession> {
   }
   const resp = await httpGet(
     "https://www.bing.com/translator",
-    KEYLESS_ENDPOINT_TIMEOUT_MS,
+    MT_ENDPOINT_TIMEOUT_MS,
   );
   const html = await resp.text();
   const ig = html.match(/IG:"([A-Fa-f0-9]{16,})"/)?.[1] || "";
@@ -610,7 +613,7 @@ async function postBingWebTranslate(
         Referer: `${session.origin}/translator`,
       },
       body: body.toString(),
-      signal: abortSignalTimeout(KEYLESS_ENDPOINT_TIMEOUT_MS),
+      signal: abortSignalTimeout(MT_ENDPOINT_TIMEOUT_MS),
     });
     if (!resp.ok) {
       return {
@@ -718,6 +721,7 @@ async function translateWithDeepL(
         `https://${host}/v2/translate`,
         { Authorization: `DeepL-Auth-Key ${opts.apiKey}` },
         params,
+        MT_ENDPOINT_TIMEOUT_MS,
       ),
     );
     const data = (await resp.json()) as any;
@@ -846,6 +850,9 @@ async function translateWithCustom(
 
     // 与 AI 引擎同源的自定义端点也走限流退避（同一个 openaiCompat 客户端，
     // 同一种 429 形态）。
+    // timeoutMs 与 AI 引擎一致：自定义端点面向的正是 Ollama / LM Studio 这类
+    // 本地网关，本地模型生成慢、服务无响应时若没有超时，请求会挂到操作系统
+    // 网络超时（约 60–120 秒）才算完，而单段 translator 又没有取消通道。
     const result = await withRateLimitRetry(() =>
       client.chat({
         messages: [
@@ -865,6 +872,7 @@ async function translateWithCustom(
             Math.min(text.length * 2, SINGLE_OUTPUT_MAX_TOKENS),
           ),
         temperature: 0.3,
+        timeoutMs: AI_ENDPOINT_TIMEOUT_MS,
       }),
     );
 
@@ -997,15 +1005,53 @@ export function getEngineConfig(): EngineConfig {
 }
 
 /**
+ * Configuration dimensions that change WHAT the model answers without being
+ * part of the engine's wire identity: the glossary (it is injected into the
+ * prompt) and the extra HTTP headers (a different gateway answers). Both are
+ * folded in ONLY when actually configured — a headerless, glossary-free
+ * install keeps the identity it always had, so upgrading never wipes a cache
+ * for nothing.
+ *
+ * One helper serves both caches: engineCacheIdentity() (persistent) and the
+ * in-memory key in createTranslator(). They must agree — editing the glossary
+ * used to change the persistent identity but not the session key, and the
+ * session cache then answered a repeated paragraph with its pre-edit
+ * translation (README promises the opposite).
+ */
+function contentConfigParts(glossaryRaw: string, headersRaw: string): string[] {
+  const parts: string[] = [];
+  const headers = parseCustomHeaders(headersRaw || "");
+  if (Object.keys(headers).length > 0) {
+    parts.push("h:" + promptFingerprint(JSON.stringify(headers)));
+  }
+  const glossary = parseGlossary(glossaryRaw || "");
+  if (glossary.length > 0) {
+    parts.push("g:" + promptFingerprint(JSON.stringify(glossary)));
+  }
+  return parts;
+}
+
+/**
  * Stable fingerprint of the engine configuration for the persistent translation
  * cache (translationCache.ts). Two runs with the same identity are assumed to
  * produce interchangeable translations, so cached paragraphs are reused.
  * Credentials only enter as a short fingerprint (never the full secret).
  *
- * The "ai" engine additionally fingerprints its prompt template: the template
- * *is* the engine's behaviour, so editing it must invalidate cached paragraphs
- * (a cached Google paragraph is interchangeable with another Google paragraph;
- * a cached paragraph from prompt A is not one from prompt B).
+ * What folds in, and why:
+ *   - model-backed engines ("ai", "custom"): model, endpoint, credential tail,
+ *     prompt template (the template *is* the engine's behaviour — a cached
+ *     paragraph from prompt A is not one from prompt B), glossary, headers.
+ *   - MT engines (google / bing / deepl): the endpoint tier only — keyed vs
+ *     keyless for Google, free vs pro for DeepL, and for Azure the subscription
+ *     region, because another region is another Translator endpoint that can
+ *     serve a different model version. Credentials are deliberately NOT folded
+ *     in: the account behind an MT key does not change the translation, so
+ *     including it would only force a needless re-translation of the corpus.
+ *     (The session cache in createTranslator is stricter — it keeps the
+ *     credential tail per L-23; a session-local miss costs nothing.)
+ *
+ * The in-memory key folds in the same dimensions through contentConfigParts(),
+ * so an edit invalidates both caches or neither.
  */
 export function engineCacheIdentity(): string {
   const cfg = getEngineConfig();
@@ -1017,33 +1063,24 @@ export function engineCacheIdentity(): string {
       (cfg.aiApiKey || "").slice(-6),
       promptFingerprint(resolvePromptTemplate(cfg.aiPrompt)),
     );
-    // Custom headers change which gateway answers (and thus the result
-    // shape), so — like the prompt — they must invalidate cached paragraphs.
-    // Only appended when actually configured: a headerless install must keep
-    // the identity it always had (no one-time cache wipe on upgrade).
-    const aiHeaders = parseCustomHeaders(cfg.aiHeaders || "");
-    if (Object.keys(aiHeaders).length > 0) {
-      parts.push("h:" + promptFingerprint(JSON.stringify(aiHeaders)));
-    }
-    // 术语表改变译文内容，与提示模板同理：改动必须使已缓存段落失效。
-    const aiGlossary = parseGlossary(cfg.glossary || "");
-    if (aiGlossary.length > 0) {
-      parts.push("g:" + promptFingerprint(JSON.stringify(aiGlossary)));
-    }
+    parts.push(
+      ...contentConfigParts(cfg.glossary || "", cfg.aiHeaders || ""),
+    );
   } else if (cfg.engineType === "custom") {
     parts.push(cfg.customModel || "", cfg.customApiUrl || "", (cfg.customApiKey || "").slice(-6));
-    const customHeaders = parseCustomHeaders(cfg.customHeaders || "");
-    if (Object.keys(customHeaders).length > 0) {
-      parts.push("h:" + promptFingerprint(JSON.stringify(customHeaders)));
-    }
-    const customGlossary = parseGlossary(cfg.glossary || "");
-    if (customGlossary.length > 0) {
-      parts.push("g:" + promptFingerprint(JSON.stringify(customGlossary)));
-    }
+    parts.push(
+      ...contentConfigParts(cfg.glossary || "", cfg.customHeaders || ""),
+    );
   } else if (cfg.engineType === "google") {
     parts.push(cfg.googleApiKey ? "keyed" : "keyless");
   } else if (cfg.engineType === "deepl") {
     parts.push(cfg.deeplUseFree ? "free" : "pro");
+  } else if (cfg.engineType === "bing") {
+    // Azure has no keyless mode, so an unconfigured install keeps the bare
+    // identity; a non-default region is another endpoint and is folded in.
+    if (cfg.bingRegion && cfg.bingRegion !== "global") {
+      parts.push("r:" + cfg.bingRegion);
+    }
   }
   return parts.join("|");
 }
@@ -1078,43 +1115,62 @@ export function createTranslator(
   }
   const inner = createTranslatorUncached(targetLanguage, sourceLanguage);
 
-  return async (text: string, tgt: string, src?: string) => {
-    // Only cache texts under 5000 chars to avoid memory bloat from long PDFs.
-    if (text.length > 5000) return inner(text, tgt, src);
 
-    // L-23: fold the model + API-key fingerprint into the cache key —
-    // switching key/model within the same engine type must not serve the
-    // previous configuration's cached translations.
-    const credKey =
-      cfg.engineType === "google"
-        ? cfg.googleApiKey
-        : cfg.engineType === "bing"
-          ? cfg.bingApiKey
-          : cfg.engineType === "deepl"
-            ? cfg.deeplApiKey
+  // L-23: fold the configuration that changes the RESULT into the cache key —
+  // engine, model, credential tail, endpoint, prompt template — so switching
+  // any of them mid-session never serves the previous configuration's
+  // translation. The glossary and the custom headers go through the SAME
+  // helper engineCacheIdentity() uses (contentConfigParts), so an edit
+  // invalidates this cache exactly when it invalidates the persistent one:
+  // editing the glossary used to change the persistent identity but not this
+  // key, and a repeated paragraph came back with its pre-edit translation.
+  // Hoisted out of the closure: a translator is created per request, so this is
+  // as fresh as `cfg` and costs one fingerprint per request instead of per
+  // paragraph. Only the model-backed engines get the content dimensions —
+  // they are the only ones with a prompt to inject into.
+  const modelKey =
+    cfg.engineType === "ai" ? cfg.aiModel || "" : cfg.customModel || "";
+  const credKey =
+    cfg.engineType === "google"
+      ? cfg.googleApiKey
+      : cfg.engineType === "bing"
+        ? cfg.bingApiKey
             : cfg.engineType === "ai"
               ? cfg.aiApiKey
               : cfg.engineType === "custom"
                 ? cfg.customApiKey
                 : "";
-    // The endpoint is part of a model-backed engine's configuration identity —
-    // the same key/model against a different apiUrl serves a different service.
-    const apiUrlKey =
-      cfg.engineType === "custom"
-        ? cfg.customApiUrl || ""
-        : cfg.engineType === "ai"
-          ? cfg.aiApiUrl || ""
-          : "";
-    // …and so is the prompt: same endpoint, different template, different
-    // translations. Resolving first keeps the key stable for the default
-    // template (empty pref), so switching from edited to default re-hits it.
-    const promptKey =
-      cfg.engineType === "ai"
-        ? promptFingerprint(resolvePromptTemplate(cfg.aiPrompt))
+  // The endpoint is part of a model-backed engine's configuration identity —
+  // the same key/model against a different apiUrl serves a different service.
+  const apiUrlKey =
+    cfg.engineType === "custom"
+      ? cfg.customApiUrl || ""
+      : cfg.engineType === "ai"
+        ? cfg.aiApiUrl || ""
         : "";
-    const modelKey =
-      cfg.engineType === "ai" ? cfg.aiModel || "" : cfg.customModel || "";
-    const key = `${cfg.engineType}:${modelKey}:${(credKey || "").slice(-6)}:${apiUrlKey}:${promptKey}:${tgt || targetLanguage}:${src || sourceLanguage || "auto"}:${text}`;
+  // …and so is the prompt: same endpoint, different template, different
+  // translations. Resolving first keeps the key stable for the default
+  // template (empty pref), so switching from edited to default re-hits it.
+  const promptKey =
+    cfg.engineType === "ai"
+      ? promptFingerprint(resolvePromptTemplate(cfg.aiPrompt))
+      : "";
+  const contentKey =
+    cfg.engineType === "ai" || cfg.engineType === "custom"
+      ? contentConfigParts(
+          cfg.glossary || "",
+          (cfg.engineType === "ai" ? cfg.aiHeaders : cfg.customHeaders) || "",
+        ).join(",")
+      : "";
+  // Azure's subscription region identifies another Translator endpoint, so the
+  // session cache must not hand one region's paragraph to another.
+  const regionKey = cfg.engineType === "bing" ? cfg.bingRegion || "" : "";
+
+  return async (text: string, tgt: string, src?: string) => {
+    // Only cache texts under 5000 chars to avoid memory bloat from long PDFs.
+    if (text.length > 5000) return inner(text, tgt, src);
+
+    const key = `${cfg.engineType}:${modelKey}:${(credKey || "").slice(-6)}:${apiUrlKey}:${promptKey}:${contentKey}:${regionKey}:${tgt || targetLanguage}:${src || sourceLanguage || "auto"}:${text}`;
     const cached = TRANSLATION_CACHE.get(key);
     if (cached !== undefined) {
       // LRU refresh: delete + re-insert moves entry to end (most recently used).

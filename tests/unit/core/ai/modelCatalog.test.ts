@@ -46,6 +46,49 @@ describe("resolveModelBudgets", () => {
     }
   });
 
+  it("设置面板预设的模型按真实上下文档位取值（不高估）", () => {
+    // 预设表 prefill 的四个国内模型：qwen-plus / glm-4-plus / moonshot-v1-8k /
+    // step-2-16k。前两个本就落在家族规则的正确档位，后两个曾是 8 倍 / 16 倍
+    // 高估（moonshot-v1-8k 按 131072、step-2-16k 落 128000 兜底）。
+    expect(resolveModelBudgets("qwen-plus")).toEqual({
+      contextWindowTokens: 131072,
+      maxOutputTokens: 8192,
+    });
+    expect(resolveModelBudgets("glm-4-plus")).toEqual({
+      contextWindowTokens: 131072,
+      maxOutputTokens: 16384,
+    });
+    expect(resolveModelBudgets("moonshot-v1-8k")).toEqual({
+      contextWindowTokens: 8192,
+      maxOutputTokens: 4096,
+    });
+    expect(resolveModelBudgets("step-2-16k")).toEqual({
+      contextWindowTokens: 16384,
+      maxOutputTokens: 4096,
+    });
+  });
+
+  it("moonshot 分档优先于家族兜底，v1 新家族仍走 128k 档", () => {
+    expect(resolveModelBudgets("moonshot-v1-8k").contextWindowTokens).toBe(8192);
+    expect(resolveModelBudgets("moonshot-v1-32k").contextWindowTokens).toBe(32768);
+    expect(resolveModelBudgets("moonshot-v1-128k").contextWindowTokens).toBe(131072);
+    expect(resolveModelBudgets("kimi-latest").contextWindowTokens).toBe(131072);
+  });
+
+  it("小窗口模型的输入预算不会超过它的真实窗口", () => {
+    // 与 createAIBatchTranslator 的推导同构：contextWindow − 系统预留 − 输出上限。
+    for (const model of ["moonshot-v1-8k", "step-2-16k", "moonshot-v1-32k"]) {
+      const b = resolveModelBudgets(model);
+      const inputBudget = Math.min(
+        b.contextWindowTokens - 600 - b.maxOutputTokens,
+        8192, // translate.batchMaxTokens 出厂值
+      );
+      expect(inputBudget + b.maxOutputTokens, `${model} 的输入加输出`).toBeLessThanOrEqual(
+        b.contextWindowTokens,
+      );
+    }
+  });
+
   it("特例优先于家族兜底（claude-3 不落到 claude 家族档）", () => {
     expect(resolveModelBudgets("claude-3-7-sonnet").maxOutputTokens).toBe(8192);
     expect(resolveModelBudgets("claude-sonnet-4").maxOutputTokens).toBe(32000);

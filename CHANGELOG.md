@@ -3,6 +3,71 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- The session translation cache ignored the glossary and the custom headers.
+  Its key carried the engine, model, credential tail, endpoint, prompt
+  template, language pair and text — but not the two settings that change what
+  the model answers without touching the engine's wire identity. Editing the
+  glossary therefore changed the persistent cache's fingerprint (a correct
+  miss) while the in-memory LRU still held the pre-edit translation, so the
+  same paragraph came back with its old wording until Zotero restarted. That
+  contradicted the documented promise in both READMEs ("editing the table
+  keeps invalidating affected translations") and reached every per-paragraph
+  path: the selection pane, the PDF split view, the bilingual view and the
+  word-card model layer (the batch path has no session cache and was never
+  affected). The glossary and header dimensions now go through one shared
+  helper (contentConfigParts) that both engineCacheIdentity() and the session
+  key use, so an edit invalidates both caches or neither; a blank or
+  whitespace-only value still counts as "none" and does not churn the key.
+  Azure's subscription region joined the session key too — another region is
+  another Translator endpoint — and engineCacheIdentity() folds a non-default
+  region into the persistent fingerprint, while MT credentials deliberately
+  stay out of it (the account behind a machine-translation key does not change
+  the translation, so folding it in would only force a needless
+  re-translation of the corpus; that rule is now written down instead of
+  being an accident of the branch structure).
+
+- The model budget table overestimated the context window of two presets the
+  settings pane ships. `moonshot-v1-8k` (the "Kimi" preset's pre-filled model,
+  really 8k input / 4k output) was matched by the `kimi|moonshot` family rule
+  at 131072 / 8192, and `step-2-16k` (the "StepFun" preset) had no rule at all
+  and fell back to 128000 / 16384. Both directions are the ones the module's
+  own comment calls unsafe: the default batch budget could then ask for more
+  input plus output than the model's window holds, so every batch failed and
+  degraded to per-paragraph after burning its retries. The Moonshot v1 tiers
+  (8k / 32k / 128k) and step-2-16k now have their own rules, ordered ahead of
+  the family fallback, and a test pins the derived input-plus-output budget
+  inside each model's real window.
+
+- The custom OpenAI-compatible engine sent its single-paragraph request
+  without a timeout, and so did the Azure Translator and DeepL calls. A
+  hung or unreachable endpoint then blocked a paragraph until the operating
+  system's network timeout (about 60–120s) — worst exactly where the custom
+  engine points users, at a self-hosted Ollama or LM Studio — and the
+  single-paragraph translator has no cancellation channel to cut it short.
+  The custom engine now carries the same 120s budget as the AI engine, and the
+  machine-translation endpoints share one named constant
+  (MT_ENDPOINT_TIMEOUT_MS, 10s) instead of a "keyless" one that only some of
+  them used.
+
+- The AI provider dropdown in the settings pane only echoed the configured
+  endpoint on load. Pasting a preset's URL into the address field by hand left
+  the dropdown on "no preset", so the pane's state disagreed with the
+  configuration it was about to save. The dropdown now re-detects from the
+  field's current value as it changes (and only the dropdown — the field
+  itself is never rewritten under the user's typing).
+
+### Documentation
+
+- Both READMEs claimed the AI engine requests per paragraph and never uses
+  batch JSON. It has used the batch path since the batch translator learned to
+  derive its prompt from the user's template; the section now describes both
+  shapes (full-text and bilingual pack paragraphs into one request, a
+  selection goes out per paragraph).
+
 ## [1.20.0] - 2026-11-09
 
 ### Added
