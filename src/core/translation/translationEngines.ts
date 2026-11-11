@@ -1,7 +1,7 @@
 /**
  * translationEngines — Unified translation engine dispatcher.
  *
- * Supports seven engine types:
+ * Supports nine engine types:
  *   - "ai"      → OpenAI-compatible chat-completions endpoint driven by a
  *                 user-owned, validated prompt template (translate.ai.*) via
  *                 src/core/translation/promptTemplate.ts. This is the port of
@@ -23,6 +23,15 @@
  *                 never a silent substitute for a failing engine
  *                 (ported from z-search's 2026-09-28 change).
  *   - "deepl"   → DeepL API
+ *   - "youdao"  → Youdao 智云 text translation (openapi.youdao.com), signed
+ *                 with signType=v3 from a user-owned app id + secret. The
+ *                 domestic provider for users who cannot reach the others;
+ *                 see src/core/translation/youdaoTranslate.ts for the contract.
+ *   - "youdao-web" → keyless Youdao demo endpoint (aidemo.youdao.com/trans),
+ *                 the reverse-engineered endpoint behind fanyi.youdao.com.
+ *                 Same risk class as "bing-web": no credentials, no stability
+ *                 guarantee, and its failures are reported as failures — it is
+ *                 never a silent substitute for a failing engine.
  *   - "zotero-pdf-translate" → external plugin bridge
  *
  * All engines return the same signature:
@@ -58,6 +67,16 @@ import {
   glossaryPromptBlock,
   parseGlossary,
 } from "./glossary";
+import {
+  YOUDAO_GENERIC_ERROR_KEY,
+  YOUDAO_WEB_ENDPOINT,
+  buildWebFormParams,
+  buildYoudaoSignature,
+  buildZhiyunUrl,
+  normalizeYoudaoDomain,
+  toYoudaoLang,
+  youdaoErrorKey,
+} from "./youdaoTranslate";
 import { getPrefDynamic } from "../../utils/prefs";
 import { parseJsonFromMarkdown } from "../../utils/json";
 import { toErrorMessage } from "../../utils/error";
@@ -91,6 +110,8 @@ export type TranslationEngineType =
   | "bing-web"
   | "deepl"
   | "custom"
+  | "youdao"
+  | "youdao-web"
   | "zotero-pdf-translate";
 
 /**
@@ -112,6 +133,17 @@ export interface BingTranslateOptions {
 export interface DeepLTranslateOptions {
   apiKey: string;
   useFreeEndpoint?: boolean;
+}
+
+export interface YoudaoTranslateOptions {
+  /** Application id from the Youdao console (应用 ID). */
+  appKey: string;
+  /** Application secret (应用密钥). */
+  appSecret: string;
+  /** Optional glossary id (术语库 ID); sent only when non-empty. */
+  vocabId?: string;
+  /** Translation domain (general | computers | medicine | finance | game). */
+  domain?: string;
 }
 
 export interface CustomTranslateOptions {
@@ -720,6 +752,124 @@ async function translateWithDeepL(
 }
 
 /**
+ * Youdao 智云 text translation (signType=v3).
+ *
+ * GET with the signature in the query string, exactly as documented:
+ *   sign = sha256hex(appKey + truncate(q) + salt + curtime + appSecret)
+ * A missing digest is an error, never an unsigned request — a request the
+ * server would reject with an opaque signature failure is worse than saying
+ * "this host cannot sign".
+ */
+async function translateWithYoudaoZhiyun(
+  text: string,
+  targetLanguage: string,
+  sourceLanguage: string | undefined,
+  opts: YoudaoTranslateOptions,
+): Promise<{ success: boolean; translatedText?: string; error?: string }> {
+  try {
+    const salt = String(Date.now());
+    const curtime = String(Math.round(Date.now() / 1000));
+    const sign = await buildYoudaoSignature({
+      appKey: opts.appKey,
+      appSecret: opts.appSecret,
+      query: text,
+      salt,
+      curtime,
+    });
+    if (!sign) {
+      return {
+        success: false,
+        error: getString("translation-error-youdao-sign-unavailable"),
+      };
+    }
+    const url = buildZhiyunUrl({
+      appKey: opts.appKey,
+      appSecret: opts.appSecret,
+      vocabId: opts.vocabId,
+      domain: normalizeYoudaoDomain(opts.domain),
+      query: text,
+      from: toYoudaoLang(sourceLanguage) || "auto",
+      to: toYoudaoLang(targetLanguage),
+      salt,
+      curtime,
+      sign,
+    });
+    const resp = await httpGet(url, MT_ENDPOINT_TIMEOUT_MS);
+    const data = (await resp.json()) as any;
+    // errorCode 是字符串形式的数字；0 才算成功，其余一律按失败处理。
+    if (String(data?.errorCode ?? "0") !== "0") {
+      const code = String(data?.errorCode);
+      const key = youdaoErrorKey(code);
+      return {
+        success: false,
+        error: key
+          ? getString(key)
+          : getString(YOUDAO_GENERIC_ERROR_KEY, { code }),
+      };
+    }
+    const translated = Array.isArray(data?.translation)
+      ? data.translation.join("")
+      : "";
+    if (!translated)
+      return {
+        success: false,
+        error: getString("translation-error-youdao-empty"),
+      };
+    return { success: true, translatedText: translated };
+  } catch (e: any) {
+    return { success: false, error: toErrorMessage(e) };
+  }
+}
+
+/**
+ * Keyless Youdao demo endpoint (aidemo.youdao.com/trans) — the endpoint behind
+ * fanyi.youdao.com. Reverse-engineered, so it can change without notice; a
+ * shape mismatch or an errorCode is reported as a failure, never retried
+ * against another provider.
+ */
+async function translateWithYoudaoWeb(
+  text: string,
+  targetLanguage: string,
+  sourceLanguage: string | undefined,
+): Promise<{ success: boolean; translatedText?: string; error?: string }> {
+  try {
+    const params = buildWebFormParams({
+      from: toYoudaoLang(sourceLanguage) || "auto",
+      to: toYoudaoLang(targetLanguage),
+      query: text,
+    });
+    const resp = await httpPostForm(
+      YOUDAO_WEB_ENDPOINT,
+      {},
+      params,
+      MT_ENDPOINT_TIMEOUT_MS,
+    );
+    const data = (await resp.json()) as any;
+    if (data?.errorCode && String(data.errorCode) !== "0") {
+      const code = String(data.errorCode);
+      const key = youdaoErrorKey(code);
+      return {
+        success: false,
+        error: key
+          ? getString(key)
+          : getString(YOUDAO_GENERIC_ERROR_KEY, { code }),
+      };
+    }
+    const translated = Array.isArray(data?.translation)
+      ? data.translation.join("\n")
+      : "";
+    if (!translated)
+      return {
+        success: false,
+        error: getString("translation-error-youdao-empty"),
+      };
+    return { success: true, translatedText: translated };
+  } catch (e: any) {
+    return { success: false, error: toErrorMessage(e) };
+  }
+}
+
+/**
  * Model-backed translation ("ai" engine) — the port of leadero's "ai" engine
  * onto z-transplit's own OpenAI-compatible client.
  *
@@ -918,6 +1068,10 @@ export interface EngineConfig {
   bingRegion?: string;
   deeplApiKey?: string;
   deeplUseFree?: boolean;
+  youdaoAppKey?: string;
+  youdaoAppSecret?: string;
+  youdaoVocabId?: string;
+  youdaoDomain?: string;
   customApiUrl?: string;
   customApiKey?: string;
   customModel?: string;
@@ -965,6 +1119,11 @@ export function getEngineConfig(): EngineConfig {
     bingRegion: get("translate.bing.region") || "global",
     deeplApiKey: get("translate.deepl.apiKey") || undefined,
     deeplUseFree: get("translate.deepl.useFree") === "true",
+    youdaoAppKey: get("translate.youdao.appKey") || undefined,
+    youdaoAppSecret: get("translate.youdao.appSecret") || undefined,
+    youdaoVocabId: get("translate.youdao.vocabId") || undefined,
+    // 领域偏好归一化在请求侧做（normalizeYoudaoDomain），这里只做「有值」判断。
+    youdaoDomain: get("translate.youdao.domain") || undefined,
     customApiUrl: get("translate.custom.apiUrl") || undefined,
     customApiKey: get("translate.custom.apiKey") || undefined,
     // Empty string = no model override: openaiCompat omits the wire `model`
@@ -1066,6 +1225,15 @@ export function engineCacheIdentity(): string {
     if (cfg.bingRegion && cfg.bingRegion !== "global") {
       parts.push("r:" + cfg.bingRegion);
     }
+  } else if (cfg.engineType === "youdao") {
+    // Credential tail + domain: another app key or another domain is another
+    // service, so the translations are not interchangeable. The domain is
+    // normalized first so an empty value and an explicit "general" are the
+    // same identity (no needless re-translation after a no-op edit).
+    parts.push(
+      (cfg.youdaoAppKey || "").slice(-6),
+      normalizeYoudaoDomain(cfg.youdaoDomain),
+    );
   }
   return parts.join("|");
 }
@@ -1114,6 +1282,10 @@ export function createTranslator(
       ? cfg.googleApiKey
       : cfg.engineType === "bing"
         ? cfg.bingApiKey
+        : cfg.engineType === "deepl"
+          ? cfg.deeplApiKey
+          : cfg.engineType === "youdao"
+            ? cfg.youdaoAppKey
             : cfg.engineType === "ai"
               ? cfg.aiApiKey
               : cfg.engineType === "custom"
@@ -1272,6 +1444,40 @@ function createTranslatorUncached(
         if (!result.success)
           throw new Error(
             result.error || getString("translation-error-deepl-failed"),
+          );
+        return result.translatedText || "";
+      };
+    case "youdao":
+      return async (text: string) => {
+        if (!cfg.youdaoAppKey || !cfg.youdaoAppSecret)
+          throw new Error(getString("translation-error-youdao-not-configured"));
+        const result = await translateWithYoudaoZhiyun(
+          text,
+          targetLanguage,
+          sourceLanguage,
+          {
+            appKey: cfg.youdaoAppKey,
+            appSecret: cfg.youdaoAppSecret,
+            vocabId: cfg.youdaoVocabId,
+            domain: cfg.youdaoDomain,
+          },
+        );
+        if (!result.success)
+          throw new Error(
+            result.error || getString("translation-error-youdao-failed"),
+          );
+        return result.translatedText || "";
+      };
+    case "youdao-web":
+      return async (text: string) => {
+        const result = await translateWithYoudaoWeb(
+          text,
+          targetLanguage,
+          sourceLanguage,
+        );
+        if (!result.success)
+          throw new Error(
+            result.error || getString("translation-error-youdao-failed"),
           );
         return result.translatedText || "";
       };

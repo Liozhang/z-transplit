@@ -147,6 +147,10 @@ preferences-ztransplit-engine-bingweb =
     .label = Bing web (keyless)
 preferences-ztransplit-engine-deepl =
     .label = DeepL
+preferences-ztransplit-engine-youdao =
+    .label = Youdao
+preferences-ztransplit-engine-youdaoweb =
+    .label = Youdao (keyless)
 preferences-ztransplit-engine-ai =
     .label = AI translation (OpenAI-compatible)
 preferences-ztransplit-engine-custom =
@@ -169,8 +173,8 @@ preferences-ztransplit-google-api-key-desc =
     official API is used instead, with better quota and stability. When the
     endpoint is unreachable the translation fails with Google's own error —
     the plugin never quietly retries another provider. For a keyless engine
-    that is reachable, pick Bing web above, or set the network region to
-    mainland China.
+    that is reachable, pick Bing web or Youdao (keyless) above, or set the
+    network region to mainland China.
 
 ## Bing
 preferences-ztransplit-bing-api-key =
@@ -205,6 +209,48 @@ preferences-ztransplit-deepl-use-free =
 preferences-ztransplit-deepl-use-free-desc =
     Free keys (ending in ":fx") must enable this; Pro keys must disable it.
     The wrong choice returns a 401/403 authentication error.
+
+## Youdao (Zhiyun text translation)
+preferences-ztransplit-youdao-app-key =
+    .value = Youdao app ID
+preferences-ztransplit-youdao-app-key-desc =
+    Required. Created in the Youdao console, paired with the app secret below.
+preferences-ztransplit-youdao-app-secret =
+    .value = Youdao app secret
+preferences-ztransplit-youdao-app-secret-desc =
+    Required. The signType=v3 signature needs both the app ID and the app
+    secret; with either one missing no request is sent and the configuration
+    error is reported instead.
+preferences-ztransplit-youdao-vocab-id =
+    .value = Glossary ID
+preferences-ztransplit-youdao-vocab-id-desc =
+    Optional. When set, the glossary created in the console applies to every
+    request; leave empty to use none.
+preferences-ztransplit-youdao-domain =
+    .value = Translation domain
+preferences-ztransplit-youdao-domain-desc =
+    Pick the domain the text belongs to; it has no effect unless the app has
+    domain translation enabled. The domain changes the translation, so already
+    translated content is requested again after switching.
+preferences-ztransplit-youdao-domain-general =
+    .label = General
+preferences-ztransplit-youdao-domain-computers =
+    .label = Computers
+preferences-ztransplit-youdao-domain-medicine =
+    .label = Medicine
+preferences-ztransplit-youdao-domain-finance =
+    .label = Finance
+preferences-ztransplit-youdao-domain-game =
+    .label = Game
+
+## Youdao (keyless)
+preferences-ztransplit-engine-youdaoweb-desc =
+    Keyless, nothing to configure. Uses the demo endpoint behind Youdao's web
+    translator — one of the engines that works without a key on networks in
+    mainland China. Note that it is not an official open API: it can change or
+    disappear without notice, and a failure is reported as a failure rather
+    than retried against another provider. For stability, use Youdao above
+    with app credentials.
 
 ## AI provider presets (picking one fills the endpoint and a recommended model)
 preferences-ztransplit-ai-provider =

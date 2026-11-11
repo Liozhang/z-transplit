@@ -124,6 +124,10 @@ preferences-ztransplit-engine-bingweb =
     .label = Bing 网页翻译（免密钥）
 preferences-ztransplit-engine-deepl =
     .label = DeepL
+preferences-ztransplit-engine-youdao =
+    .label = 有道翻译
+preferences-ztransplit-engine-youdaoweb =
+    .label = 有道翻译（免密钥）
 preferences-ztransplit-engine-ai =
     .label = AI 翻译（OpenAI 兼容）
 preferences-ztransplit-engine-custom =
@@ -143,8 +147,9 @@ preferences-ztransplit-google-api-key =
 preferences-ztransplit-google-api-key-desc =
     可以留空。留空时使用免密钥的免费端点；填写密钥后改走官方接口，配额和稳定性
     更好。端点不可达时翻译会直接失败并显示 Google 自己的错误，不会悄悄改走别的
-    接口——需要免密钥又可达的引擎，请选「Bing 网页翻译（免密钥）」，也可以在
-    「网络区域」里选中国大陆。
+    接口——需要免密钥又可达的引擎，请选「Bing 网页翻译（免密钥）」或「有道翻译
+    （免密钥）」，也可以在「网络区域」里选中国大陆。
+
 ## Bing
 preferences-ztransplit-bing-api-key =
     .value = Bing API 密钥
@@ -173,6 +178,44 @@ preferences-ztransplit-deepl-use-free =
 preferences-ztransplit-deepl-use-free-desc =
     免费密钥（密钥以 :fx 结尾）必须开启；Pro 密钥请关闭。选错会返回 401/403
     鉴权错误。
+
+## 有道翻译（智云文本翻译）
+preferences-ztransplit-youdao-app-key =
+    .value = 有道应用 ID
+preferences-ztransplit-youdao-app-key-desc =
+    必填。在有道智云控制台创建应用后获得，与下面的应用密钥配对使用。
+preferences-ztransplit-youdao-app-secret =
+    .value = 有道应用密钥
+preferences-ztransplit-youdao-app-secret-desc =
+    必填。请求签名（signType=v3）同时需要应用 ID 与应用密钥，缺任何一项都不会
+    发出请求，直接报配置错误。
+preferences-ztransplit-youdao-vocab-id =
+    .value = 术语库 ID
+preferences-ztransplit-youdao-vocab-id-desc =
+    可留空。填写控制台自建的术语库 ID 后，该术语库对每次请求生效；留空表示不
+    使用。
+preferences-ztransplit-youdao-domain =
+    .value = 翻译领域
+preferences-ztransplit-youdao-domain-desc =
+    按文本所属领域选择，未开通领域化翻译的应用此设置不生效。领域会改变译文，
+    因此切换领域后已翻译的内容会重新请求。
+preferences-ztransplit-youdao-domain-general =
+    .label = 通用
+preferences-ztransplit-youdao-domain-computers =
+    .label = 计算机
+preferences-ztransplit-youdao-domain-medicine =
+    .label = 医学
+preferences-ztransplit-youdao-domain-finance =
+    .label = 金融
+preferences-ztransplit-youdao-domain-game =
+    .label = 游戏
+
+## 有道翻译（免密钥）
+preferences-ztransplit-engine-youdaoweb-desc =
+    免密钥，无需任何配置。使用有道翻译网页版背后的演示接口，是国内网络下无需
+    密钥即可直接使用的引擎之一。注意：该接口并非官方开放接口，可能随时变更或
+    停摆，失败时只会报错、不会改走别的引擎；对稳定性有要求请改用上面的「有道
+    翻译」并填写应用凭据。
 
 ## AI 翻译（OpenAI 兼容 + 用户自建提示词模板）
 ## AI 服务商预设（选中即填入端点与推荐模型，只需粘密钥）

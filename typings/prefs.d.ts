@@ -19,6 +19,10 @@ declare namespace _ZoteroTypes {
       "translate.bing.region": string;
       "translate.deepl.apiKey": string;
       "translate.deepl.useFree": boolean;
+      "translate.youdao.appKey": string;
+      "translate.youdao.appSecret": string;
+      "translate.youdao.vocabId": string;
+      "translate.youdao.domain": string;
       "translate.custom.apiUrl": string;
       "translate.custom.apiKey": string;
       "translate.custom.model": string;

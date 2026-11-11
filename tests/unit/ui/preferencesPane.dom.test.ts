@@ -749,8 +749,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 30 = 28 原有 + 输出预算行标签 + 术语表行标签。
-    expect(labels.length).toBe(30);
+    // 34 = 28 原有 + 输出预算 + 术语表 + 有道四项（应用 ID / 应用密钥 /
+    // 术语库 ID / 翻译领域）。
+    expect(labels.length).toBe(34);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
@@ -759,8 +760,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("22 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
     const items = l10nBindings().filter((r) => r.tag === "menuitem");
-    // 22 = 7 原有引擎项 + 10 个 AI 服务商预设项 + 5 个 Bing 区域项。
-    expect(items.length).toBe(22);
+    // 29 = 9 引擎项（含有道与有道免密钥）+ 10 个 AI 服务商预设项 + 5 个
+    // Bing 区域项 + 5 个有道翻译领域项。
+    expect(items.length).toBe(29);
     for (const row of items) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);
@@ -769,8 +771,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("checkbox 两语言都写 .label", () => {
     const boxes = l10nBindings().filter((r) => r.tag === "checkbox");
-    // 13 = 11 原有 + 词卡开关 + 原文删除开关（preferences-ztransplit-pdf-removal-enabled）。
-    expect(boxes.length).toBe(13);
+    // 14 = 11 原有 + 词卡开关 + 原文删除开关
+    // （preferences-ztransplit-pdf-removal-enabled）+ 有道应用密钥的显示开关。
+    expect(boxes.length).toBe(14);
     for (const row of boxes) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);

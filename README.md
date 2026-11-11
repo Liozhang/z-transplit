@@ -153,6 +153,8 @@ reused verbatim by every other entry point.
 | Bing | required | Azure Translator REST API |
 | Bing web | — | Keyless; the engine to pick where Google is unreachable |
 | DeepL | required | free / pro endpoint toggle |
+| Youdao | app ID + app secret | Zhiyun text translation, signType=v3; a translation domain and an optional glossary id are configurable |
+| Youdao (keyless) | — | The demo endpoint behind Youdao's web translator — reverse-engineered, so it can change or stop without notice |
 | AI | endpoint required, key optional | OpenAI-compatible chat/completions with a user-owned prompt template |
 | Custom | required | OpenAI-compatible chat/completions |
 | zotero-pdf-translate | — | Delegates to the plugin when detected |

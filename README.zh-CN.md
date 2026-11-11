@@ -115,6 +115,8 @@ Zotero 10 阅读模式的上下双语对照与仅译文模式，以及跨会话�
 | Bing | 必填 | Azure 翻译器 REST API |
 | Bing 网页翻译 | 不需要 | 免密钥；Google 不可达时就选它 |
 | DeepL | 必填 | free / pro 端点可选 |
+| 有道翻译 | 应用 ID + 应用密钥 | 智云文本翻译，signType=v3 签名；可选翻译领域与术语库 ID |
+| 有道翻译（免密钥） | 不需要 | 有道网页翻译背后的演示接口——逆向实现，可能随时变更或停摆 |
 | AI 翻译 | 视服务商而定 | OpenAI 兼容 chat/completions，提示词模板可自定义 |
 | 自定义接口 | 必填 | OpenAI 兼容 chat/completions |
 | zotero-pdf-translate | — | 检测到该插件时可直接转交 |

@@ -54,6 +54,16 @@ pref("extensions.zotero.ztransplit.translate.bing.apiKey", "");
 pref("extensions.zotero.ztransplit.translate.bing.region", "");
 pref("extensions.zotero.ztransplit.translate.deepl.apiKey", "");
 pref("extensions.zotero.ztransplit.translate.deepl.useFree", false);
+
+// 有道翻译（智云文本翻译，openapi.youdao.com）。签名算法 signType=v3 同时
+// 需要应用 ID 与应用密钥，两者缺一即无法签名——缺任一项都不会发请求，直接
+// 报配置错误。vocabId（术语库 ID）可空：留空表示不使用自定义术语库。
+// domain 是翻译领域（general | computers | medicine | finance | game），
+// 留空或无法识别时按 general 处理；只有开通了领域化翻译的应用才会生效。
+pref("extensions.zotero.ztransplit.translate.youdao.appKey", "");
+pref("extensions.zotero.ztransplit.translate.youdao.appSecret", "");
+pref("extensions.zotero.ztransplit.translate.youdao.vocabId", "");
+pref("extensions.zotero.ztransplit.translate.youdao.domain", "general");
 pref("extensions.zotero.ztransplit.translate.custom.apiUrl", "");
 pref("extensions.zotero.ztransplit.translate.custom.apiKey", "");
 pref("extensions.zotero.ztransplit.translate.custom.model", "");

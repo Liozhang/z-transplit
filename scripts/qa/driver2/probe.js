@@ -1262,6 +1262,8 @@ PROBE_CMDS.prefs = async function (engine) {
       "bing",
       "bing-web",
       "deepl",
+      "youdao",
+      "youdao-web",
       "ai",
       "custom",
       "pdftranslate",
@@ -1274,11 +1276,13 @@ PROBE_CMDS.prefs = async function (engine) {
     engineValue: doc.getElementById("ztransplit-pref-engine-type")?.value,
     groups: (() => {
       const o = {};
-  for (const id of [
+      for (const id of [
       "google",
       "bing",
       "bing-web",
       "deepl",
+      "youdao",
+      "youdao-web",
       "ai",
       "custom",
       "pdftranslate",

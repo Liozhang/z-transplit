@@ -1570,3 +1570,233 @@ describe("engineCacheIdentity — 机器翻译端点维度", () => {
     expect(engineCacheIdentity()).not.toBe(base);
   });
 });
+
+describe("youdao / youdao-web — 有道翻译", () => {
+  function youdaoPrefs(overrides: Record<string, unknown> = {}) {
+    setPrefs({
+      "translate.engineType": "youdao",
+      "translate.youdao.appKey": "app-1",
+      "translate.youdao.appSecret": "secret-1",
+      "translate.youdao.domain": "general",
+      ...overrides,
+    });
+  }
+
+  function zhiyunRoute(translation: string[] = ["你好"], errorCode = "0") {
+    route("openapi.youdao.com", (call) => {
+      const q = new URL(call.url).searchParams;
+      return jsonResponse({
+        errorCode,
+        translation,
+        // 回显便于断言请求形状
+        query: q.get("q"),
+      });
+    });
+  }
+
+  it("智云：签名参数逐项上线，signType=v3，sign 是 64 位小写 hex", async () => {
+    youdaoPrefs();
+    zhiyunRoute();
+
+    const t = createTranslator("zh-CN", "en-US");
+    expect(await t("hello world", "zh-CN", "en-US")).toBe("你好");
+    const call = h.fetchCalls[0];
+    const q = new URL(call.url).searchParams;
+    expect(call.url.startsWith("https://openapi.youdao.com/api?")).toBe(true);
+    expect(q.get("q")).toBe("hello+world");
+    expect(q.get("appKey")).toBe("app-1");
+    expect(q.get("from")).toBe("en"); // en-US → 主码
+    expect(q.get("to")).toBe("zh-CHS"); // zh-CN → 简体中文
+    expect(q.get("signType")).toBe("v3");
+    expect(q.get("domain")).toBe("general");
+    expect(q.get("sign")).toMatch(/^[0-9a-f]{64}$/);
+    expect(q.get("salt")).toMatch(/^\d+$/);
+    expect(q.get("curtime")).toMatch(/^\d+$/);
+    // 空 vocabId 不发送
+    expect(q.has("vocabId")).toBe(false);
+    // 密钥绝不进 URL（只在签名里）
+    expect(call.url).not.toContain("secret-1");
+    // 超时signal：无 signal 的请求会挂到操作系统网络超时
+    expect(call.signal).toBeDefined();
+  });
+
+  it("智云：术语库 ID 与领域按设置发送", async () => {
+    youdaoPrefs({ "translate.youdao.vocabId": "vocab-9", "translate.youdao.domain": "medicine" });
+    zhiyunRoute();
+
+    const t = createTranslator("zh-CN", "en-US");
+    await t("hi", "zh-CN", "en-US");
+    const q = new URL(h.fetchCalls[0].url).searchParams;
+    expect(q.get("vocabId")).toBe("vocab-9");
+    expect(q.get("domain")).toBe("medicine");
+  });
+
+  it("智云：源语言缺省发 auto", async () => {
+    youdaoPrefs();
+    zhiyunRoute();
+
+    const t = createTranslator("zh-CN");
+    await t("hi", "zh-CN");
+    expect(new URL(h.fetchCalls[0].url).searchParams.get("from")).toBe("auto");
+  });
+
+  it("智云：多段译文拼接（官方端点按空串连接）", async () => {
+    youdaoPrefs();
+    zhiyunRoute(["第一段", "第二段"]);
+
+    const t = createTranslator("zh-CN", "en-US");
+    expect(await t("a\n\nb", "zh-CN", "en-US")).toBe("第一段第二段");
+  });
+
+  it("智云：缺应用 ID 或密钥时不发请求，直接报配置错误", async () => {
+    youdaoPrefs({ "translate.youdao.appSecret": "" });
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-not-configured",
+    );
+    expect(h.fetchCalls).toHaveLength(0);
+
+    youdaoPrefs({ "translate.youdao.appKey": "" });
+    const t2 = createTranslator("zh-CN");
+    await expect(t2("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-not-configured",
+    );
+    expect(h.fetchCalls).toHaveLength(0);
+  });
+
+  it("智云：已知错误码转成可操作的文案", async () => {
+    youdaoPrefs();
+    zhiyunRoute([], "108");
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-code-108",
+    );
+  });
+
+  it("智云：202（签名失败）同样给可操作文案", async () => {
+    youdaoPrefs();
+    zhiyunRoute([], "202");
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-code-202",
+    );
+  });
+
+  it("智云：未知错误码带原始码透出", async () => {
+    youdaoPrefs();
+    zhiyunRoute([], "999");
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      /translation-error-youdao-code-other/,
+    );
+  });
+
+  it("智云：空译文按失败处理", async () => {
+    youdaoPrefs();
+    zhiyunRoute([]);
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-empty",
+    );
+  });
+
+  it("免密钥端点：表单三字段，无任何凭据，多段按换行拼接", async () => {
+    setPrefs({ "translate.engineType": "youdao-web" });
+    route("aidemo.youdao.com", () =>
+      jsonResponse({ errorCode: "0", translation: ["你好", "世界"] }),
+    );
+
+    const t = createTranslator("zh-CN", "en-US");
+    expect(await t("hello world", "zh-CN", "en-US")).toBe("你好\n世界");
+    const call = h.fetchCalls[0];
+    expect(call.method).toBe("POST");
+    expect(call.url).toBe("https://aidemo.youdao.com/trans");
+    const body = new URLSearchParams(call.body);
+    expect(body.get("from")).toBe("en");
+    expect(body.get("to")).toBe("zh-CHS");
+    expect(body.get("q")).toBe("hello world");
+    expect(call.body).not.toContain("appKey");
+    expect(call.body).not.toContain("secret");
+    expect(call.signal).toBeDefined();
+  });
+
+  it("免密钥端点：错误码按失败处理", async () => {
+    setPrefs({ "translate.engineType": "youdao-web" });
+    route("aidemo.youdao.com", () => jsonResponse({ errorCode: "108" }));
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-code-108",
+    );
+  });
+
+  it("免密钥端点：空结果按失败处理", async () => {
+    setPrefs({ "translate.engineType": "youdao-web" });
+    route("aidemo.youdao.com", () =>
+      jsonResponse({ errorCode: "0", translation: [] }),
+    );
+    const t = createTranslator("zh-CN");
+    await expect(t("hi", "zh-CN")).rejects.toThrow(
+      "translation-error-youdao-empty",
+    );
+  });
+
+  it("两个有道引擎都不走批量（传统机器翻译）", () => {
+    youdaoPrefs();
+    expect(supportsBatching()).toBe(false);
+    setPrefs({ "translate.engineType": "youdao-web" });
+    expect(supportsBatching()).toBe(false);
+  });
+
+  it("换应用 ID 使已缓存译文失效（凭据尾号入会话键）", async () => {
+    youdaoPrefs();
+    zhiyunRoute();
+    const t1 = createTranslator("zh-CN");
+    await t1("same text", "zh-CN");
+    await t1("same text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1);
+
+    youdaoPrefs({ "translate.youdao.appKey": "app-2" });
+    const t2 = createTranslator("zh-CN");
+    await t2("same text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(2); // 另一个应用 → 重新请求
+  });
+
+  it("同一应用只换密钥：缓存仍然命中（输出不随密钥变化）", async () => {
+    youdaoPrefs();
+    zhiyunRoute();
+    const t1 = createTranslator("zh-CN");
+    await t1("same text", "zh-CN");
+    await t1("same text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1);
+
+    youdaoPrefs({ "translate.youdao.appSecret": "secret-2" });
+    const t2 = createTranslator("zh-CN");
+    await t2("same text", "zh-CN");
+    expect(h.fetchCalls).toHaveLength(1); // 同一应用，译文可互换
+  });
+
+  it("cache identity: 应用 ID 尾号与领域入指纹，密钥不入", () => {
+    youdaoPrefs();
+    const base = engineCacheIdentity();
+
+    // 换密钥不改变译文（同一个应用），折叠它只会迫使整库重译
+    youdaoPrefs({ "translate.youdao.appSecret": "secret-2" });
+    expect(engineCacheIdentity()).toBe(base);
+
+    // 换应用 ID：另一个应用，译文不可互换
+    youdaoPrefs({ "translate.youdao.appKey": "app-2" });
+    expect(engineCacheIdentity()).not.toBe(base);
+
+    // 换领域：领域改变译文
+    youdaoPrefs({ "translate.youdao.domain": "medicine" });
+    expect(engineCacheIdentity()).not.toBe(base);
+
+    // 空领域等同 general（避免毫无意义的重译）
+    youdaoPrefs({ "translate.youdao.domain": "" });
+    expect(engineCacheIdentity()).toBe(base);
+
+    // 免密钥端点：裸身份（同 bing-web）
+    setPrefs({ "translate.engineType": "youdao-web" });
+    expect(engineCacheIdentity()).toBe("youdao-web");
+  });
+});

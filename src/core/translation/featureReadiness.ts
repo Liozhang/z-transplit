@@ -15,6 +15,12 @@
  *   - bing-web             → always ready (keyless by contract; nothing to
  *                            configure)
  *   - bing / deepl         → need translate.<engine>.apiKey
+ *   - youdao               → needs translate.youdao.appKey AND
+ *                            translate.youdao.appSecret (the signType=v3
+ *                            signature needs both; the glossary id is optional)
+ *   - youdao-web           → always ready (keyless by contract — same stance as
+ *                            bing-web, with the same "no stability guarantee"
+ *                            caveat)
  *   - custom               → needs translate.custom.apiUrl AND
  *                            translate.custom.apiKey
  *   - ai                   → needs translate.ai.apiUrl, plus a prompt template
@@ -82,6 +88,23 @@ export function checkTranslationReadiness(
     case "bing-web":
       // Keyless by contract — same readiness shape as Google's keyless path.
       return { ready: true, missing: [] };
+    case "youdao-web":
+      // Keyless by contract, with the bing-web caveat: reachable without any
+      // configuration, but the endpoint is reverse-engineered and may fail.
+      return { ready: true, missing: [] };
+    case "youdao": {
+      // The signType=v3 signature needs BOTH halves; a missing app secret is
+      // as fatal as a missing app id, so report both gaps at once.
+      for (const key of [
+        "translate.youdao.appKey",
+        "translate.youdao.appSecret",
+      ]) {
+        if (!prefValue(getPref, key)) {
+          missing.push({ prefKey: key, reasonKey: "readiness-reason-engine-key" });
+        }
+      }
+      return { ready: missing.length === 0, missing };
+    }
     case "bing":
     case "deepl": {
       const key = `translate.${engine}.apiKey`;

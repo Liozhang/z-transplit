@@ -5,6 +5,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Youdao translation, as two engines following the existing Bing / Bing-web
+  split. "Youdao" is the official 智云 text-translation API
+  (openapi.youdao.com), signed with signType=v3 from an app id and secret you
+  create in the Youdao console — the domestic provider for users who cannot
+  reach the others, and the only new engine whose failures are diagnosable
+  down to the cause: the API's error codes are mapped to actionable messages
+  (invalid app id, service not enabled for the app, signature check failed,
+  invalid timestamp) instead of a raw number. The translation domain
+  (general / computers / medicine / finance / game) and an optional glossary
+  id are settings, and both are part of the cache identity — switching domain
+  re-requests, because the domain changes the translation. "Youdao (keyless)"
+  is the demo endpoint behind Youdao's web translator: no credentials, same
+  risk class as Bing web (reverse-engineered, may change or stop without
+  notice), and its failures are reported as failures rather than retried
+  against another provider. Both engines are traditional MT, so neither uses
+  the batch JSON path. The signature itself reuses utils/hash.ts, which gained
+  a string entry point that resolves WebCrypto from the bundle scope and then
+  from the main window; when no digest can be computed the request is refused
+  rather than sent unsigned.
+
 ### Removed
 
 - The Google engine's silent fallback to the keyless Bing web endpoint. It was

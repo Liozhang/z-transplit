@@ -71,6 +71,57 @@ describe("checkTranslationReadiness", () => {
     ).toEqual({ ready: true, missing: [] });
   });
 
+  it("youdao needs appKey AND appSecret (signType=v3 needs both)", () => {
+    expect(
+      checkTranslationReadiness(reader({ "translate.engineType": "youdao" })),
+    ).toEqual({
+      ready: false,
+      missing: [
+        {
+          prefKey: "translate.youdao.appKey",
+          reasonKey: "readiness-reason-engine-key",
+        },
+        {
+          prefKey: "translate.youdao.appSecret",
+          reasonKey: "readiness-reason-engine-key",
+        },
+      ],
+    });
+    // 只填一半仍然不就绪
+    expect(
+      checkTranslationReadiness(
+        reader({
+          "translate.engineType": "youdao",
+          "translate.youdao.appKey": "app-1",
+        }),
+      ),
+    ).toEqual({
+      ready: false,
+      missing: [
+        {
+          prefKey: "translate.youdao.appSecret",
+          reasonKey: "readiness-reason-engine-key",
+        },
+      ],
+    });
+    // 两项齐全即就绪（术语库 ID 可空）
+    expect(
+      checkTranslationReadiness(
+        reader({
+          "translate.engineType": "youdao",
+          "translate.youdao.appKey": "app-1",
+          "translate.youdao.appSecret": "secret-1",
+        }),
+      ),
+    ).toEqual({ ready: true, missing: [] });
+  });
+
+  it("youdao-web is always ready (keyless by contract)", () => {
+    expect(
+      checkTranslationReadiness(reader({ "translate.engineType": "youdao-web" })),
+    ).toEqual({ ready: true, missing: [] });
+  });
+
   it("custom needs apiUrl AND apiKey", () => {
     expect(
       checkTranslationReadiness(reader({ "translate.engineType": "custom" })),

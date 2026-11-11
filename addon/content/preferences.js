@@ -45,6 +45,8 @@
     ["bing", "ztransplit-pref-engine-bing"],
     ["bing-web", "ztransplit-pref-engine-bingweb"],
     ["deepl", "ztransplit-pref-engine-deepl"],
+    ["youdao", "ztransplit-pref-engine-youdao"],
+    ["youdao-web", "ztransplit-pref-engine-youdaoweb"],
     ["ai", "ztransplit-pref-engine-ai"],
     ["custom", "ztransplit-pref-engine-custom"],
     ["zotero-pdf-translate", "ztransplit-pref-engine-pdftranslate"],

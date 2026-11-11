@@ -339,6 +339,16 @@
               data-l10n-id="preferences-ztransplit-engine-deepl"
             />
             <menuitem
+              value="youdao"
+              label="有道翻译"
+              data-l10n-id="preferences-ztransplit-engine-youdao"
+            />
+            <menuitem
+              value="youdao-web"
+              label="有道翻译（免密钥）"
+              data-l10n-id="preferences-ztransplit-engine-youdaoweb"
+            />
+            <menuitem
               value="ai"
               label="AI 翻译（OpenAI 兼容）"
               data-l10n-id="preferences-ztransplit-engine-ai"
@@ -505,6 +515,139 @@
             class="ztransplit-desc"
             data-l10n-id="preferences-ztransplit-deepl-use-free-desc"
           >免费密钥（密钥以 :fx 结尾）必须开启；Pro 密钥请关闭。选错会返回 401/403 鉴权错误。</description>
+        </vbox>
+      </vbox>
+
+      <!-- youdao：智云文本翻译，应用 ID + 应用密钥 + 可选术语库 ID + 领域 -->
+      <vbox id="ztransplit-pref-engine-youdao" class="ztransplit-engine">
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="有道应用 ID"
+            control="ztransplit-pref-youdao-appkey"
+            data-l10n-id="preferences-ztransplit-youdao-app-key"
+          />
+          <html:input
+            id="ztransplit-pref-youdao-appkey"
+            class="ztransplit-text"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.youdao.appKey"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-youdao-app-key-desc"
+          >必填。在有道智云控制台创建应用后获得，与下面的应用密钥配对使用。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="有道应用密钥"
+            control="ztransplit-pref-youdao-appsecret"
+            data-l10n-id="preferences-ztransplit-youdao-app-secret"
+          />
+          <html:input
+            id="ztransplit-pref-youdao-appsecret"
+            class="ztransplit-text"
+            type="password"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.youdao.appSecret"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <checkbox
+            class="ztransplit-key-toggle"
+            native="true"
+            label="显示密钥"
+            data-l10n-id="preferences-ztransplit-show-key"
+            oncommand="if (window.ZTransplitPrefs) ZTransplitPrefs.toggleKeyVisibility(event)"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-youdao-app-secret-desc"
+          >必填。请求签名（signType=v3）同时需要应用 ID 与应用密钥，缺任何一项都不会发出请求。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="术语库 ID"
+            control="ztransplit-pref-youdao-vocabid"
+            data-l10n-id="preferences-ztransplit-youdao-vocab-id"
+          />
+          <html:input
+            id="ztransplit-pref-youdao-vocabid"
+            class="ztransplit-text"
+            type="text"
+            tabindex="0"
+            preference="extensions.zotero.ztransplit.translate.youdao.vocabId"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-youdao-vocab-id-desc"
+          >可留空。填写控制台自建的术语库 ID 后，该术语库对每次请求生效；留空表示不使用。</description>
+        </vbox>
+        <hbox class="ztransplit-row" align="center">
+          <label
+            value="翻译领域"
+            control="ztransplit-pref-youdao-domain"
+            data-l10n-id="preferences-ztransplit-youdao-domain"
+          />
+          <menulist
+            id="ztransplit-pref-youdao-domain"
+            native="true"
+            preference="extensions.zotero.ztransplit.translate.youdao.domain"
+          >
+            <menupopup>
+              <menuitem
+                value="general"
+                label="通用"
+                data-l10n-id="preferences-ztransplit-youdao-domain-general"
+              />
+              <menuitem
+                value="computers"
+                label="计算机"
+                data-l10n-id="preferences-ztransplit-youdao-domain-computers"
+              />
+              <menuitem
+                value="medicine"
+                label="医学"
+                data-l10n-id="preferences-ztransplit-youdao-domain-medicine"
+              />
+              <menuitem
+                value="finance"
+                label="金融"
+                data-l10n-id="preferences-ztransplit-youdao-domain-finance"
+              />
+              <menuitem
+                value="game"
+                label="游戏"
+                data-l10n-id="preferences-ztransplit-youdao-domain-game"
+              />
+            </menupopup>
+          </menulist>
+        </hbox>
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-youdao-domain-desc"
+          >按文本所属领域选择，未开通领域化翻译的应用此设置不生效。领域会改变译文，因此切换领域后已翻译的内容会重新请求。</description>
+        </vbox>
+      </vbox>
+
+      <!-- youdao-web：免密钥 demo 端点，无需任何配置 -->
+      <vbox id="ztransplit-pref-engine-youdaoweb" class="ztransplit-engine">
+        <vbox>
+          <description
+            class="ztransplit-desc"
+            data-l10n-id="preferences-ztransplit-engine-youdaoweb-desc"
+          >免密钥，无需任何配置。使用有道翻译网页版背后的演示接口，是国内网络下无需密钥即可直接使用的引擎之一。注意：该接口并非官方开放接口，可能随时变更或停摆，失败时只会报错、不会改走别的引擎；对稳定性有要求请改用上面的「有道翻译」并填写应用凭据。</description>
         </vbox>
       </vbox>
 

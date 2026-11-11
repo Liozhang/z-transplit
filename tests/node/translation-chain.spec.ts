@@ -57,6 +57,10 @@ function defaultPrefs(overrides: Record<string, any> = {}) {
     "translate.bing.region": "global",
     "translate.deepl.apiKey": "",
     "translate.deepl.useFree": "false",
+    "translate.youdao.appKey": "",
+    "translate.youdao.appSecret": "",
+    "translate.youdao.vocabId": "",
+    "translate.youdao.domain": "general",
     ...overrides,
   };
   setPrefDynamic.mockImplementation((key: string) => map[key]);
