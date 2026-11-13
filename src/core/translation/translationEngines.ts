@@ -69,10 +69,12 @@ import {
 } from "./glossary";
 import {
   YOUDAO_GENERIC_ERROR_KEY,
+  YOUDAO_RATE_LIMIT_ERROR_KEY,
   YOUDAO_WEB_ENDPOINT,
   buildWebFormParams,
   buildYoudaoSignature,
   buildZhiyunUrl,
+  isYoudaoThrottleCode,
   normalizeYoudaoDomain,
   toYoudaoLang,
   youdaoErrorKey,
@@ -96,6 +98,7 @@ import {
   validatePromptTemplate,
 } from "./promptTemplate";
 import {
+  backoffDelayMs,
   isRateLimitError,
   rateLimitDelayMs,
   retryAfterFromHeaders,
@@ -751,6 +754,60 @@ async function translateWithDeepL(
   }
 }
 
+// ── 有道限流闸门（两个有道引擎共享）────────────────────────────────────────
+//
+// 有道的端点会对连续请求限流：智云是文档化的 411（访问频率受限）/ 412（长
+// 请求过于频繁），演示端点实测是网关级限流——连发 6 个请求即返回 HTTP 200 +
+// {"msg":"请求频率过快","errorCode":411}，外加一个未文档化的 471（2026-11
+// 真机复现：361 段文档前 6 段成功，随后成批失败，两个码同类）。这类限流的
+// HTTP 状态是 200，429 退避包装（withRateLimitRetry）认不出，必须按 JSON
+// errorCode 识别。
+//
+// 闸门是模块级的：一处触发，所有并行段都在窗口前排队等待，不再持续撞击
+// 接口——这正是触发限流的调用形态（批量调度 8 段 × 并发 2）需要的反应。
+
+/** 单段请求的最多尝试次数：1 次初试 + 2 次限流退避重试。 */
+const YOUDAO_THROTTLE_MAX_ATTEMPTS = 3;
+
+let youdaoThrottleUntilMs = 0;
+
+/** 重置共享限流闸门（测试用；生产代码不需要）。 */
+export function resetYoudaoThrottleGate(): void {
+  youdaoThrottleUntilMs = 0;
+}
+
+/** 在限流窗口内则等待到窗口结束，窗口外立即通过。 */
+async function youdaoAwaitThrottleWindow(): Promise<void> {
+  const waitMs = youdaoThrottleUntilMs - Date.now();
+  if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+}
+
+/**
+ * 记一次限流：把共享窗口延长到「现在 + 冷却时长」（取较大值，并发段陆续
+ * 上报时不缩短窗口）。冷却走 backoffDelayMs 的 ±20% 抖动，防止多段同时
+ * 醒来齐射重试。
+ */
+function youdaoNoteThrottled(attempt: number): void {
+  const cooldownMs = backoffDelayMs(attempt, {
+    baseMs: 15000,
+    maxBackoffMs: 30000,
+  });
+  youdaoThrottleUntilMs = Math.max(
+    youdaoThrottleUntilMs,
+    Date.now() + cooldownMs,
+  );
+}
+
+/** 退避重试仍被限流的终态：限流专门文案，携带原始错误码。 */
+function youdaoThrottleFailure(
+  code: string,
+): { success: boolean; translatedText?: string; error?: string } {
+  return {
+    success: false,
+    error: getString(YOUDAO_RATE_LIMIT_ERROR_KEY, { code }),
+  };
+}
+
 /**
  * Youdao 智云 text translation (signType=v3).
  *
@@ -759,6 +816,11 @@ async function translateWithDeepL(
  * A missing digest is an error, never an unsigned request — a request the
  * server would reject with an opaque signature failure is worse than saying
  * "this host cannot sign".
+ *
+ * Throttled attempts (411/412, and the undocumented 471 the gate comment
+ * covers) wait out the shared cooldown window and retry; every attempt
+ * REBUILDS the signature — the API rejects replayed salt+curtime pairs
+ * (errorCode 207), so a reused sign is guaranteed to fail.
  */
 async function translateWithYoudaoZhiyun(
   text: string,
@@ -766,7 +828,10 @@ async function translateWithYoudaoZhiyun(
   sourceLanguage: string | undefined,
   opts: YoudaoTranslateOptions,
 ): Promise<{ success: boolean; translatedText?: string; error?: string }> {
-  try {
+  let throttledCode: string | null = null;
+  for (let attempt = 1; attempt <= YOUDAO_THROTTLE_MAX_ATTEMPTS; attempt++) {
+    // 闸门在循环顶：本段首次请求与限流后的重试走同一条排队路径。
+    await youdaoAwaitThrottleWindow();
     const salt = String(Date.now());
     const curtime = String(Math.round(Date.now() / 1000));
     const sign = await buildYoudaoSignature({
@@ -794,79 +859,104 @@ async function translateWithYoudaoZhiyun(
       curtime,
       sign,
     });
-    const resp = await httpGet(url, MT_ENDPOINT_TIMEOUT_MS);
-    const data = (await resp.json()) as any;
-    // errorCode 是字符串形式的数字；0 才算成功，其余一律按失败处理。
-    if (String(data?.errorCode ?? "0") !== "0") {
-      const code = String(data?.errorCode);
-      const key = youdaoErrorKey(code);
-      return {
-        success: false,
-        error: key
-          ? getString(key)
-          : getString(YOUDAO_GENERIC_ERROR_KEY, { code }),
-      };
+    try {
+      const resp = await httpGet(url, MT_ENDPOINT_TIMEOUT_MS);
+      const data = (await resp.json()) as any;
+      // errorCode 是字符串形式的数字；0 才算成功，其余一律按失败处理。
+      if (String(data?.errorCode ?? "0") !== "0") {
+        const code = String(data?.errorCode);
+        if (isYoudaoThrottleCode(code)) {
+          // 延长共享窗口后回到循环顶排队；三次都被拒则以下方限流终态收场。
+          youdaoNoteThrottled(attempt);
+          throttledCode = code;
+          continue;
+        }
+        const key = youdaoErrorKey(code);
+        return {
+          success: false,
+          error: key
+            ? getString(key)
+            : getString(YOUDAO_GENERIC_ERROR_KEY, { code }),
+        };
+      }
+      const translated = Array.isArray(data?.translation)
+        ? data.translation.join("")
+        : "";
+      if (!translated)
+        return {
+          success: false,
+          error: getString("translation-error-youdao-empty"),
+        };
+      return { success: true, translatedText: translated };
+    } catch (e: any) {
+      return { success: false, error: toErrorMessage(e) };
     }
-    const translated = Array.isArray(data?.translation)
-      ? data.translation.join("")
-      : "";
-    if (!translated)
-      return {
-        success: false,
-        error: getString("translation-error-youdao-empty"),
-      };
-    return { success: true, translatedText: translated };
-  } catch (e: any) {
-    return { success: false, error: toErrorMessage(e) };
   }
+  // 三次尝试全被限流才会走到这里（其余分支都在循环内返回）。
+  return youdaoThrottleFailure(throttledCode ?? "unknown");
 }
 
 /**
  * Keyless Youdao demo endpoint (aidemo.youdao.com/trans) — the endpoint behind
  * fanyi.youdao.com. Reverse-engineered, so it can change without notice; a
  * shape mismatch or an errorCode is reported as a failure, never retried
- * against another provider.
+ * against another provider — EXCEPT the throttle codes, which wait out the
+ * shared cooldown window and retry (this endpoint demonstrably throttles
+ * burst traffic, which batch translation is).
  */
 async function translateWithYoudaoWeb(
   text: string,
   targetLanguage: string,
   sourceLanguage: string | undefined,
 ): Promise<{ success: boolean; translatedText?: string; error?: string }> {
-  try {
-    const params = buildWebFormParams({
-      from: toYoudaoLang(sourceLanguage) || "auto",
-      to: toYoudaoLang(targetLanguage),
-      query: text,
-    });
-    const resp = await httpPostForm(
-      YOUDAO_WEB_ENDPOINT,
-      {},
-      params,
-      MT_ENDPOINT_TIMEOUT_MS,
-    );
-    const data = (await resp.json()) as any;
-    if (data?.errorCode && String(data.errorCode) !== "0") {
-      const code = String(data.errorCode);
-      const key = youdaoErrorKey(code);
-      return {
-        success: false,
-        error: key
-          ? getString(key)
-          : getString(YOUDAO_GENERIC_ERROR_KEY, { code }),
-      };
+  const params = buildWebFormParams({
+    from: toYoudaoLang(sourceLanguage) || "auto",
+    to: toYoudaoLang(targetLanguage),
+    query: text,
+  });
+  let throttledCode: string | null = null;
+  for (let attempt = 1; attempt <= YOUDAO_THROTTLE_MAX_ATTEMPTS; attempt++) {
+    // 闸门在循环顶：本段首次请求与限流后的重试走同一条排队路径。
+    await youdaoAwaitThrottleWindow();
+    try {
+      const resp = await httpPostForm(
+        YOUDAO_WEB_ENDPOINT,
+        {},
+        params,
+        MT_ENDPOINT_TIMEOUT_MS,
+      );
+      const data = (await resp.json()) as any;
+      if (data?.errorCode && String(data.errorCode) !== "0") {
+        const code = String(data.errorCode);
+        if (isYoudaoThrottleCode(code)) {
+          // 延长共享窗口后回到循环顶排队；三次都被拒则以下方限流终态收场。
+          youdaoNoteThrottled(attempt);
+          throttledCode = code;
+          continue;
+        }
+        const key = youdaoErrorKey(code);
+        return {
+          success: false,
+          error: key
+            ? getString(key)
+            : getString(YOUDAO_GENERIC_ERROR_KEY, { code }),
+        };
+      }
+      const translated = Array.isArray(data?.translation)
+        ? data.translation.join("\n")
+        : "";
+      if (!translated)
+        return {
+          success: false,
+          error: getString("translation-error-youdao-empty"),
+        };
+      return { success: true, translatedText: translated };
+    } catch (e: any) {
+      return { success: false, error: toErrorMessage(e) };
     }
-    const translated = Array.isArray(data?.translation)
-      ? data.translation.join("\n")
-      : "";
-    if (!translated)
-      return {
-        success: false,
-        error: getString("translation-error-youdao-empty"),
-      };
-    return { success: true, translatedText: translated };
-  } catch (e: any) {
-    return { success: false, error: toErrorMessage(e) };
   }
+  // 三次尝试全被限流才会走到这里（其余分支都在循环内返回）。
+  return youdaoThrottleFailure(throttledCode ?? "unknown");
 }
 
 /**

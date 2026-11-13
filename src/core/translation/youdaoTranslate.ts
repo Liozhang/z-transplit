@@ -200,6 +200,31 @@ export function buildWebFormParams(params: {
 }
 
 /**
+ * The throttle (rate-limit) message id, which carries the raw code.
+ *
+ * 411 / 412 are the documented codes (访问频率受限 / 长请求过于频繁). 471 is
+ * NOT in any Youdao error table — it was observed live (2026-11, batch
+ * translation of a 361-paragraph document: 6 segments OK, then a wall of
+ * failures) and matches the same pattern the demo endpoint reproducibly
+ * returns as 411, so it is classified as a throttle variant. Keeping the raw
+ * code in the message means an undocumented code can never be silently
+ * relabelled.
+ */
+export const YOUDAO_RATE_LIMIT_ERROR_KEY = "translation-error-youdao-rate-limited";
+
+/** Whether an API errorCode means the endpoint is throttling this client. */
+export function isYoudaoThrottleCode(errorCode: string | number): boolean {
+  switch (String(errorCode)) {
+    case "411":
+    case "412":
+    case "471":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
  * Fluent message id for an API errorCode, or null when the code is unknown.
  *
  * Only the codes a misconfiguration actually produces are mapped — the rest
@@ -207,6 +232,7 @@ export function buildWebFormParams(params: {
  * silently swallowed.
  */
 export function youdaoErrorKey(errorCode: string | number): string | null {
+  if (isYoudaoThrottleCode(errorCode)) return YOUDAO_RATE_LIMIT_ERROR_KEY;
   switch (String(errorCode)) {
     case "108":
       return "translation-error-youdao-code-108";

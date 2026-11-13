@@ -244,14 +244,24 @@ preferences-ztransplit-youdao-domain-finance =
 preferences-ztransplit-youdao-domain-game =
     .label = Game
 
+## Youdao (Zhiyun text translation)
+preferences-ztransplit-engine-youdao-desc =
+    The official open API (Youdao Zhiyun text translation) — better quota and
+    stability than the keyless demo endpoint, and the platform grants new
+    accounts trial credit that covers ordinary document translation for a
+    while. Recommended for long documents.
+
 ## Youdao (keyless)
 preferences-ztransplit-engine-youdaoweb-desc =
     Keyless, nothing to configure. Uses the demo endpoint behind Youdao's web
     translator — one of the engines that works without a key on networks in
     mainland China. Note that it is not an official open API: it can change or
-    disappear without notice, and a failure is reported as a failure rather
-    than retried against another provider. For stability, use Youdao above
-    with app credentials.
+    disappear without notice, and it throttles consecutive requests — the
+    bilingual view requests paragraph by paragraph, so long documents hit the
+    limit easily (error codes 411/471). For long documents, switch to Youdao
+    above (the official API, trial credit for new accounts), the
+    zotero-pdf-translate plugin (several free services inside), or AI
+    translation (OpenAI-compatible; any existing endpoint key works).
 
 ## AI provider presets (picking one fills the endpoint and a recommended model)
 preferences-ztransplit-ai-provider =

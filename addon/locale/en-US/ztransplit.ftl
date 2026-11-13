@@ -37,6 +37,7 @@ translation-error-youdao-code-110 = Youdao translation failed: this app has no a
 translation-error-youdao-code-202 = Youdao translation failed: the signature check failed — check the app secret
 translation-error-youdao-code-206 = Youdao translation failed: the timestamp is invalid — check the system clock
 translation-error-youdao-code-other = Youdao translation failed (error code { $code })
+translation-error-youdao-rate-limited = Youdao translation failed: the endpoint is rate-limiting requests (error code { $code }) — waited and retried, still rejected. Try again later; for long documents, switch to the official Youdao engine or another engine in the settings
 translation-error-custom-url-missing = Custom translation API URL is not configured
 translation-error-unknown = Unknown error
 translation-error-bing-token-unavailable = Could not obtain the Bing translation token (the page structure may have changed)

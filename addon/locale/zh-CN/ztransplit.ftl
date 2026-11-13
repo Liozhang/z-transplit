@@ -34,6 +34,7 @@ translation-error-youdao-code-110 = 有道翻译失败：该应用未开通文�
 translation-error-youdao-code-202 = 有道翻译失败：签名校验失败，请核对应用密钥
 translation-error-youdao-code-206 = 有道翻译失败：时间戳无效，请检查系统时间
 translation-error-youdao-code-other = 有道翻译失败（错误码 { $code }）
+translation-error-youdao-rate-limited = 有道翻译失败：接口限流，请求过于频繁（错误码 { $code }）。已等待并重试仍被拒绝，请稍后再试；翻译长文档建议在设置中改用「有道翻译」（官方接口）或其他引擎
 translation-error-custom-url-missing = 自定义翻译接口地址未配置
 translation-error-unknown = 未知错误
 translation-error-bing-token-unavailable = 无法获取 Bing 翻译令牌（页面结构可能已变化）

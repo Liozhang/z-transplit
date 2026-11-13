@@ -33,6 +33,7 @@ import {
   getEngineConfig,
   clearTranslationCache,
   resetBingWebSession,
+  resetYoudaoThrottleGate,
   createTranslator,
   createAIBatchTranslator,
   supportsBatching,
@@ -80,6 +81,8 @@ beforeEach(() => {
   setPrefs({});
   clearTranslationCache();
   resetBingWebSession();
+  // 有道的限流闸门是模块级的：上一个用例触发的冷却窗口不得泄漏到下一个。
+  resetYoudaoThrottleGate();
   delete Z.PDFTranslate;
 
   vi.stubGlobal("fetch", (url: string, init: any = {}) => {
@@ -1727,6 +1730,123 @@ describe("youdao / youdao-web — 有道翻译", () => {
     await expect(t("hi", "zh-CN")).rejects.toThrow(
       "translation-error-youdao-code-108",
     );
+  });
+
+  it("免密钥端点：471（未文档化限流码）退避后重试成功", async () => {
+    // 2026-11 真机：361 段文档前 6 段成功后成批返回 471。旧实现按普通失败
+    // 处理，用户只能手动逐段重试；现在识别为限流，等共享冷却窗口过后重试。
+    vi.useFakeTimers();
+    try {
+      setPrefs({ "translate.engineType": "youdao-web" });
+      let hits = 0;
+      route("aidemo.youdao.com", () => {
+        hits++;
+        return hits === 1
+          ? jsonResponse({ errorCode: 471, msg: "请求频率过快" })
+          : jsonResponse({ errorCode: "0", translation: ["你好"] });
+      });
+      const t = createTranslator("zh-CN");
+      const p = t("hi", "zh-CN");
+      // 推过一次最长冷却（15 秒 ×1.2 抖动 ≈ 18 秒），取 31 秒留余量。
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(p).resolves.toBe("你好");
+      expect(h.fetchCalls).toHaveLength(2); // 一次初试 + 一次退避重试
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("免密钥端点：三次限流（411）后以限流专门文案终态", async () => {
+    vi.useFakeTimers();
+    try {
+      setPrefs({ "translate.engineType": "youdao-web" });
+      route("aidemo.youdao.com", () =>
+        jsonResponse({ errorCode: 411, msg: "请求频率过快" }),
+      );
+      const t = createTranslator("zh-CN");
+      const p = t("hi", "zh-CN");
+      // 预挂观察者：终态拒绝发生在推进时钟的 await 期间，那时还没有
+      // rejects 观察者，Node 会记「异步处理拒绝」告警，被 vitest 当成
+      // 未处理错误。落定即停的步进也防止虚拟时钟越过断言需要的窗口。
+      let settled = false;
+      p.catch(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 60 && !settled; i++) {
+        await vi.advanceTimersByTimeAsync(5_000);
+      }
+      // 恰好三次请求（1 次初试 + 2 次退避重试），终态文案携带原始码。
+      await expect(p).rejects.toThrow(/translation-error-youdao-rate-limited/);
+      expect(h.fetchCalls).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("智云：411 触发退避重试，重试带全新签名（salt 不复用）", async () => {
+    // 接口以 salt+curtime 防重放（错误码 207），复用旧签名重发必被拒，
+    // 因此每次尝试必须重新签名。
+    vi.useFakeTimers();
+    try {
+      youdaoPrefs();
+      const salts: string[] = [];
+      let hits = 0;
+      route("openapi.youdao.com", (call) => {
+        hits++;
+        salts.push(new URL(call.url).searchParams.get("salt") ?? "");
+        return hits === 1
+          ? jsonResponse({ errorCode: "411" })
+          : jsonResponse({ errorCode: "0", translation: ["你好"] });
+      });
+      const t = createTranslator("zh-CN");
+      const p = t("hi", "zh-CN");
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(p).resolves.toBe("你好");
+      expect(h.fetchCalls).toHaveLength(2);
+      expect(salts[0]).not.toBe(salts[1]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("限流闸门共享：窗口期内后续段先排队等待再发请求", async () => {
+    // 第一段把窗口推到最远冷却点后，紧接着的第二段必须先被闸门拦住——
+    // 批量调度 8 段 × 并发 2 齐射正是触发限流的形态，不能撞完再撞。
+    // route 按注册顺序首条匹配，同一个 URL 用一个按次数变化的响应器。
+    vi.useFakeTimers();
+    try {
+      setPrefs({ "translate.engineType": "youdao-web" });
+      let hits = 0;
+      route("aidemo.youdao.com", () => {
+        hits++;
+        return hits <= 3
+          ? jsonResponse({ errorCode: 411, msg: "请求频率过快" })
+          : jsonResponse({ errorCode: "0", translation: ["好"] });
+      });
+      const t = createTranslator("zh-CN");
+      const p1 = t("a", "zh-CN");
+      // 预挂观察者（防「异步处理拒绝」告警）＋ 5 秒步进落定即停：
+      // 一次推 120 秒会把虚拟时钟推过 p1 自己设置的冷却窗口，后面的
+      // 「p2 停在闸门上」断言就没有意义了。
+      let settled = false;
+      p1.catch(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 40 && !settled; i++) {
+        await vi.advanceTimersByTimeAsync(5_000);
+      }
+      await expect(p1).rejects.toThrow(/translation-error-youdao-rate-limited/);
+      expect(h.fetchCalls).toHaveLength(3);
+
+      const p2 = t("b", "zh-CN");
+      await vi.advanceTimersByTimeAsync(0); // 只跑微任务：p2 应停在闸门上
+      expect(h.fetchCalls).toHaveLength(3); // 没有新请求出闸
+      await vi.advanceTimersByTimeAsync(60_000); // 冷却窗口最长 36 秒
+      await expect(p2).resolves.toBe("好");
+      expect(h.fetchCalls).toHaveLength(4); // 放行后的 1 次请求
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("免密钥端点：空结果按失败处理", async () => {

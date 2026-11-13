@@ -10,12 +10,14 @@ import {
   YOUDAO_DEFAULT_DOMAIN,
   YOUDAO_DOMAINS,
   YOUDAO_GENERIC_ERROR_KEY,
+  YOUDAO_RATE_LIMIT_ERROR_KEY,
   YOUDAO_WEB_ENDPOINT,
   YOUDAO_ZHIYUN_ENDPOINT,
   buildWebFormParams,
   buildYoudaoSignature,
   buildZhiyunUrl,
   encodeYoudaoQuery,
+  isYoudaoThrottleCode,
   normalizeYoudaoDomain,
   toYoudaoLang,
   truncateYoudaoQuery,
@@ -244,6 +246,38 @@ describe("youdaoErrorKey — 错误码分类", () => {
     expect(youdaoErrorKey("999")).toBeNull();
     expect(youdaoErrorKey("")).toBeNull();
     expect(YOUDAO_GENERIC_ERROR_KEY).toBe("translation-error-youdao-code-other");
+  });
+});
+
+describe("isYoudaoThrottleCode — 限流错误码识别", () => {
+  it("文档化的 411/412 识别为限流", () => {
+    expect(isYoudaoThrottleCode("411")).toBe(true);
+    expect(isYoudaoThrottleCode("412")).toBe(true);
+    expect(isYoudaoThrottleCode(411)).toBe(true);
+  });
+
+  it("实测观察到的未文档化 471 同样识别为限流", () => {
+    // 2026-11 真机：361 段文档前 6 段成功后成批返回 471，与演示端点连发
+    // 6 个请求即触发 411 的行为同类。471 不在任何官方错误码表里。
+    expect(isYoudaoThrottleCode("471")).toBe(true);
+    expect(isYoudaoThrottleCode(471)).toBe(true);
+  });
+
+  it("终态错误码与成功码不误判为限流（欠费 401、配置 108、成功 0）", () => {
+    expect(isYoudaoThrottleCode("401")).toBe(false);
+    expect(isYoudaoThrottleCode("108")).toBe(false);
+    expect(isYoudaoThrottleCode("0")).toBe(false);
+    expect(isYoudaoThrottleCode("999")).toBe(false);
+    expect(isYoudaoThrottleCode("")).toBe(false);
+  });
+
+  it("限流码经 youdaoErrorKey 映射到限流文案键（带原始码）", () => {
+    expect(youdaoErrorKey("411")).toBe(YOUDAO_RATE_LIMIT_ERROR_KEY);
+    expect(youdaoErrorKey("412")).toBe(YOUDAO_RATE_LIMIT_ERROR_KEY);
+    expect(youdaoErrorKey("471")).toBe(YOUDAO_RATE_LIMIT_ERROR_KEY);
+    expect(YOUDAO_RATE_LIMIT_ERROR_KEY).toBe(
+      "translation-error-youdao-rate-limited",
+    );
   });
 });
 
