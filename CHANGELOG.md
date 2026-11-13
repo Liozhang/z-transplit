@@ -3,6 +3,44 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.21.1] - 2026-11-13
+
+### Fixed
+
+- Youdao's endpoints throttle consecutive requests, and the plugin neither
+  recognised the throttle nor slowed down when it hit one. The official 智云
+  API documents 411 (access rate limited) and 412 (long requests too
+  frequent); the keyless demo endpoint answers burst traffic with a
+  gateway-level `{"msg":"请求频率过快","errorCode":411}` — plus an
+  undocumented 471 that appears in no Youdao error table — and a
+  361-paragraph bilingual translation reproduced the pattern live: six
+  segments translated, then a wall of failures, one raw error code per
+  segment. The failure was doubly unhelpful: the codes fell through to the
+  generic "Youdao translation failed (error code N)" message, and the
+  existing 429 backoff never fired because it keys off the HTTP status while
+  these throttles arrive as HTTP 200 with a JSON errorCode. Both engines now
+  share a module-level throttle gate: a throttled response extends a shared
+  cooldown window (≈15–30s, jittered), every in-flight and later segment
+  queues in front of it instead of hammering the endpoint, the throttled
+  request retries itself (up to three attempts — the 智云 path re-signs on
+  every attempt, since the API rejects replayed salt+curtime pairs with
+  207), and only after the final attempt does the segment fail, with a
+  message that names the throttle and carries the raw code. Other error
+  codes keep their semantics.
+
+### Documentation
+
+- The settings pane now says what the throttle means and what to switch to.
+  The keyless Youdao description warns that consecutive requests are
+  rate-limited — the bilingual view requests paragraph by paragraph, so long
+  documents hit the limit easily — and points at the official Youdao engine,
+  the zotero-pdf-translate plugin (several free services inside) and AI
+  translation (OpenAI-compatible) as alternatives. The official Youdao
+  engine's panel gained the description it never had (official open API,
+  better quota and stability, trial credit for new accounts, recommended for
+  long documents), and the throttle failure message itself carries the same
+  pointer.
+
 ## [1.21.0] - 2026-11-11
 
 ### Added
