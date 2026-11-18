@@ -79,6 +79,11 @@ existing translation is opened instead of re-running the pipeline.
   back in position; the default template asks the model to keep them verbatim
 - A multi-PDF selection runs the pipeline serially, with ordinal labels in the
   progress window and one failure never stopping the rest
+- Scanned documents (experimental): every page is classified before translation;
+  scanned pages and pages with a garbled text layer go to a local recognition
+  sidecar that restores text and formulas. Configure the sidecar command in the
+  settings; unconfigured or skipped pages keep their original text — nothing is
+  dropped silently
 
 ### 3. Split-screen Reading
 

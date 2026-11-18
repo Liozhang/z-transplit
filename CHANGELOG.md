@@ -3,6 +3,38 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Scanned-page recognition (experimental). Full-text translation now classifies
+  every page before parsing: digital pages keep using OpenDataLoader, while
+  scanned pages and pages whose text layer is garbage (early OCR output with a
+  broken ToUnicode map — the most invisible source of missing content) are sent
+  to a local recognition sidecar that restores text, formulas and tables from
+  small CPU-capable models (layout, line-level OCR, formula recognition, table
+  structure). A document OpenDataLoader cannot read at all — a pure scan — no
+  longer dead-ends at "no text": a pdf.js probe sizes the pages and the whole
+  document goes through recognition. The sidecar is configured in the settings
+  (command line); automatic runtime distribution is planned for a later
+  release. Nothing is dropped silently: every page ends up either recognized,
+  explicitly empty, or skipped with a recorded reason (rotated, sidecar not
+  configured, batch failed, cancelled), and the completion summary counts each
+  category.
+- Recognition runs in batches with checkpoint manifests, so a long document
+  only ever risks the batch in flight and can be continued with "Translate
+  page range…" (which merges into the existing translated attachment).
+  Suspect pages (detected-region coverage far below normal — the signature of
+  a layout miss) are retried once at higher resolution and, if still sparse,
+  keep their results with a "sparse" note rather than being discarded.
+- Formulas recognized by the sidecar carry native LaTeX and skip the
+  vision-model crop entirely (the screenshot preservation path still applies),
+  and the single-paragraph translation prompt now also protects `$…$` /
+  `$$…$$` expressions verbatim, closing a gap where OCR formulas could be
+  rewritten by the translator.
+- Cancellation now takes effect between pages on the per-page translation path
+  (previously a cancel waited for the whole document to finish translating).
+
 ## [1.21.1] - 2026-11-13
 
 ### Fixed

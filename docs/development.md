@@ -100,6 +100,28 @@ npm run check:jar                            # 对账（同时校验 ODL jar 与
 `src/core/pdf/OriginalTextRemovalClient.ts` 头注释；
 可行性验证数据见 `prototype/region-text-remover/README.md`。
 
+### 扫描页识别侧车（tools/scan-sidecar/sidecar.py）
+
+扫描件与乱码文本层页的识别在插件外的一个 Python 侧车里跑（版面 + 行级文字 +
+公式 + 表格，全部 CPU 可跑的小模型），插件只认 JSON 契约
+（`src/core/pdf/scan/sidecarProtocol.ts`），换引擎不用改插件。本地联调：
+
+```bash
+pip install -r tools/scan-sidecar/requirements.txt
+python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir --dpi 200
+# workdir/result.json 即插件读取的批次结果；stderr 每行一个 JSON 诊断
+```
+
+然后在设置 → PDF 分屏翻译 →「识别侧车命令」填完整命令行（带空格的路径加引号），
+对一篇纯扫描 PDF 执行「翻译全文」即可走通全链路。侧车的纯函数（页码解析、框
+归一、覆盖率并集）已用 Python 直接冒烟验证；模型调用部分需在装好依赖的机器上
+按上面的命令验证。运行时的自动分发（按平台构件清单、镜像、校验）属第二期，
+本期以「用户配置侧车命令」为落地形态。管线语义：路由决策
+（`scan/routePages.ts`，纯函数）、逐页分类（`scan/pageClassification.ts`）、
+分批与断点账目（`scan/scanBatchPlan.ts`、`scan/ScanPipeline.ts`）、产出合并
+（`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖；设置面板的「侧车状态
+只读行」与断点清单的读取（自动续跑）同属第二期。
+
 ## 质量门控
 
 | 命令 | 覆盖 |

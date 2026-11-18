@@ -39,3 +39,7 @@ prototype/region-text-remover/work/
 prototype/region-text-remover/build/
 prototype/region-text-remover/src-tmp/
 prototype/region-text-remover/lib/
+
+# Python bytecode (tools/scan-sidecar is run in place during development)
+__pycache__/
+*.pyc

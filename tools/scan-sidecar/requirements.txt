@@ -1,0 +1,8 @@
+# 扫描页识别侧车依赖。CPU 可跑；GPU 非必需。
+# paddleocr 提供 PP-StructureV3（版面/公式/表格）与 PP-OCRv6（行级文字）。
+paddleocr>=3.3
+# PDF 渲染（无 GTK 依赖的纯二进制渲染器）。
+pypdfium2>=4.30
+# 结果结构的数值处理（PaddleOCR 传递依赖，显式声明便于审计）。
+numpy>=1.24
+Pillow>=9.0
