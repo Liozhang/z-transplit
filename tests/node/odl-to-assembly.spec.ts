@@ -47,6 +47,10 @@ function buildAnalysis(
       fontSize?: number;
       fontName?: string;
       textColor?: string;
+      /** OCR sidecar's explicit bold channel (titles/headings). */
+      bold?: boolean;
+      /** OCR sidecar's native-formula marker (text is LaTeX). */
+      isFormula?: boolean;
     }>;
     chartAreas?: Array<{
       x: number;
@@ -76,6 +80,8 @@ function buildAnalysis(
         fontName: b.fontName ?? "Helvetica",
         hasEOL: false,
         ...(b.textColor != null ? { textColor: b.textColor } : {}),
+        ...(b.bold != null ? { bold: b.bold } : {}),
+        ...(b.isFormula != null ? { isFormula: b.isFormula } : {}),
       })),
       regions: [],
       tables: (pg.tables ?? []).map((t) => ({
@@ -331,6 +337,71 @@ describe("odlAnalysisToAssembly", () => {
     expect(paragraphs[0].color).toEqual({ r: 1, g: 0, b: 0 });
     expect(paragraphs[1].color).toEqual({ r: 0, g: 0, b: 1 });
     expect(paragraphs[2].color).toBeUndefined();
+  });
+
+  it("native formula blocks (OCR sidecar) carry their LaTeX into formulaBlocks", () => {
+    // OCR 侧车的公式行：文本即 LaTeX。装配层必须原样带出（latex 字段），
+    // 让编排层跳过"裁剪 + 视觉模型"，而不是把 LaTeX 当普通段落。
+    const analysis = buildAnalysis([
+      {
+        blocks: [
+          { text: "定理如下。", x: 50, y: 700, width: 200, height: 15 },
+          {
+            text: "$$E = mc^2$$",
+            x: 50,
+            y: 640,
+            width: 120,
+            height: 20,
+            isFormula: true,
+          },
+          { text: "证明从动量出发。", x: 50, y: 600, width: 200, height: 15 },
+        ],
+      },
+    ]);
+
+    const { assemblies, formulaBlocks } = odlAnalysisToAssembly(analysis);
+    expect(assemblies[0].texts).toEqual(["定理如下。", "$$E = mc^2$$", "证明从动量出发。"]);
+    expect(formulaBlocks).toHaveLength(1);
+    expect(formulaBlocks[0].latex).toBe("$$E = mc^2$$");
+    expect(formulaBlocks[0].paragraphIndex).toBe(1);
+    expect(formulaBlocks[0].bbox).toEqual({ x: 50, y: 640, width: 120, height: 20 });
+  });
+
+  it("native formula LaTeX is NOT double-counted by the character heuristic", () => {
+    // LaTeX 里的 \frac、\sum 之类会命中字符密度启发式。若两条路都触发，
+    // 同一区域会被重复贴截图、重复进账目。isFormula 块只走原生产出。
+    const analysis = buildAnalysis([
+      {
+        blocks: [
+          { text: "$\\frac{\\alpha}{\\beta} \\geq \\sum_i x_i$", x: 50, y: 700, width: 200, height: 16, isFormula: true },
+          // 同一页再来一个普通段落，里面也有两个公式字符——启发式照旧命中它。
+          { text: "其中 β 与 α 为系数，见上文。", x: 50, y: 650, width: 200, height: 15 },
+        ],
+      },
+    ]);
+
+    const { formulaBlocks } = odlAnalysisToAssembly(analysis);
+    expect(formulaBlocks).toHaveLength(2);
+    expect(formulaBlocks[0].latex).toBe("$\\frac{\\alpha}{\\beta} \\geq \\sum_i x_i$");
+    // 第二条来自启发式：没有 latex，交由视觉模型提取。
+    expect(formulaBlocks[1].latex).toBeUndefined();
+    expect(formulaBlocks[1].paragraphIndex).toBe(1);
+  });
+
+  it("explicit bold flag (OCR titles) reaches the paragraph without a font name", () => {
+    // OCR 不产出字体名，标题的加粗走 PdfTextBlock.bold 显式通道。
+    const analysis = buildAnalysis([
+      {
+        blocks: [
+          { text: "第一章 绪论", x: 50, y: 700, width: 300, height: 22, fontSize: 16, bold: true },
+          { text: "正文段落。", x: 50, y: 650, width: 300, height: 15 },
+        ],
+      },
+    ]);
+
+    const { assemblies } = odlAnalysisToAssembly(analysis);
+    expect(assemblies[0].paragraphs[0].bold).toBe(true);
+    expect(assemblies[0].paragraphs[1].bold).toBeUndefined();
   });
 
   it("table cells are NOT rendered (tables kept as source)", async () => {
