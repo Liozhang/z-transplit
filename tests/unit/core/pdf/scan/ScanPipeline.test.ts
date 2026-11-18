@@ -224,6 +224,62 @@ describe("runScanPipeline", () => {
     expect(result.summary.selected).toBe(0);
   });
 
+  it("续跑：已识别的页不再调侧车，按沿用记账", async () => {
+    const sidecar = fakeSidecar((pages) => run(pages.map((p) => page(p))));
+    const resumed = new Map([[1, page(1)]]);
+    const result = await runScanPipeline(
+      options({ runBatch: sidecar.fn, resumed }),
+    );
+    // 只剩 2、3 两页进侧车，且第 1 页不在任何批次里
+    expect(sidecar.calls).toHaveLength(1);
+    expect(sidecar.calls[0].pages).toEqual([2, 3]);
+    expect(result.summary.recognized).toBe(3);
+    expect(result.summary.resumed).toBe(1);
+    const outcome = result.outcomes.get(1)!;
+    expect(outcome.kind === "recognized" && outcome.resumed).toBe(true);
+    // 沿用的页照样进 IR（装配与翻译不受来源影响）
+    expect(result.analyses.get(1)!.textBlocks[0].text).toContain("第 1 页");
+  });
+
+  it("续跑页不在选中集合内：忽略（页码范围收窄的场景）", async () => {
+    const sidecar = fakeSidecar((pages) => run(pages.map((p) => page(p))));
+    const resumed = new Map([[99, page(99)]]);
+    const result = await runScanPipeline(options({ runBatch: sidecar.fn, resumed }));
+    expect(result.summary.resumed).toBe(0);
+    expect(result.outcomes.has(99)).toBe(false);
+  });
+
+  it("新识别的页逐页落盘（续跑状态的写入方被调用）", async () => {
+    const sidecar = fakeSidecar((pages) => run(pages.map((p) => page(p))));
+    const persisted: number[] = [];
+    const result = await runScanPipeline(
+      options({
+        runBatch: sidecar.fn,
+        batchSize: 2,
+        persistPage: async (p) => {
+          persisted.push(p.pageNumber);
+        },
+      }),
+    );
+    expect(persisted).toEqual([1, 2, 3]);
+    expect(result.summary.recognized).toBe(3);
+  });
+
+  it("沿用的页不重复落盘", async () => {
+    const sidecar = fakeSidecar((pages) => run(pages.map((p) => page(p))));
+    const persisted: number[] = [];
+    await runScanPipeline(
+      options({
+        runBatch: sidecar.fn,
+        resumed: new Map([[1, page(1)]]),
+        persistPage: async (p) => {
+          persisted.push(p.pageNumber);
+        },
+      }),
+    );
+    expect(persisted).toEqual([2, 3]);
+  });
+
   it("无内容页（noContent）记 empty 且不产 IR", async () => {
     const sidecar = fakeSidecar((pages) =>
       run([page(1, 0.5), page(2, 0.0, { noContent: true, lines: [] }), page(3, 0.5)]),

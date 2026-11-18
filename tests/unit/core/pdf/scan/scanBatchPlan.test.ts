@@ -11,7 +11,6 @@ import {
   evaluateCoverage,
   emptySkipReasons,
   planScanBatches,
-  parseManifest,
   reconcileScanOutcomes,
   serializeManifest,
   summarizeScan,
@@ -118,6 +117,7 @@ describe("summarizeScan", () => {
     const s = summarizeScan([1, 2, 3, 4, 5], outcomes, 2);
     expect(s.selected).toBe(5);
     expect(s.recognized).toBe(2);
+    expect(s.resumed).toBe(0);
     expect(s.empty).toBe(1);
     expect(s.skipped).toBe(2);
     expect(s.skipReasons).toEqual({
@@ -153,6 +153,17 @@ describe("summarizeScan", () => {
     expect(s.tables).toBe(1);
   });
 
+  it("沿用的页计入 recognized 同时单独计数 resumed", () => {
+    const outcomes = new Map<number, ScanPageOutcome>([
+      [1, { kind: "recognized", page: page(1, 0.5), suspect: false, resumed: true }],
+      [2, { kind: "recognized", page: page(2, 0.5), suspect: false }],
+    ]);
+    const s = summarizeScan([1, 2], outcomes, 0);
+    expect(s.recognized).toBe(2);
+    expect(s.resumed).toBe(1);
+    expect(s.paragraphs).toBe(2);
+  });
+
   it("原因计数表键集合固定", () => {
     expect(Object.keys(emptySkipReasons()).sort()).toEqual([
       "batch-failed",
@@ -161,20 +172,5 @@ describe("summarizeScan", () => {
       "rotated",
       "sidecar-unavailable",
     ]);
-  });
-});
-
-describe("断点清单", () => {
-  it("序列化后可原样解析", () => {
-    const m = serializeManifest({ version: 1, batch: 3, pages: [21, 22, 23], status: "partial", dpi: 200 });
-    const parsed = parseManifest(m);
-    expect(parsed).toEqual({ version: 1, batch: 3, pages: [21, 22, 23], status: "partial", dpi: 200 });
-  });
-
-  it("畸形输入返回 null（对账走保守路径）", () => {
-    expect(parseManifest("not json")).toBeNull();
-    expect(parseManifest(JSON.stringify({ version: 2, batch: 0, pages: [] }))).toBeNull();
-    expect(parseManifest(JSON.stringify({ version: 1, batch: -1, pages: [] }))).toBeNull();
-    expect(parseManifest(JSON.stringify({ version: 1, batch: 0 }))).toBeNull();
   });
 });
