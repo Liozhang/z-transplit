@@ -45,6 +45,7 @@ import { getString } from "../../utils/locale";
 import { safeDebug } from "../../utils/logger";
 import { sha256Hex } from "../../utils/hash";
 import { resolveJavaExecutable } from "./javaLocator";
+import { isArm64Host } from "./platformArch";
 
 export interface JavaStatus {
   /** A usable java executable path was resolved (managed JRE or system). */
@@ -95,40 +96,10 @@ function isMacArm64(): boolean {
  * ARM64（含 Apple Silicon 与 aarch64 Linux）vs x64。
  * Adoptium 在 Linux 上同样发布 aarch64 的 JRE——固定下载 x64 会让 ARM 设备
  * （能跑 Zotero 的 ARM 笔记本、开发板等）装出跑不起来的运行时。
- * 探测顺序：系统信息服务 → XPCOM ABI（Linux 上最可靠的来源，形如
- * "aarch64-gnueabi-linux"）→ navigator.platform → Zotero.isARM。
+ * 判定逻辑在 platformArch（与 Python 运行时分发共用一份，避免两处漂移）。
  */
 function isArm64(): boolean {
-  try {
-    const sysinfo = (Components as any).classes[
-      "@mozilla.org/system-info;1"
-    ]?.getService?.((Components as any).interfaces?.nsIPropertyBag2);
-    // macOS machine model / arch hints
-    const arch = (sysinfo?.get?.("arch") as string) || "";
-    if (/aarch64|arm64/i.test(arch)) return true;
-  } catch (e) {
-    safeDebug("[Z-Transplit] JavaRuntimeManager: " + e);
-    /* ignore */
-  }
-  try {
-    const appinfo = (Components as any).classes[
-      "@mozilla.org/xre/app-info;1"
-    ]?.getService?.((Components as any).interfaces?.nsIXULRuntime);
-    const abi = ((appinfo as any)?.XPCOMABI as string) || "";
-    if (/aarch64|arm64/i.test(abi)) return true;
-    if (/x86_64|amd64/i.test(abi)) return false;
-  } catch (e) {
-    safeDebug("[Z-Transplit] JavaRuntimeManager: " + e);
-    /* ignore */
-  }
-  try {
-    if (/aarch64|arm64/i.test(navigator?.platform || "")) return true;
-  } catch (e) {
-    /* ignore */
-  }
-  // Fallback: Zotero 7+ may expose isARM
-  if ((Zotero as any).isARM) return true;
-  return false;
+  return isArm64Host();
 }
 
 
@@ -667,15 +638,53 @@ async function downloadJreArchive(
 
 
 /**
+ * 解包 tar.gz 归档到目标目录。
+ *
+ * 供 Python 运行时分发共用（src/core/pdf/scan/pythonRuntime.ts）——tar.gz
+ * 解包全插件只有这一份实现，避免两处漂移。Windows 走 System32 的 bsdtar
+ * （Win10 1803+ 自带，Zotero 7 的最低要求即 Win10）；Unix 走
+ * /usr/bin/tar -xzf。失败抛错并带上 stderr 明细，由调用方决定文案。
+ */
+export async function extractTarGzArchive(
+  archivePath: string,
+  destDir: string,
+): Promise<void> {
+  // Ensure dest exists. IOUtils' MakeDirectoryOptions only knows
+  // `createAncestors`; `recursive`/`createParents` are OS.File-era names that
+  // the WebIDL dictionary conversion silently drops, so ancestors were never
+  // actually created.
+  await (globalThis as any).IOUtils.makeDirectory(destDir, {
+    createAncestors: true,
+  });
+
+  const tarExe = isWindows()
+    ? "C:\\Windows\\System32\\tar.exe"
+    : "/usr/bin/tar";
+  const result = await execCommand(
+    tarExe,
+    ["-xzf", archivePath, "-C", destDir],
+    { timeout: 300000 },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `extract failed (${tarExe}): ${result.stderr || "unknown error"}`,
+    );
+  }
+}
+
+/**
  * Extract a downloaded JRE archive into the managed runtime dir.
  * Windows zip → tar.exe (Win10 1803+), fallback PowerShell Expand-Archive.
- * Unix tar.gz → /usr/bin/tar -xzf.
+ * Unix tar.gz → shared extractTarGzArchive.
  */
 async function extractArchive(
   archivePath: string,
   destDir: string,
   archive: "zip" | "tar.gz",
 ): Promise<void> {
+  if (archive === "tar.gz") {
+    return extractTarGzArchive(archivePath, destDir);
+  }
   const isWin = isWindows();
 
   // Ensure dest exists. IOUtils' MakeDirectoryOptions only knows
@@ -716,16 +725,8 @@ async function extractArchive(
     return;
   }
 
-  // Unix: tar -xzf works for .tar.gz (and -xf auto-detects on modern tar).
-  const flag = archive === "tar.gz" ? "-xzf" : "-xf";
-  const result = await execCommand("/usr/bin/tar", [flag, archivePath, "-C", destDir], {
-    timeout: 300000,
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(getString("java-error-extract-failed", {
-      detail: result.stderr || "unknown error",
-    }));
-  }
+  // tar.gz 走共享实现（见 extractTarGzArchive）。
+  return extractTarGzArchive(archivePath, destDir);
 }
 
 
