@@ -28,6 +28,17 @@
  *   - Tables / background / grid lines: preserved by overlay mode (the source
  *     page is the render target), which is the default path.
  *
+ * Per-page routing (scanned documents): after the ODL parse, every page is
+ * classified digital / scanned / degraded (see core/pdf/scan/pageClassification).
+ * Digital pages use the ODL assembly above; scanned and degraded pages go to
+ * the OCR sidecar pipeline (core/pdf/scan/**), whose per-page IR is assembled
+ * with the same pageAnalysisToAssembly and spliced into the assemblies array by
+ * page index — translation and rendering stay positional and engine-agnostic.
+ * A document ODL cannot read at all (pure scan) falls back to a pdf.js probe
+ * that builds an all-scanned placeholder analysis, so the run no longer dies at
+ * "no text". OCR formulas carry native LaTeX (FormulaBlock.latex) and skip the
+ * vision-model crop; the screenshot preservation path runs for both sources.
+ *
  * Translation engine: createTranslator() / createAIBatchTranslator() from
  * src/core/translation/translationEngines.ts, with the formula-preserving
  * prompt. Before any work starts, featureReadiness.checkTranslationReadiness()
@@ -38,14 +49,22 @@
  * Ported from leadero's src/core/pdf/translation/opendataloaderSplitAdapter.ts.
  * Changes: MinerU fallback half removed (single OpenDataLoader backend),
  * ModelRouter narrative replaced by the local engine layer + readiness
- * preflight, leadero data-dir/log prefixes renamed.
+ * preflight, leadero data-dir/log prefixes renamed, scanned-page routing and
+ * the shared reader session added.
  *
  * @module core/pdf/translation/opendataloaderSplitAdapter
  */
 
 import { parsePdfWithOpenDataLoader } from "../backendSelector";
+import { PdfParseError } from "../PdfParseError";
 import { odlAnalysisToAssembly } from "./odlToAssembly";
 import type { FormulaBlock } from "./odlToAssembly";
+import type { PdfDocumentAnalysis } from "../PdfIR";
+import { emptyAnalysisFromProbe, probePdfPages } from "../scan/pdfPageProbe";
+import { runScanPipeline } from "../scan/ScanPipeline";
+import { mergeScannedAssemblies } from "../scan/mergeScannedAssemblies";
+import { decideScanRouting } from "../scan/routePages";
+import { openTransientReader } from "../scan/readerAccess";
 import type { ProgressFraction } from "../../translation/types";
 import {
   extractFormulaLatex,
@@ -329,23 +348,48 @@ export async function translateAndSplitWithOpenDataLoader(
   // 0. Preflight: the engine must be ready before we spend minutes parsing.
   assertEngineReady();
 
-  // 0-1. Parse the source PDF via OpenDataLoader (the only backend).
+  // 0-1. Parse the source PDF via OpenDataLoader.
+  //
+  // 纯扫描件的兜底：ODL 对整篇零产出时抛 no-text（旧行为是死路，文案
+  // 自承"可能是纯图片"）。此时用 pdf.js 探针取页数页尺寸，建一份每页
+  // 空文本的占位分析，全部页标记 scanned 走 OCR 管线——翻译不再死在
+  // 路上。探针也打不开阅读器时抛出可读错误，不伪装成功。
   onProgress(getString("odl-progress-parsing"));
   const inputPath = sourceItem.getFilePath?.();
   if (!inputPath) {
     throw new Error(getString("odl-error-source-path"));
   }
-  const { analysis } = await parsePdfWithOpenDataLoader(inputPath, {
-    imageOutput: "embedded",
-    signal: opts.signal,
-    onProgress,
-  });
-  if (!analysis || !analysis.pages || analysis.pages.length === 0) {
-    throw new Error(
-      analysis?.filteredMarkdown
-        ? getString("odl-error-parse-failed", { detail: analysis.filteredMarkdown })
-        : getString("odl-error-parse-no-pages"),
-    );
+  let analysis: PdfDocumentAnalysis | null = null;
+  let noTextDetail = "";
+  try {
+    const parsed = await parsePdfWithOpenDataLoader(inputPath, {
+      imageOutput: "embedded",
+      signal: opts.signal,
+      onProgress,
+    });
+    if (parsed.analysis?.pages?.length) {
+      analysis = parsed.analysis;
+    }
+  } catch (e: any) {
+    const noText =
+      e instanceof PdfParseError && (e as any).reason === "no-text";
+    if (!noText) throw e;
+    noTextDetail = String(e?.message ?? "");
+  }
+  if (!analysis) {
+    const probe = await probePdfPages(sourceItem.id);
+    if (probe && probe.length > 0) {
+      safeDebug(
+        `[Z-Transplit] opendataloaderSplitAdapter: ODL found no text; probing ${probe.length} page(s) for the OCR path`,
+      );
+      analysis = emptyAnalysisFromProbe(probe);
+    } else {
+      throw new Error(
+        noTextDetail
+          ? getString("odl-error-parse-failed", { detail: noTextDetail })
+          : getString("odl-error-parse-no-pages"),
+      );
+    }
   }
   //    already sliced paragraphs with geometry in the right coordinate space).
   // 图片区域完全不翻译：删除器检查模式报告含文字表单对象（矢量图）的
@@ -369,8 +413,11 @@ export async function translateAndSplitWithOpenDataLoader(
         e,
     );
   }
-  const { assemblies, pageSizes, formulaBlocks } = odlAnalysisToAssembly(analysis);
-  const totalPages = assemblies.length;
+  const base = odlAnalysisToAssembly(analysis);
+  const baseAssemblies = base.assemblies;
+  const basePageSizes = base.pageSizes;
+  const baseFormulaBlocks = base.formulaBlocks;
+  const totalPages = baseAssemblies.length;
 
   // 页码范围：先于一切昂贵步骤（VLM 公式提取、截图、翻译）校验并定型为
   // 0 基集合，范围外的页面完全不进入后续管线，输出 PDF 里保持原文原样。
@@ -389,11 +436,69 @@ export async function translateAndSplitWithOpenDataLoader(
   const isPageSelected = (pageNumber: number): boolean =>
     !selectedPages || selectedPages.has(pageNumber - 1);
 
+  // 逐页分类与 OCR 路由。数字页走上面的 ODL 装配；扫描页与劣质文本层页
+  // （乱码隐藏层，最隐蔽的遗漏来源）交给扫描管线，产出按页替换进装配
+  // 数组——渲染与翻译按位置散回，两路产出对下游完全同构。路由规则本身
+  // 在 decideScanRouting（纯函数，有单测），这里只做编排。
+  const routing = decideScanRouting(analysis, isPageSelected);
+  const ocrPageNumbers = routing.ocrPages;
+  if (ocrPageNumbers.length === 0 && routing.counts.scanned + routing.counts.degraded > 0) {
+    safeDebug(
+      `[Z-Transplit] opendataloaderSplitAdapter: ${routing.counts.scanned + routing.counts.degraded} scanned/degraded page(s) outside the selected range — left as source`,
+    );
+  }
+  let assemblies = baseAssemblies;
+  let pageSizes = basePageSizes;
+  let formulaBlocks = baseFormulaBlocks;
+  // OCR 页一页都没认出来时的原因归类：最终 0 段的报错文案据此选择——
+  // 扫描件走 OCR 却零产出，报"OpenDataLoader 不识别扫描件"会误导用户。
+  let scanRecognized = -1; // -1 = 没有 OCR 页（纯数字文档）
+  if (ocrPageNumbers.length > 0) {
+    const scanEnabled = getPrefDynamic("pdfParser.scan.enabled") !== false;
+    if (scanEnabled) {
+      const scan = await runScanPipeline({
+        pdfPath: inputPath,
+        pages: ocrPageNumbers,
+        onProgress,
+        signal: opts.signal,
+      });
+      scanRecognized = scan.summary.recognized;
+      const merged = mergeScannedAssemblies({
+        assemblies: baseAssemblies,
+        pageSizes: basePageSizes,
+        formulaBlocks: baseFormulaBlocks,
+        ocrAnalyses: scan.analyses,
+      });
+      assemblies = merged.assemblies;
+      pageSizes = merged.pageSizes;
+      formulaBlocks = merged.formulaBlocks;
+      if (scan.summary.skipReasons.rotated > 0) {
+        onProgress(getString("scan-error-rotated-skipped"));
+      }
+      if (scan.cancelled) {
+        // 扫描阶段被取消：不等翻译，直接走统一取消闸口。
+        throw new TranslationCancelledError();
+      }
+      if (scanRecognized === 0 && scan.summary.skipped > 0) {
+        // 一页都没认出来：把原因讲明白，而不是让用户对着"0 段"发呆。
+        onProgress(getString("scan-error-sidecar-unconfigured"));
+      }
+    } else {
+      scanRecognized = 0;
+      onProgress(getString("scan-error-disabled"));
+    }
+  }
+
   const totalParagraphs = assemblies.reduce(
     (sum, a, i) => sum + (isPageSelected(i + 1) ? a.paragraphs.length : 0),
     0,
   );
   if (totalParagraphs === 0) {
+    // 有 OCR 页却零产出：报侧车未就绪（带配置指引），而不是"解析未提取到
+    // 文本"——后者在这个场景下等于让用户去检查一个已经尽力了的解析器。
+    if (ocrPageNumbers.length > 0 && scanRecognized === 0) {
+      throw new Error(getString("scan-error-sidecar-unconfigured"));
+    }
     throw new Error(getString("odl-error-parse-no-text"));
   }
 
@@ -408,16 +513,20 @@ export async function translateAndSplitWithOpenDataLoader(
   //    then splice the LaTeX back into the paragraph text (protected from
   //    translation by formulaPreservingPrompt). Without vision, degrade: the
   //    formulas stay inline and may translate imperfectly (a known limitation).
+  //
+  //    原生公式（OCR 侧车的 isFormula 块）文本即 LaTeX，不需要视觉模型——
+  //    过滤掉之后，计数与进度行只反映真正要走提取的启发式公式。
+  const vlmFormulaBlocks = selectedFormulaBlocks.filter((fb) => !fb.latex);
   const visionOk = isFormulaVisionAvailable();
-  if (selectedFormulaBlocks.length > 0) {
+  if (vlmFormulaBlocks.length > 0) {
     if (visionOk) {
       onProgress(
-        getString("odl-progress-formula-vlm", { count: selectedFormulaBlocks.length }),
+        getString("odl-progress-formula-vlm", { count: vlmFormulaBlocks.length }),
       );
-      await extractFormulasForTranslation(sourceItem.id, assemblies, selectedFormulaBlocks, onProgress);
+      await extractFormulasForTranslation(sourceItem.id, assemblies, vlmFormulaBlocks, onProgress);
     } else {
       onProgress(
-        getString("odl-progress-formula-novlm", { count: selectedFormulaBlocks.length }),
+        getString("odl-progress-formula-novlm", { count: vlmFormulaBlocks.length }),
       );
     }
   }
@@ -522,6 +631,12 @@ export async function translateAndSplitWithOpenDataLoader(
       if (!isPageSelected(i + 1)) {
         translatedSets.push(emptySet(assembly));
         continue;
+      }
+      // 逐页路径的取消闸口：translateParagraphs 自身不接 signal（单段请求
+      // 由引擎层的超时兜底），长文档逐页跑完再统一检查会让取消等完全部
+      // 页面。每页开工前查一次，取消即刻生效。
+      if (opts.signal?.aborted) {
+        throw new TranslationCancelledError();
       }
       onProgress(
         getString("odl-progress-page", {
@@ -778,49 +893,17 @@ function failedSuffix(failedTranslations: number): string {
  * Wait for a freshly-opened reader's pdf.js to be ready (PDFViewerApplication +
  * pdfDocument available).
  */
-async function waitForReaderPdf(reader: any): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < 15000) {
-    // Outer reader wraps the real reader under _internalReader; direct/internal
-    // readers expose _primaryView at the top level.
-    const primaryView =
-      reader?._internalReader?._primaryView ?? reader?._primaryView;
-    if (primaryView) return;
-    await (Zotero as any).Promise.delay(100);
-  }
-  throw new Error(getString("odl-error-reader-pdf-timeout"));
-}
-
 /**
  * Open the source PDF in a reader for the duration of cropping (the rasterizer
  * needs a live pdf.js instance). Returns { reader, openedNew } or null when the
- * reader can't be opened at all.
+ * reader can't be opened at all. Delegates to the shared reader session
+ * (core/pdf/scan/readerAccess) — the formula path, the rasterizer and the
+ * scanned-page probe all open readers the same way.
  */
 async function openReaderForCropping(
   attachmentId: number,
 ): Promise<{ reader: any; openedNew: boolean } | null> {
-  let reader: any;
-  let openedNew = false;
-  try {
-    reader = await (Zotero as any).Reader.open(attachmentId);
-    openedNew = !!reader;
-    // Reader.open() returns undefined when the tab is already open — find the
-    // existing reader so we can use its pdf.js instance for rasterization.
-    if (!reader) {
-      reader = (Zotero as any).Reader?._readers?.find(
-        (r: any) => (r._itemID ?? r.itemID ?? r._attachmentId ?? r.attachmentID) === attachmentId,
-      );
-    }
-    if (!reader) return null;
-    await waitForReaderPdf(reader);
-    return { reader, openedNew };
-  } catch (_e) {
-    // Only close the reader if we opened a new one.
-    if (openedNew) {
-      try { reader?.close?.(); } catch (e) { safeDebug("[Z-Transplit] opendataloaderSplitAdapter: " + e);  /* best-effort */ }
-    }
-    return null;
-  }
+  return openTransientReader(attachmentId);
 }
 
 /**
@@ -853,6 +936,14 @@ async function extractFormulasForTranslation(
     for (const fb of formulaBlocks) {
       const assembly = assemblies[fb.pageNumber - 1];
       if (!assembly) continue;
+      // 原生公式（OCR 侧车）：段落文本本身就是 LaTeX，无需裁剪、无需视觉
+      // 模型。截图回贴路径照旧跑（captureFormulaScreenshots 不管来源），
+      // 公式的视觉保全不变。
+      if (fb.latex) {
+        assembly.texts[fb.paragraphIndex] = fb.latex;
+        processed++;
+        continue;
+      }
       // Capture the crop OUTSIDE the try so it's available to the catch branch
       // for image fallback if VLM extraction fails.
       let dataUrl: string | null = null;
