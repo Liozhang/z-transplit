@@ -16,11 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   structure). A document OpenDataLoader cannot read at all — a pure scan — no
   longer dead-ends at "no text": a pdf.js probe sizes the pages and the whole
   document goes through recognition. The sidecar is configured in the settings
-  (command line); automatic runtime distribution is planned for a later
-  release. Nothing is dropped silently: every page ends up either recognized,
-  explicitly empty, or skipped with a recorded reason (rotated, sidecar not
-  configured, batch failed, cancelled), and the completion summary counts each
-  category.
+  (command line), and the Python runtime it needs is installed by the plugin
+  from the same settings pane; the sidecar's model dependencies still come
+  from a local install. Nothing is dropped silently: every page ends up
+  either recognized, explicitly empty, or skipped with a recorded reason
+  (rotated, sidecar not configured, batch failed, cancelled), and the
+  completion summary counts each category.
 - Recognition runs in batches with checkpoint manifests, so a long document
   only ever risks the batch in flight and can be continued with "Translate
   page range…" (which merges into the existing translated attachment).
@@ -56,6 +57,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   zero-paragraph failure path now also records an audit line when the sidecar
   recognized pages and the document has text but the assemblies came out
   empty — the one case where content could still be lost.
+- The Python runtime the recognition sidecar needs is now distributed by the
+  plugin instead of by the user. A shipped manifest declares which artifact
+  belongs to which platform (six: Windows/macOS/Linux × x64/arm64) and where
+  the upstream checksum list lives; at install time the plugin fetches that
+  list, downloads the matching artifact from a mirror (falling back to the
+  canonical source), verifies the bytes, extracts to a staging directory,
+  probes `python -V`, and only then moves it into place. The settings pane
+  gained a "Recognition runtime" row with status check and install/repair;
+  progress shows in the Zotero main window. The manifest deliberately stores
+  no per-artifact fingerprint — the checksum list published with the release
+  is the trust anchor, fetched fresh at install time. Verified against the
+  2026-11-10 release of python-build-standalone (CPython 3.12.16): all six
+  artifacts exist, the education-network mirror carries byte-identical
+  checksums, and two artifacts were downloaded and hashed end to end. Only
+  the interpreter is distributed — the sidecar's model dependencies still
+  need a local install, after which the sidecar command can point at the
+  managed runtime.
 - Formulas recognized by the sidecar carry native LaTeX and skip the
   vision-model crop entirely (the screenshot preservation path still applies),
   and the single-paragraph translation prompt now also protects `$…$` /

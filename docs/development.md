@@ -115,8 +115,7 @@ python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir 
 然后在设置 → PDF 分屏翻译 →「识别侧车命令」填完整命令行（带空格的路径加引号），
 对一篇纯扫描 PDF 执行「翻译全文」即可走通全链路。侧车的纯函数（页码解析、框
 归一、覆盖率并集）已用 Python 直接冒烟验证；模型调用部分需在装好依赖的机器上
-按上面的命令验证。运行时的自动分发（按平台构件清单、镜像、校验）属第二期，
-本期以「用户配置侧车命令」为落地形态。管线语义：路由决策
+按上面的命令验证。管线语义：路由决策
 （`scan/routePages.ts`，纯函数）、逐页分类（`scan/pageClassification.ts`）、
 分批与断点账目（`scan/scanBatchPlan.ts`、`scan/ScanPipeline.ts`）、产出合并
 （`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖。表格结构还原在插件侧
@@ -139,8 +138,42 @@ python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir 
 清单在而页文件丢失的页按未完成处理，不冒充已认。整篇运行成功产出后清理状态；
 页码范围运行保留，供下一个范围接着用。状态读写集中在
 `src/core/pdf/scan/scanRunState.ts`（纯函数序列化/校验 + 宿主 IOUtils），
-适配器在 `opendataloaderSplitAdapter.ts` 接线；「侧车状态只读行」面板入口
-属第二期。
+适配器在 `opendataloaderSplitAdapter.ts` 接线。
+
+### 识别运行时的 Python 自动分发（pythonRuntime）
+
+侧车跑在插件外的 Python 里，运行时本身由插件按平台分发，落地在数据目录
+`ztransplit/python-runtime/`（内部即上游发行版的 `python/` 布局，可执行文件
+路径以清单为准）。链路与 jar、JRE 同一形状：
+
+1. 随包清单 `src/core/pdf/lib/PYTHON-RUNTIME.json` 声明"哪个平台取哪个构件、
+   校验和清单在哪"（`src/core/pdf/scan/pythonRuntimeManifest.ts` 解析，六平台
+   必须齐，缺一个该平台用户装不上）；
+2. 安装时现取上游随发行版发布的 SHA256SUMS（信任锚），取出本平台构件的
+   指纹——清单不存单构件指纹：一个发行版六个平台，逐个人工登记只会让人懒得
+   更新，而"漏登记一个平台"比"不登记"更危险；
+3. 字节必须过 SHA-256 才解包；镜像只送字节，对不上就换源（来源表由清单的
+   `mirrors` + 规范源组成，探测竞速后整包下载，见
+   `src/core/pdf/artifactAcquire.ts`——jar 与运行时共用的取件器，按目标 key
+   去重）；
+4. 解到暂存区、跑一次 `python -V` 探活、通过才原子换位：解压中断或架构不符
+   都不占据正式位置；探活失败的状态行显示"未安装"而不是拿跑不起来的运行时
+   当可用。
+
+对账：`npm run check:python-runtime`（结构：平台齐全、文件名含发行标签、
+可执行路径符合 install_only 布局、镜像唯一且 https、更新说明随数据带）；
+`--online` 追加联网核对（每个构件名都在上游 SHA256SUMS 里、镜像可达）——在线
+模式依赖外网，默认不进 CI。升级发行版的步骤写在清单的 `howToUpdate` 里。
+
+已实测（2026-11-18）：发行版 `20261110`，CPython 3.12.16 的
+install_only_stripped 构件六个平台齐备；`mirrors.cernet.edu.cn` 收录该发行版
+且 SHA256SUMS 与 GitHub 逐字节一致（清华/阿里/腾讯/中科大/南大均未收录）；
+win-x64 与 mac-arm64 两个构件已完整下载并核对指纹（355ee61b…、2f11b8aa…）。
+
+入口：设置 → PDF 分屏翻译 →「识别运行时」的「检查状态 / 安装 / 修复…」
+（`Zotero.ZTransplit.python`，进度窗显示在主窗口）。已知边界：本模块只分发
+解释器，侧车的模型依赖（onnxruntime、rapidocr 等）仍需本地安装；装好后把
+侧车命令写成「<受管 python> <sidecar.py>」即可。
 
 ## 质量门控
 
@@ -153,6 +186,7 @@ python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir 
 | `npm run check:structure` | S1–S9 包结构：manifest、图标、prefs 语法、偏好键双向一致、FTL 覆盖、chrome:// URL、SVG 角色、XPI 产物、无 leadero 可执行引用 |
 | `npm run test:qa` | QA 资产自测：Zotero/fetch mock 自举 + structure-check 正控（无正控的校验器不能证明自己能抓问题） |
 | `npm run check:jar` | 随包 jar 与 `PROVENANCE.json` 的 sha256 / 字节数对账 |
+| `npm run check:python-runtime` | 随包 `PYTHON-RUNTIME.json` 的结构对账（`--online` 追加联网核对构件与镜像） |
 
 ## 测试分层
 
