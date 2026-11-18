@@ -12,12 +12,14 @@
  * 带页界记账（OpenDataLoaderJsonAdapter 产出；探针占位与旧缓存没有，
  * 按整篇降级，见 mergeScannedDocument 的分支说明）。
  *
- * 收录规则与数字路径一致（见 OpenDataLoaderJsonAdapter 的收集点）：
- *   - filteredText 只收正文类块（标题/正文/参考文献/脚注/侧栏）；页眉
- *     页脚、页码、边注、图注、公式都不进——公式是 LaTeX，不是行文；
- *   - filteredMarkdown 收标题（识别页无层级信息，统一一级）与正文，表格
- *     走共享的 tableToMarkdown；识别页的表格与文本之间无交错信息，
- *     表格附在本页文本之后。
+ * 收录规则与数字路径对齐（见 OpenDataLoaderJsonAdapter 的收集点）：
+ *   - 标题与正文进 filteredText 与 filteredMarkdown（标题带一级标记——识别
+ *     页没有标题层级信息，统一一级）；
+ *   - 表格只进 filteredMarkdown（数字路径同样如此：表格文本不进纯文本）；
+ *   - 页眉页脚、边注、图注不进任何一侧——数字路径也不收；
+ *   - 公式（LaTeX）不是行文，两边都不收；
+ *   - 参考文献条目与脚注按识别路径的块角色收录：数字路径的 JSON 里没有
+ *     对应元素类型（引文另有 allCitations 通道），这是识别路径多收的部分。
  *
  * 纯模块：不碰宿主，可在 Node 单测。
  *
@@ -90,12 +92,15 @@ function joinWithSpans(
   const spans: Array<{ pageNumber: number; start: number; end: number }> = [];
   const parts: string[] = [];
   let acc = 0;
-  for (const item of items) {
-    const start = acc === 0 ? 0 : acc + 2;
+  items.forEach((item, index) => {
+    // 首段无分隔符，按段数判断而不是按累计长度：首段内容为空串时（底本
+    // 的空 span 原样保留就会出现），累计长度仍是 0，会把后面每段少算 2。
+    const first = index === 0;
+    const start = first ? 0 : acc + 2;
     acc = start + item.content.length;
     parts.push(item.content);
     spans.push({ pageNumber: item.pageNumber, start, end: acc });
-  }
+  });
   return { text: parts.join("\n\n"), spans };
 }
 

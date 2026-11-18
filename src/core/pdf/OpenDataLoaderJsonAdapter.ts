@@ -380,6 +380,9 @@ export function adaptOpenDataLoaderJson(
   const filteredMarkdownParts: string[] = [];
   // 页界记账。pushFilteredText 与文末 join("\n\n") 的增量
   // 长度严格一致（首段无分隔符，其后每段 +2），页首段起点即页 span.start。
+  // 「首段」按已入段的个数判断，不能按累计长度判断：首段内容本身是空串时
+  // （例如第 1 页第一个收录元素是无行表格），累计长度仍是 0，会把后面每一
+  // 段的起点都少算 2——按页界切片的消费方（文档级聚合）会静默丢字符。
   const filteredPageSpans: Array<{ pageNumber: number; start: number; end: number }> = [];
   // Markdown 侧同一套记账：表格只进 Markdown 不进纯文本，两边的收集点
   // 不同，必须各自记各自的 span，文档级聚合才能按页替换（扫描页的聚合
@@ -392,29 +395,31 @@ export function adaptOpenDataLoaderJson(
   const pushFilteredText = (content: string, pageNo: number) => {
     // 收集点收敛回本函数——所有调用点都是应进 filteredText 的正文，
     // +2 记账与 join("\n\n") 严格一致。
+    const first = filteredTextParts.length === 0;
     filteredTextParts.push(content);
     if (!openPageSpan || openPageSpan.pageNumber !== pageNo) {
       if (openPageSpan) filteredPageSpans.push(openPageSpan);
       openPageSpan = {
         pageNumber: pageNo,
-        start: filteredAcc === 0 ? 0 : filteredAcc + 2,
+        start: first ? 0 : filteredAcc + 2,
         end: 0,
       };
     }
-    filteredAcc += (filteredAcc === 0 ? 0 : 2) + content.length;
+    filteredAcc += (first ? 0 : 2) + content.length;
     openPageSpan.end = filteredAcc;
   };
   const pushFilteredMarkdown = (content: string, pageNo: number) => {
+    const first = filteredMarkdownParts.length === 0;
     filteredMarkdownParts.push(content);
     if (!openMarkdownSpan || openMarkdownSpan.pageNumber !== pageNo) {
       if (openMarkdownSpan) filteredMarkdownPageSpans.push(openMarkdownSpan);
       openMarkdownSpan = {
         pageNumber: pageNo,
-        start: markdownAcc === 0 ? 0 : markdownAcc + 2,
+        start: first ? 0 : markdownAcc + 2,
         end: 0,
       };
     }
-    markdownAcc += (markdownAcc === 0 ? 0 : 2) + content.length;
+    markdownAcc += (first ? 0 : 2) + content.length;
     openMarkdownSpan.end = markdownAcc;
   };
 
