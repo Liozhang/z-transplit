@@ -127,6 +127,16 @@ pref("extensions.zotero.ztransplit.pdfParser.opendataloader.returnImages", true)
 // 翻译前把已翻译段落的原文从 PDF 内容流中删除（替代白色遮罩）；失败自动回退遮罩
 pref("extensions.zotero.ztransplit.pdfParser.originalTextRemoval.enabled", true);
 
+// 扫描页识别（src/core/pdf/scan/**）：逐页分类后，扫描页与劣质文本层页交给
+// 本地 OCR 侧车识别。sidecarPath 是完整命令行（带空格的路径要加引号），
+// 留空表示未配置——这些页保持原文，不会静默丢弃。dpi / batchSize / timeout
+// 在读取时钳制到合法范围（72–600 / 1–200 / 30–3600），非法值回退默认值。
+pref("extensions.zotero.ztransplit.pdfParser.scan.enabled", true);
+pref("extensions.zotero.ztransplit.pdfParser.scan.sidecarPath", "");
+pref("extensions.zotero.ztransplit.pdfParser.scan.dpi", 200);
+pref("extensions.zotero.ztransplit.pdfParser.scan.batchSize", 10);
+pref("extensions.zotero.ztransplit.pdfParser.scan.timeout", 600);
+
 // Persistent paragraph translation cache (src/core/translation/translationCache.ts).
 // Content-addressed translation records under
 // {DataDir}/ztransplit/translation-cache/, shared across sessions and output

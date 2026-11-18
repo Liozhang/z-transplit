@@ -193,7 +193,6 @@ odl-progress-summary-failed = ，{ $failed } 段翻译失败已保留原文
 odl-progress-summary-nosplit = 完成：{ $pages } 页，{ $paragraphs } 段（译文已生成，但分屏打开失败）
 odl-progress-opening-split = 正在打开分屏…
 odl-error-no-split-opener = 分屏打开器不可用（内部错误：split 流程缺少 openSplitView）。
-odl-error-reader-pdf-timeout = reader pdf.js 未在 15 秒内就绪。
 odl-progress-crop-reader-missing-skip = 无法打开 reader 进行公式截图，跳过公式提取。
 odl-progress-crop-reader-missing-text = 无法打开 reader 进行公式截图，公式将以文本形式处理。
 odl-progress-crop-progress = 公式提取进度：{ $current }/{ $total }
@@ -203,6 +202,19 @@ odl-progress-crop-failed = ，{ $count } 段失败已保留原文
 odl-progress-shot-progress = 公式截图进度：{ $current }/{ $total }
 odl-progress-shot-done = 公式截图完成：{ $ok } 段成功
 odl-progress-shot-failed = ，{ $count } 段失败
+
+## 扫描页识别管线（src/core/pdf/scan/**）
+scan-progress-start = 正在识别扫描页（共 { $pages } 页）…
+scan-progress-batch = 已识别 { $done }/{ $total } 批
+scan-progress-retry = 第 { $batch } 批有 { $pages } 页内容偏少，提高分辨率重试…
+scan-progress-summary = 扫描识别完成：{ $recognized } 页有内容，{ $empty } 页无内容，{ $skipped } 页跳过
+scan-progress-summary-suspect = ，{ $suspect } 页内容仍偏少（已保留识别结果）
+scan-error-sidecar-unconfigured = 检测到需要识别的扫描页，但尚未配置扫描识别侧车。请在 Z-Transplit 设置的「扫描页识别」中填写侧车命令（需本地安装 PaddleOCR 环境）；这些页将保持原文。
+scan-error-disabled = 扫描页识别已在设置中关闭，这些页将保持原文。
+scan-error-rotated-skipped = 扫描页含旋转页面，已跳过识别并保持原文。
+
+## 阅读器会话（src/core/pdf/scan/readerAccess.ts）
+err-reader-pdf-timeout = 阅读器的 pdf.js 未在 15 秒内就绪。
 
 ## 版式保留渲染器（LayoutPreservingRenderer.ts）
 render-error-rotated-page = 暂不支持旋转页面（/Rotate { $angle }°）。请先将 PDF 转正再翻译。

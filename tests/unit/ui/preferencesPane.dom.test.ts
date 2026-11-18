@@ -749,9 +749,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 34 = 28 原有 + 输出预算 + 术语表 + 有道四项（应用 ID / 应用密钥 /
-    // 术语库 ID / 翻译领域）。
-    expect(labels.length).toBe(34);
+    // 38 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
+    // 的四项（侧车命令 / dpi / 每批页数 / 单批超时）。
+    expect(labels.length).toBe(38);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
@@ -771,9 +771,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("checkbox 两语言都写 .label", () => {
     const boxes = l10nBindings().filter((r) => r.tag === "checkbox");
-    // 14 = 11 原有 + 词卡开关 + 原文删除开关
-    // （preferences-ztransplit-pdf-removal-enabled）+ 有道应用密钥的显示开关。
-    expect(boxes.length).toBe(14);
+    // 15 = 14 原有（11 + 词卡开关 + 原文删除开关 + 有道应用密钥显示开关）
+    // + 扫描页识别开关（preferences-ztransplit-pdf-scan-enabled）。
+    expect(boxes.length).toBe(15);
     for (const row of boxes) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);

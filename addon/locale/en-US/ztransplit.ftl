@@ -199,7 +199,6 @@ odl-progress-summary-failed = ; { $failed } paragraphs failed and keep the origi
 odl-progress-summary-nosplit = Done: { $pages } pages, { $paragraphs } paragraphs (translation saved, but the split view failed to open)
 odl-progress-opening-split = Opening the split view…
 odl-error-no-split-opener = The split-view opener is unavailable (internal error: the split flow is missing openSplitView).
-odl-error-reader-pdf-timeout = The reader's pdf.js did not become ready within 15 s.
 odl-progress-crop-reader-missing-skip = Could not open a reader for formula screenshots; skipping formula extraction.
 odl-progress-crop-reader-missing-text = Could not open a reader for formula screenshots; formulas will be handled as text.
 odl-progress-crop-progress = Formula extraction progress: { $current }/{ $total }
@@ -209,6 +208,19 @@ odl-progress-crop-failed = , { $count } failed and keep the original text
 odl-progress-shot-progress = Formula screenshot progress: { $current }/{ $total }
 odl-progress-shot-done = Formula screenshots finished: { $ok } succeeded
 odl-progress-shot-failed = , { $count } failed
+
+## Scanned-page recognition pipeline (src/core/pdf/scan/**)
+scan-progress-start = Recognizing scanned pages ({ $pages } pages)…
+scan-progress-batch = Recognized batch { $done }/{ $total }
+scan-progress-retry = Batch { $batch } has { $pages } page(s) with little content, retrying at higher resolution…
+scan-progress-summary = Scanned-page recognition done: { $recognized } page(s) with content, { $empty } empty, { $skipped } skipped
+scan-progress-summary-suspect = , { $suspect } still sparse (results kept)
+scan-error-sidecar-unconfigured = Scanned pages need recognition, but the recognition sidecar is not configured. Fill in the sidecar command under "Scanned-page recognition" in the Z-Transplit settings (requires a local PaddleOCR install); these pages will keep their original text.
+scan-error-disabled = Scanned-page recognition is turned off in the settings; these pages will keep their original text.
+scan-error-rotated-skipped = The scanned document contains rotated pages; they were skipped and keep their original text.
+
+## Reader session (src/core/pdf/scan/readerAccess.ts)
+err-reader-pdf-timeout = The reader's pdf.js did not become ready within 15 s.
 
 ## Layout preserving renderer (LayoutPreservingRenderer.ts)
 render-error-rotated-page = Rotated pages are not supported yet (/Rotate { $angle }°). Straighten the PDF before translating.

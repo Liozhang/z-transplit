@@ -557,6 +557,42 @@ preferences-ztransplit-pdf-removal-enabled-desc =
     copyable without surfacing masked-out originals. If deletion fails, the
     pipeline falls back to white masks automatically; when off, masks are
     always used.
+preferences-ztransplit-pdf-scan-enabled =
+    .label = Recognize scanned pages (experimental)
+preferences-ztransplit-pdf-scan-enabled-desc =
+    Before translating, every page is classified: scanned pages and pages
+    with a garbled text layer go to the local recognition sidecar, digital
+    pages still use OpenDataLoader. Pages without a configured sidecar, or
+    skipped by recognition, keep their original text — nothing is dropped
+    silently. This is an experimental capability; speed and accuracy depend
+    on the models installed for the sidecar.
+preferences-ztransplit-pdf-scan-sidecar =
+    .value = Recognition sidecar command
+preferences-ztransplit-pdf-scan-sidecar-desc =
+    The full command line, for example "C:\Python\python.exe"
+    C:\tools\scan-sidecar\sidecar.py; quote paths that contain spaces. An
+    empty value means "not configured": scanned pages keep their original
+    text and the translation flow is unaffected. Setup instructions are in
+    the development doc under "Scanned-page recognition sidecar".
+preferences-ztransplit-pdf-scan-dpi =
+    .value = Recognition resolution (dpi)
+preferences-ztransplit-pdf-scan-dpi-desc =
+    The resolution pages are rendered at before being sent to the sidecar;
+    accepts 72–600, default 200. Higher is sharper but slower; out-of-range
+    values are clamped to the nearest boundary.
+preferences-ztransplit-pdf-scan-batch =
+    .value = Pages per batch
+preferences-ztransplit-pdf-scan-batch-desc =
+    How many pages one sidecar call recognizes in a row; accepts 1–200,
+    default 10. Smaller batches wait less per call and checkpoint more
+    finely; progress is recorded after each batch, and translation starts
+    only once every batch is done.
+preferences-ztransplit-pdf-scan-timeout =
+    .value = Per-batch timeout (seconds)
+preferences-ztransplit-pdf-scan-timeout-desc =
+    The longest one batch may take; accepts 30–3600, default 600. A timed-out
+    batch is recorded as failed (its pages keep the original text) without
+    affecting batches that already finished.
 
 ## ── Word cards ─────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =

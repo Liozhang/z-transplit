@@ -476,6 +476,33 @@ preferences-ztransplit-pdf-removal-enabled-desc =
     翻译并分屏时先从 PDF 中真正删除已翻译段落的原文，再叠加译文；删后的译
     文可正常搜索与复制，不再翻出被遮住的原文。删除失败会自动回退为白色遮
     罩，关闭后始终使用遮罩。
+preferences-ztransplit-pdf-scan-enabled =
+    .label = 识别扫描页（实验性）
+preferences-ztransplit-pdf-scan-enabled-desc =
+    翻译前逐页判断：扫描页与乱码文本层页交给本地识别侧车还原文字，数字页
+    仍走 OpenDataLoader。未配置侧车或识别跳过的页保持原文，不会静默丢
+    弃。属于实验性能力，识别速度与准确率取决于侧车所装的模型。
+preferences-ztransplit-pdf-scan-sidecar =
+    .value = 识别侧车命令
+preferences-ztransplit-pdf-scan-sidecar-desc =
+    完整命令行，例如 "C:\Python\python.exe" C:\tools\scan-sidecar\sidecar.py；
+    路径带空格时必须加引号。留空表示未配置：扫描页保持原文，翻译流程不受
+    影响。设置方法见开发文档的「扫描页识别侧车」一节。
+preferences-ztransplit-pdf-scan-dpi =
+    .value = 识别分辨率（dpi）
+preferences-ztransplit-pdf-scan-dpi-desc =
+    送侧车渲染的页面分辨率，可填 72–600，默认 200。调高更清晰但更慢；填写
+    超出范围的值时按最接近的边界处理。
+preferences-ztransplit-pdf-scan-batch =
+    .value = 每批页数
+preferences-ztransplit-pdf-scan-batch-desc =
+    一次调用侧车连续识别的页数，可填 1–200，默认 10。批次越小单次等待越
+    短、断点越细；每批结束会记录一次进度，全部批完成后才进入翻译。
+preferences-ztransplit-pdf-scan-timeout =
+    .value = 单批超时（秒）
+preferences-ztransplit-pdf-scan-timeout-desc =
+    一批页面的最长识别时间，可填 30–3600，默认 600。超时的批按失败记账
+    （该批页面保持原文），不影响已完成的批次。
 
 ## ── 词卡 ───────────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =

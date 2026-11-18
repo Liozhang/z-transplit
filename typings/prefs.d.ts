@@ -42,6 +42,11 @@ declare namespace _ZoteroTypes {
       "pdfParser.opendataloader.timeout": number;
       "pdfParser.opendataloader.returnImages": boolean;
       "pdfParser.originalTextRemoval.enabled": boolean;
+      "pdfParser.scan.enabled": boolean;
+      "pdfParser.scan.sidecarPath": string;
+      "pdfParser.scan.dpi": number;
+      "pdfParser.scan.batchSize": number;
+      "pdfParser.scan.timeout": number;
       "translate.cache.enabled": boolean;
       "translate.cache.maxSizeMB": number;
       "reader.bilingual.defaultMode": string;
