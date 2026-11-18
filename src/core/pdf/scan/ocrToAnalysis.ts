@@ -23,8 +23,10 @@
  * isFormula，odlToAssembly 会原样带出，不跑字符密度启发式）；侧车若
  * 另给 formulas 数组，作为冗余来源一并收入（附在文本块之后）。
  *
- * 表格：Phase 1 只登记区域与计数（结构还原与文本抽取属第二期，随文档级
- * 聚合一起接入）；表格区域本身维持"保留原文"的产品决策。
+ * 表格：侧车给出的表格 HTML 解析成行/单元格结构（含 colspan/rowspan，
+ * 见 htmlTable.ts），列起点与网格规模用于把单元格按均分近似落进表格区
+ * 域——HTML 不带坐标，均分是唯一不编造信息的定位方式；解析不出结构时
+ * 退回只登记区域。表格区域本身维持"保留原文"的产品决策。
  *
  * 纯模块：不碰宿主，可在 Node 单测。
  *
@@ -39,8 +41,10 @@ import type {
   PdfFormula,
   PdfPageAnalysis,
   PdfTable,
+  PdfTableRow,
   PdfTextBlock,
 } from "../PdfIR";
+import { parseHtmlTable } from "./htmlTable";
 import { pixelBoxToPdfBox } from "./pdfPageProbe";
 import type { SidecarPageResult, SidecarTextLine } from "./sidecarProtocol";
 
@@ -158,6 +162,34 @@ function clampFontSize(size: number): number {
   return Math.min(MAX_OCR_FONT_SIZE, Math.max(MIN_OCR_FONT_SIZE, size));
 }
 
+/**
+ * 单元格的近似边界框：表格区域按网格均分（列宽、行高各自等分），单元格
+ * 占自己跨度的一段。HTML 不带任何坐标，均分是不编造信息的定位方式；真实
+ * 表格的列宽很少严格相等，近似值只供账目与将来的聚合使用——表格区域维持
+ * "保留原文"，译文不按这个框渲染。
+ *
+ * BBox 为 PDF 用户空间：x 左缘、y 下缘、宽高向右上展开；第 0 行贴表格
+ * 顶边，所以行方向自上而下算、再翻成 y。
+ */
+function cellBBox(
+  table: BBox,
+  columns: number,
+  gridRows: number,
+  rowIndex: number,
+  col: number,
+  colspan: number,
+  rowspan: number,
+): BBox {
+  const cols = Math.max(1, columns);
+  const rows = Math.max(1, gridRows);
+  const colEnd = Math.min(col + colspan, cols);
+  const rowEnd = Math.min(rowIndex + rowspan, rows);
+  const width = ((colEnd - col) / cols) * table.width;
+  const height = ((rowEnd - rowIndex) / rows) * table.height;
+  const top = table.y + table.height - (rowIndex / rows) * table.height;
+  return { x: table.x + (col / cols) * table.width, y: top - height, width, height };
+}
+
 /** 把侧车一页结果转成 PdfPageAnalysis。 */
 export function sidecarPageToAnalysis(page: SidecarPageResult): PdfPageAnalysis {
   const sy = page.pageSizePt.height / Math.max(1, page.renderSizePx.height);
@@ -224,14 +256,34 @@ export function sidecarPageToAnalysis(page: SidecarPageResult): PdfPageAnalysis 
     });
   }
 
-  // 3) 表格：只计数与抽文本（结构还原属第二期）。
+  // 3) 表格：结构还原。HTML 解析成功 → 行/单元格（跨度与文本进 IR，供
+  //    文档级聚合与文本账目使用）；解析失败（引擎没给 HTML 或输出无法
+  //    解析）→ 退回只登记区域，与 Phase 1 行为一致。
   const tables: PdfTable[] = [];
   for (const t of page.tables) {
     const bbox = pixelBoxToPdfBox(t.bbox, page.renderSizePx, page.pageSizePt);
+    const parsed = t.html ? parseHtmlTable(t.html) : null;
+    if (!parsed) {
+      tables.push({
+        pageNumber: page.pageNumber,
+        bbox,
+        rows: [],
+        confidence: 0.8,
+      });
+      continue;
+    }
+    const rows: PdfTableRow[] = parsed.rows.map((row, rowIndex) => ({
+      cells: row.cells.map((c) => ({
+        text: c.text,
+        colspan: c.colspan,
+        rowspan: c.rowspan,
+        bbox: cellBBox(bbox, parsed.columns, parsed.gridRows, rowIndex, c.col, c.colspan, c.rowspan),
+      })),
+    }));
     tables.push({
       pageNumber: page.pageNumber,
       bbox,
-      rows: [],
+      rows,
       confidence: 0.8,
     });
   }

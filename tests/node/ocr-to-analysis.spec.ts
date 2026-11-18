@@ -183,7 +183,7 @@ describe("sidecarPageToAnalysis", () => {
     expect(analysis.formulas[0].isDisplay).toBe(true);
   });
 
-  it("表格与图区登记边界框（结构还原属第二期，Phase 1 只计数）", () => {
+  it("表格与图区登记边界框（无 HTML 时只计数，结构留空）", () => {
     const analysis = sidecarPageToAnalysis(
       typicalPage({
         tables: [{ bbox: { x0: 100, y0: 700, x1: 1500, y1: 1200 } }],
@@ -194,6 +194,103 @@ describe("sidecarPageToAnalysis", () => {
     expect(analysis.tables[0].rows).toEqual([]);
     expect(analysis.chartAreas).toHaveLength(1);
     expect(analysis.chartAreas[0].detectedType).toBe("unknown");
+  });
+
+  it("表格 HTML 还原成行/单元格（含 colspan/rowspan 与文本）", () => {
+    const analysis = sidecarPageToAnalysis(
+      typicalPage({
+        tables: [
+          {
+            bbox: { x0: 100, y0: 700, x1: 1500, y1: 1200 },
+            html:
+              "<table><tr><td>甲</td><td>乙</td></tr>" +
+              "<tr><td>丙</td><td>丁</td></tr></table>",
+          },
+        ],
+      }),
+    );
+    const table = analysis.tables[0];
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0].cells.map((c) => c.text)).toEqual(["甲", "乙"]);
+    expect(table.rows[1].cells.map((c) => c.text)).toEqual(["丙", "丁"]);
+    for (const row of table.rows) {
+      for (const cell of row.cells) {
+        expect(cell.colspan).toBe(1);
+        expect(cell.rowspan).toBe(1);
+      }
+    }
+  });
+
+  it("单元格近似框：网格均分，首行贴表格顶边、末行贴底边", () => {
+    const analysis = sidecarPageToAnalysis(
+      typicalPage({
+        tables: [
+          {
+            bbox: { x0: 0, y0: 0, x1: 1654, y1: 2339 }, // 整页
+            html: "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>",
+          },
+        ],
+      }),
+    );
+    const table = analysis.tables[0];
+    const [tl, tr] = table.rows[0].cells;
+    const [bl, br] = table.rows[1].cells;
+    // 表格框即整页（左下原点：x/y 是左/下缘，宽高向右上展开）
+    expect(table.bbox.x).toBeCloseTo(0, 5);
+    expect(table.bbox.y).toBeCloseTo(0, 5);
+    expect(table.bbox.width).toBeCloseTo(PAGE_PT.width, 5);
+    expect(table.bbox.height).toBeCloseTo(PAGE_PT.height, 5);
+    const halfW = PAGE_PT.width / 2;
+    const halfH = PAGE_PT.height / 2;
+    // 左上格：左半、上半（y 是下缘，落在半高处）
+    expect(tl.bbox.x).toBeCloseTo(0, 5);
+    expect(tl.bbox.width).toBeCloseTo(halfW, 5);
+    expect(tl.bbox.y).toBeCloseTo(halfH, 5);
+    expect(tl.bbox.height).toBeCloseTo(halfH, 5);
+    // 右上格：右半、上半
+    expect(tr.bbox.x).toBeCloseTo(halfW, 5);
+    expect(tr.bbox.width).toBeCloseTo(halfW, 5);
+    expect(tr.bbox.y).toBeCloseTo(halfH, 5);
+    // 左下格：左半、下半（下缘贴表格底边）
+    expect(bl.bbox.x).toBeCloseTo(0, 5);
+    expect(bl.bbox.y).toBeCloseTo(0, 5);
+    expect(bl.bbox.height).toBeCloseTo(halfH, 5);
+    // 右下格：右半、下半
+    expect(br.bbox.x).toBeCloseTo(halfW, 5);
+    expect(br.bbox.y).toBeCloseTo(0, 5);
+  });
+
+  it("rowspan 单元格的框纵向跨两行", () => {
+    const analysis = sidecarPageToAnalysis(
+      typicalPage({
+        tables: [
+          {
+            bbox: { x0: 0, y0: 0, x1: 1654, y1: 2339 },
+            html:
+              "<table><tr><td rowspan=2>侧</td><td>上</td></tr>" +
+              "<tr><td>下</td></tr></table>",
+          },
+        ],
+      }),
+    );
+    const rows = analysis.tables[0].rows;
+    const side = rows[0].cells[0];
+    expect(side.rowspan).toBe(2);
+    expect(side.bbox.y).toBeCloseTo(0, 5); // 下缘贴表格底边
+    expect(side.bbox.height).toBeCloseTo(PAGE_PT.height, 5); // 贯穿整个表格高度
+    // 第二行只剩一格，列起点被 rowspan 挤到第 1 列
+    expect(rows[1].cells).toHaveLength(1);
+    expect(rows[1].cells[0].text).toBe("下");
+  });
+
+  it("表格 HTML 无法解析：退回只登记区域，不抛", () => {
+    const analysis = sidecarPageToAnalysis(
+      typicalPage({
+        tables: [{ bbox: { x0: 100, y0: 700, x1: 1500, y1: 1200 }, html: "<div>坏</div>" }],
+      }),
+    );
+    expect(analysis.tables).toHaveLength(1);
+    expect(analysis.tables[0].rows).toEqual([]);
   });
 
   it("页面尺寸取侧车回报的页尺寸（点）", () => {

@@ -36,6 +36,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   than no recognition. Full-document runs clear the checkpoint on success;
   page-range runs keep it, so the next range picks up where the last one left
   off.
+- Recognized tables now keep their structure. The sidecar's table HTML is
+  parsed in the plugin (no DOM dependency — a quote-aware scanner built for
+  the narrow table/tr/td/th grammar) into rows and cells with colspan and
+  rowspan, including the grid column each cell lands on after rowspan pushes
+  later rows aside. Cell boxes are approximated by dividing the table region
+  evenly, since HTML carries no coordinates. Tables whose HTML is missing or
+  unparseable fall back to region-only registration, as before. Table regions
+  themselves still keep their source text, matching the product decision for
+  digital documents.
 - Formulas recognized by the sidecar carry native LaTeX and skip the
   vision-model crop entirely (the screenshot preservation path still applies),
   and the single-paragraph translation prompt now also protects `$…$` /

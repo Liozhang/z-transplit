@@ -119,7 +119,10 @@ python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir 
 本期以「用户配置侧车命令」为落地形态。管线语义：路由决策
 （`scan/routePages.ts`，纯函数）、逐页分类（`scan/pageClassification.ts`）、
 分批与断点账目（`scan/scanBatchPlan.ts`、`scan/ScanPipeline.ts`）、产出合并
-（`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖。
+（`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖。表格结构还原在插件侧
+完成：侧车给出的表格 HTML 由 `scan/htmlTable.ts`（纯函数，不依赖 DOM 的引号
+感知扫描器）解析成行/单元格，含 colspan/rowspan 与网格列起点，单元格框按
+表格区域均分近似（HTML 不带坐标）；解析失败整表退回只登记区域。
 
 ### 识别断点与自动续跑（scanRunState）
 
