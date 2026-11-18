@@ -55,12 +55,19 @@ export interface PageSize {
  * `assembly.texts` (so the adapter can splice the LaTeX back in). `bbox` is the
  * crop rectangle in PDF user space (y-up), and `pageNumber` is 1-indexed for
  * the rasterizer.
+ *
+ * `latex` is set when the block is a NATIVE formula region (OCR sidecar: the
+ * block's text IS the LaTeX). The orchestrator then skips the crop + vision
+ * model entirely and splices the text straight through — the screenshot path
+ * still runs for visual preservation. Absent = heuristic flag (ODL path), where
+ * the LaTeX has to be extracted from a crop.
  */
 export interface FormulaBlock {
   pageNumber: number;
   paragraphIndex: number;
   bbox: { x: number; y: number; width: number; height: number };
   originalText: string;
+  latex?: string;
 }
 
 export interface OdlAssemblyOutput {
@@ -90,7 +97,7 @@ export function odlAnalysisToAssembly(
   const formulaBlocks: FormulaBlock[] = [];
 
   analysis.pages.forEach((page, idx) => {
-    const built = pageToAssembly(page, idx + 1);
+    const built = pageAnalysisToAssembly(page, idx + 1);
     assemblies.push(built.assembly);
     pageSizes.push(built.pageSize);
     formulaBlocks.push(...built.formulaBlocks);
@@ -99,7 +106,11 @@ export function odlAnalysisToAssembly(
   return { assemblies, pageSizes, formulaBlocks };
 }
 
-function pageToAssembly(
+/**
+ * 单页装配。按页导出供扫描管线路由用：OCR 页各自装配后替换掉 ODL 给出
+ * 的空装配，两路产出在主管线里按页序合并。
+ */
+export function pageAnalysisToAssembly(
   page: PdfPageAnalysis,
   pageNumber: number,
 ): {
@@ -143,9 +154,21 @@ function pageToAssembly(
       Math.abs(w - size) < 2 && height > size * 5 && text.length > 20;
     if (isRotated) continue;
 
-    // Formula detection: ODL folds formula characters into ordinary text. Flag
-    // dense-formula paragraphs so the adapter can crop + VLM-extract LaTeX.
-    if (isFormulaParagraph(text)) {
+    // Formula detection. Two sources, priority order:
+    //   1. 原生公式区域（OCR 侧车的 isFormula 块，文本即 LaTeX）：直接带出，
+    //      不跑字符密度启发式——否则 LaTeX 里的 \frac 之类会二次命中，
+    //      同一区域被重复标记、重复贴截图。
+    //   2. ODL 路径：引擎不产公式，符号（Σ∫√ α β）被折进正文，按字符密度
+    //      启发式标记，交给视觉模型裁剪提取。
+    if (block.isFormula) {
+      formulaBlocks.push({
+        pageNumber,
+        paragraphIndex,
+        bbox: { x, y, width: w, height: Math.max(height, size) },
+        originalText: text,
+        latex: text,
+      });
+    } else if (isFormulaParagraph(text)) {
       formulaBlocks.push({
         pageNumber,
         paragraphIndex,
@@ -156,7 +179,11 @@ function pageToAssembly(
 
     // Recover source styling that ODL folds into the font name + textColor.
     // Both are optional; when absent the renderer keeps legacy behaviour.
+    // `block.bold` is the explicit style channel for backends that know the
+    // weight directly (OCR sidecar marks titles) instead of encoding it in a
+    // font name.
     const style = parseFontStyle(block.fontName);
+    const bold = style.bold || block.bold === true;
     const color = parseTextColor(block.textColor);
 
     paragraphs.push({
@@ -169,7 +196,7 @@ function pageToAssembly(
       x: x,
       brk: false,
       sourceFontSize: block.fontSize,
-      ...(style.bold ? { bold: true } : {}),
+      ...(bold ? { bold: true } : {}),
       ...(style.italic ? { italic: true } : {}),
       ...(color ? { color } : {}),
     });

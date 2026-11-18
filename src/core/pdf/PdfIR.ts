@@ -31,6 +31,19 @@ export interface PdfTextBlock {
    * paragraphs (not just table cells) can recover their original color.
    */
   textColor?: string;
+  /**
+   * Bold hint for backends that know the style directly instead of encoding
+   * it in a font name (the OCR sidecar marks titles/headings this way).
+   * Optional — absent means "derive from fontName" (legacy behaviour).
+   */
+  bold?: boolean;
+  /**
+   * True when this block IS a formula region: its text is the formula's LaTeX
+   * (OCR sidecar sets this). Downstream, `odlToAssembly` turns such blocks
+   * into formula blocks with native LaTeX instead of running the
+   * character-density heuristic over the text.
+   */
+  isFormula?: boolean;
 }
 
 
@@ -169,7 +182,12 @@ export interface PdfPageAnalysis {
 
 
 export interface PdfDocumentAnalysis {
-  source: "tier2-opendataloader-pdf";
+  /**
+   * 产出本篇分析的后端。`tier2-opendataloader-pdf` 是本地 jar 解析；
+   * `scan-sidecar` 是扫描页识别侧车（只覆盖被路由到 OCR 的页，是局部
+   * 文档，不是整篇）。无生产消费者按此分支，测试夹具用旧字面量仍然合法。
+   */
+  source: "tier2-opendataloader-pdf" | "scan-sidecar";
   totalPages: number;
   pages: PdfPageAnalysis[];
 

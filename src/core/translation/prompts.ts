@@ -20,7 +20,12 @@ import { renderPrompt } from "./promptTemplate";
  * translate the "v". The C stage tolerates spaces but NOT a translated "v",
  * so we make the constraint explicit.
  *
- * Verbatim port of leadero/src/core/pdf/translation/translateParagraphs.ts:130.
+ * Verbatim port of leadero/src/core/pdf/translation/translateParagraphs.ts:130,
+ * plus one clause added for the OCR path: OCR formulas arrive as `$...$` /
+ * `$$...$$` LaTeX (the {vn} contract never fired for them), and a translator
+ * that rewrites math inside dollar signs corrupts the one thing the pipeline
+ * promised to preserve. The batch prompt already carried this rule
+ * (batchJsonPrompt rule 3); the single-paragraph prompt did not.
  */
 export function formulaPreservingPrompt(
   targetLangDesc: string,
@@ -32,7 +37,9 @@ export function formulaPreservingPrompt(
     `CRITICAL: The text contains tokens like {v0}, {v1}, {v2} that mark the position of mathematical formulas. ` +
     `You MUST preserve every such token EXACTLY as-is — same braces, same letter 'v', same number, in the correct ` +
     `position relative to the surrounding translated text. Do not translate, rename, expand, or renumber these tokens. ` +
-    `For example, input "The result is {v0} where {v1} denotes..." must keep {v0} and {v1} intact.`
+    `For example, input "The result is {v0} where {v1} denotes..." must keep {v0} and {v1} intact.\n` +
+    `ALSO CRITICAL: the text may contain LaTeX math wrapped in $...$ or $$...$$ (for example $E=mc^2$). ` +
+    `Preserve every such expression EXACTLY as-is — never translate or modify anything inside the dollar signs.`
   );
 }
 
