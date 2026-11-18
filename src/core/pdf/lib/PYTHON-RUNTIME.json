@@ -1,0 +1,59 @@
+{
+  "schema": "ztransplit-python-runtime/1",
+  "name": "CPython 运行时（python-build-standalone 发行）",
+  "upstream": "astral-sh/python-build-standalone",
+  "license": "MIT",
+  "release": "20261110",
+  "pythonVersion": "3.12.16",
+  "verifiedAt": "2026-11-18",
+  "sha256Sums": "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/SHA256SUMS",
+  "mirrors": [
+    {
+      "id": "cernet-pbs",
+      "base": "https://mirrors.cernet.edu.cn/python-build-standalone"
+    }
+  ],
+  "artifacts": [
+    {
+      "platform": "win-x64",
+      "file": "cpython-3.12.16+20261110-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "executable": "python/python.exe"
+    },
+    {
+      "platform": "win-arm64",
+      "file": "cpython-3.12.16+20261110-aarch64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "executable": "python/python.exe"
+    },
+    {
+      "platform": "mac-x64",
+      "file": "cpython-3.12.16+20261110-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    },
+    {
+      "platform": "mac-arm64",
+      "file": "cpython-3.12.16+20261110-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    },
+    {
+      "platform": "linux-x64",
+      "file": "cpython-3.12.16+20261110-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    },
+    {
+      "platform": "linux-arm64",
+      "file": "cpython-3.12.16+20261110-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    }
+  ],
+  "howToUpdate": [
+    "1. 查上游最新发行标签：GET https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest（或 /releases?per_page=3）",
+    "2. 下载该标签的 SHA256SUMS，按下表替换每个平台的文件名（文件名里的 CPython 版本与发行标签同步变）：",
+    "   win-x64=x86_64-pc-windows-msvc, win-arm64=aarch64-pc-windows-msvc,",
+    "   mac-x64=x86_64-apple-darwin, mac-arm64=aarch64-apple-darwin,",
+    "   linux-x64=x86_64-unknown-linux-gnu, linux-arm64=aarch64-unknown-linux-gnu（取不带 v2/v3/v4 后缀的基线包）",
+    "3. 镜像条目只收实测可达且字节与规范源一致的：2026-11-18 实测仅 mirrors.cernet.edu.cn 收录该发行版（SHA256SUMS 与 GitHub 逐字节一致），清华/阿里/腾讯/中科大/南大均未收录",
+    "4. 跑对账：npm run check:python-runtime（结构）；联网核对 npm run check:python-runtime -- --online",
+    "5. 更新 verifiedAt；本清单不存单构件指纹——信任锚是随发行版一起发布的 SHA256SUMS，安装时现取现校"
+  ],
+  "consumedBy": "src/core/pdf/scan/pythonRuntime.ts"
+}
