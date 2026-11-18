@@ -155,12 +155,34 @@ async function ensureDir(path: string): Promise<void> {
 /**
  * 打开（或新建）某个附件的识别状态。指纹不匹配时先清空旧状态再开始——
  * 旧结果是另一个文件的，留着比没有更危险。
+ *
+ * 数据目录取不到（宿主异常、目录未初始化）时返回一套空操作状态：续跑是
+ * 优化，不是正确性前提，绝不能因为拿不到目录就让整场翻译失败。
  */
 export async function openScanRunState(
   attachmentId: number,
   fingerprint: string,
 ): Promise<ScanRunState> {
-  const dir = joinPath(scanStateRoot(), String(attachmentId));
+  const root = scanStateRoot();
+  if (!root || !(globalThis as any).Zotero?.DataDirectory?.dir) {
+    safeDebug("[Z-Transplit] scanRunState: no data directory, resume disabled");
+    const empty: ScanRunState = {
+      dir: "",
+      fingerprint,
+      completed: [],
+      async load() {
+        return new Map();
+      },
+      async save() {
+        /* 无落盘点：本次运行不记续跑状态 */
+      },
+      async clear() {
+        /* 无状态可清 */
+      },
+    };
+    return empty;
+  }
+  const dir = joinPath(root, String(attachmentId));
   const manifestPath = joinPath(dir, RUN_MANIFEST_FILE);
   const rawManifest = await readTextFile(manifestPath);
   const manifest = rawManifest ? parseRunManifest(rawManifest) : null;

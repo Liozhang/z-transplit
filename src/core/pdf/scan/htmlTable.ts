@@ -321,5 +321,11 @@ export function parseHtmlTable(html: string): ParsedTable | null {
   }
 
   if (rows.length === 0 || cellCount === 0) return null;
-  return { rows, columns: Math.max(1, columns), gridRows: Math.max(1, gridRows) };
+  return {
+    rows,
+    // 占位列找不到空位时会停在上限值（畸形输入的兜底），列数随之越界——
+    // 钳回上限，均分近似才不会算出表格外的框。
+    columns: Math.min(MAX_TABLE_COLUMNS, Math.max(1, columns)),
+    gridRows: Math.max(1, gridRows),
+  };
 }

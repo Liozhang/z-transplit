@@ -305,15 +305,14 @@ describe("resolveManagedPython / getPythonRuntimeStatus", () => {
     expect(status.path).toBe(exe);
   });
 
-  it("平台不在覆盖表内：状态报平台不支持", async () => {
+  it("Linux x64 → linux-x64（六个组合全覆盖，「平台不支持」分支是纯防御）", async () => {
     (globalThis as any).Zotero.isWin = false;
     (globalThis as any).Zotero.isMac = false;
     (globalThis as any).Zotero.isARM = false;
-    (globalThis as any).Zotero.platform = "sunos";
-    (globalThis as any).PathUtils = undefined;
-    // isLinux() 兜底为 linux-x64，仍覆盖；真正不覆盖的平台靠 pythonPlatformFor
-    // 的 null 分支，这里只验 linux 分支能落到键上。
     expect(pythonRuntimePlatformKey()).toBe("linux-x64");
+    const status = await getPythonRuntimeStatus();
+    expect(status.ready).toBe(false);
+    expect(await getManagedPythonPath()).toBe(`${RUNTIME_DIR}\\python\\bin\\python3`);
   });
 });
 
@@ -394,7 +393,7 @@ describe("installPythonRuntime", () => {
   });
 
   it("解包后探活失败：暂存区清掉、正式位置不被占据", async () => {
-    probeExits = [0, 1, 1]; // 第一次 resolve 前的存在性检查不跑进程；解包后探活失败
+    // 探活一律失败：安装回调里的那次探测不过，暂存区被删，正式位置空着
     runProcess.mockImplementation(async () => ({
       exitCode: 1,
       stdout: "",

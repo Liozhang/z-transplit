@@ -197,6 +197,17 @@ describe("openScanRunState", () => {
     expect((await state.load()).size).toBe(0);
   });
 
+  it("数据目录取不到：退回空操作状态（续跑是优化，不是正确性前提）", async () => {
+    (globalThis as any).Zotero = {};
+    const state = await openScanRunState(7, "1000:500");
+    expect(state.completed).toEqual([]);
+    expect((await state.load()).size).toBe(0);
+    // 落盘与清理都不抛、不写任何文件
+    await expect(state.save(page(1))).resolves.toBeUndefined();
+    await expect(state.clear()).resolves.toBeUndefined();
+    expect((await state.load()).size).toBe(0);
+  });
+
   it("save 的页写入以附件 id 分目录（不同附件互不干扰）", async () => {
     const a = await openScanRunState(7, "fp");
     const b = await openScanRunState(8, "fp");

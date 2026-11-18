@@ -205,6 +205,17 @@ describe("parseSha256Sums", () => {
     ).toBe("e23fe5b16926de1d81661b1a97352e89fb167549c55a6825796ccd0f32ec7f1b");
   });
 
+  it("CRLF 行尾与带空格的文件名都能取到", () => {
+    const crlf = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  my file (v2).tar.gz", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  other.tar.gz", ""].join(String.fromCharCode(13, 10));
+    expect(parseSha256Sums(crlf, "my file (v2).tar.gz")).toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    expect(parseSha256Sums(crlf, "other.tar.gz")).toBe("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+  });
+
+  it("指纹位数不对的行被跳过（不当成合法条目）", () => {
+    const text = ["abc  short.tar.gz", "e23f  x.tar.gz"].join(String.fromCharCode(10));
+    expect(parseSha256Sums(text, "short.tar.gz")).toBeNull();
+  });
+
   it("找不到返回 null；大小写不敏感（返回统一小写）", () => {
     expect(parseSha256Sums(text, "not-there.tar.gz")).toBeNull();
     const upper = "E23FE5B16926DE1D81661B1A97352E89FB167549C55A6825796CCD0F32EC7F1B  x.tar.gz";

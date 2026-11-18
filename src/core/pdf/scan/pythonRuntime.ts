@@ -173,15 +173,26 @@ export async function getPythonRuntimeStatus(): Promise<PythonRuntimeStatus> {
   if (!path) {
     return { ready: false, error: getString("py-status-not-installed") };
   }
-  const resolved = await resolveManagedPython();
-  if (!resolved) {
+  const IOUtils = (globalThis as any).IOUtils;
+  let present = false;
+  try {
+    present = IOUtils?.exists ? await IOUtils.exists(path) : false;
+  } catch (e) {
+    safeDebug("[Z-Transplit] pythonRuntime: " + e);
+  }
+  if (!present) {
     return { ready: false, error: getString("py-status-not-installed") };
   }
-  const probe = await runProcess(resolved, ["-V"], PROBE_TIMEOUT_MS);
+  // 一次探活同时判可用与取版本——resolveManagedPython 已经探过一次，这里
+  // 不再跑第二遍（每次查询都是用户点一下，少一次进程启动就少一秒等待）。
+  const probe = await runProcess(path, ["-V"], PROBE_TIMEOUT_MS);
+  if (probe.exitCode !== 0 || probe.aborted) {
+    return { ready: false, error: getString("py-status-not-installed") };
+  }
   const version = parsePythonVersion(probe.stdout || probe.stderr);
   return {
     ready: true,
-    path: resolved,
+    path,
     managed: true,
     ...(version ? { version } : {}),
   };
@@ -233,6 +244,7 @@ async function fetchSha256Sums(
   manifest: PythonRuntimeManifest,
   signal?: AbortSignal,
 ): Promise<string> {
+  if (signal?.aborted) throw new Error("cancelled");
   const resp = await (Zotero as any).HTTP.request("GET", manifest.sha256Sums, {
     responseType: "text",
     timeout: CHECKSUM_TIMEOUT_MS,
@@ -291,6 +303,9 @@ export async function installPythonRuntime(opts: {
     key: runtimeDir,
     label: "Python runtime install",
     sources: artifactSources(manifest, artifact),
+    // sha256 是"已落地产物的指纹"，用于取件器的非空守卫；这里同时传了
+    // verifyExisting（目标是目录，按跑得起来复核），所以它不参与文件哈希。
+    // 字节那一层的核对走 archiveSha256——上游 SHA256SUMS 给的正是归档指纹。
     sha256: expected,
     archiveSha256: expected,
     paths: {
