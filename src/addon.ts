@@ -11,6 +11,11 @@ import {
   type AiConnectionConfig,
   type AiTestResult,
 } from "./core/ai/connectionTest";
+import {
+  getPythonRuntimeStatus,
+  installPythonRuntime,
+} from "./core/pdf/scan/pythonRuntime";
+import { installPythonRuntimeWithProgress } from "./core/pdf/scan/pythonRuntimeInstallUi";
 
 /**
  * Addon singleton, published as `Zotero.ZTransplit` by src/index.ts (the name
@@ -62,6 +67,16 @@ class Addon {
       config: AiConnectionConfig,
     ) => Promise<AiTestResult>;
   };
+  /**
+   * 识别侧车的 Python 运行时的编程入口，供设置面板脚本
+   * （addon/content/preferences.js）使用，与 java/odlJar 同一约定：
+   * getStatus 探活受管运行时（存在 + 跑一次 python -V）；install 按平台
+   * 取件安装/修复（进度窗口显示在主窗口，内部有 in-flight 去重）。
+   */
+  public python: {
+    getStatus: typeof getPythonRuntimeStatus;
+    install: typeof installPythonRuntimeWithProgress;
+  };
 
   constructor() {
     this.data = {
@@ -82,6 +97,10 @@ class Addon {
     };
     this.ai = {
       testConnection: testAiConnection,
+    };
+    this.python = {
+      getStatus: getPythonRuntimeStatus,
+      install: installPythonRuntimeWithProgress,
     };
   }
 }

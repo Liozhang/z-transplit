@@ -215,6 +215,20 @@ scan-error-sidecar-unconfigured = 检测到需要识别的扫描页，但尚未�
 scan-error-disabled = 扫描页识别已在设置中关闭，这些页将保持原文。
 scan-error-rotated-skipped = 扫描页含旋转页面，已跳过识别并保持原文。
 
+## 识别侧车的 Python 运行时分发（src/core/pdf/scan/pythonRuntime.ts）
+py-progress-window = 正在安装识别运行时
+py-progress-checksum = 正在获取构件校验清单…
+py-progress-probing = 正在探测可用镜像…
+py-progress-downloading = 正在下载运行时（{ $percent }%）
+py-progress-verifying = 正在核对构件指纹…
+py-progress-extracting = 正在解压并探活…
+py-progress-done = 识别运行时安装完成
+py-status-not-installed = 未安装
+py-error-install-failed = 识别运行时安装失败，请检查网络后重试
+py-error-unsupported-platform = 当前平台没有可用的识别运行时构件
+py-error-manifest-unavailable = 运行时清单缺失或损坏，请重新安装插件
+py-error-checksum-unavailable = 校验清单里没有本平台构件，安装已中止（宁可不装，也不装来路不明的字节）
+
 ## 阅读器会话（src/core/pdf/scan/readerAccess.ts）
 err-reader-pdf-timeout = 阅读器的 pdf.js 未在 15 秒内就绪。
 

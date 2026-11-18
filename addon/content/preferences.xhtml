@@ -1383,6 +1383,37 @@
           data-l10n-id="preferences-ztransplit-pdf-scan-timeout-desc"
         >一批页面的最长识别时间，可填 30–3600，默认 600。超时的批按失败记账（该批页面保持原文），不影响已完成的批次。</description>
       </vbox>
+
+      <!-- 识别运行时（侧车用的 Python）：按平台自动下载，字节过 SHA-256
+           才解包，探活通过才落地。行为脚本见 preferences.js 的 scan 小节；
+           安装进度显示在 Zotero 主窗口。 -->
+      <hbox class="ztransplit-row" align="center">
+        <label
+          value="识别运行时"
+          control="ztransplit-pref-scan-python-check"
+          data-l10n-id="preferences-ztransplit-pdf-scan-python"
+        />
+        <button
+          id="ztransplit-pref-scan-python-check"
+          data-l10n-id="preferences-ztransplit-pdf-scan-python-check"
+          label="检查状态"
+        />
+        <button
+          id="ztransplit-pref-scan-python-install"
+          data-l10n-id="preferences-ztransplit-pdf-scan-python-install"
+          label="安装 / 修复…"
+        />
+      </hbox>
+      <vbox>
+        <description
+          id="ztransplit-pref-scan-python-status"
+          class="ztransplit-desc"
+        ></description>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-scan-python-desc"
+        >识别侧车所需的 Python 运行时。点「安装 / 修复…」由插件按当前平台自动下载（约 20–70 MB，存到 Zotero 数据目录，指纹核对通过才启用）；已安装时此处显示版本。侧车的模型依赖仍需本地安装，装好后把侧车命令写成「&lt;受管 python&gt; &lt;sidecar.py&gt;」即可。</description>
+      </vbox>
     </groupbox>
   </vbox>
 
@@ -1529,5 +1560,34 @@
       id="ztransplit-pref-string-odl-comp-status-nobundle"
       data-l10n-id="preferences-ztransplit-pdf-odl-comp-status-nobundle"
     >插件主包未加载，无法检查或下载解析组件。请重启 Zotero；仍未恢复时请重新安装本插件。</label>
+    <!-- 识别运行时的状态与过程文案（正文里的 {version} 由脚本替换）。 -->
+    <label
+      id="ztransplit-pref-string-scan-python-installing"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-installing"
+    >正在安装…</label>
+    <label
+      id="ztransplit-pref-string-scan-python-status-not-installed"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-status-not-installed"
+    >未安装</label>
+    <label
+      id="ztransplit-pref-string-scan-python-status-ready"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-status-ready"
+    >已安装：Python { $version }</label>
+    <label
+      id="ztransplit-pref-string-scan-python-status-checking"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-status-checking"
+    >正在检查识别运行时…</label>
+    <label
+      id="ztransplit-pref-string-scan-python-status-installing"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-status-installing"
+    >正在安装识别运行时，进度显示在 Zotero 主窗口。完成后此处会自动刷新状态。</label>
+    <label
+      id="ztransplit-pref-string-scan-python-status-nobundle"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-status-nobundle"
+    >插件主包未加载，无法检查或安装识别运行时。请重启 Zotero；仍未恢复时请重新安装本插件。</label>
+    <label
+      id="ztransplit-pref-string-scan-python-install-failed"
+      data-l10n-id="preferences-ztransplit-pdf-scan-python-install-failed"
+    >安装失败：{detail}</label>
   </vbox>
 </vbox>

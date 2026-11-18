@@ -749,9 +749,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 38 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
-    // 的四项（侧车命令 / dpi / 每批页数 / 单批超时）。
-    expect(labels.length).toBe(38);
+    // 39 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
+    // 的五项（侧车命令 / dpi / 每批页数 / 单批超时 / 识别运行时）。
+    expect(labels.length).toBe(39);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
@@ -1041,6 +1041,114 @@ describe("B17 设置 pane：解析组件状态行与按钮", () => {
     const status = h.doc.getElementById("ztransplit-pref-odl-comp-status")!;
     expect(String(status.textContent)).toContain("下载失败");
     expect(String(status.textContent)).toContain("no mirror reachable");
+    h.dom.window.close();
+  });
+});
+
+// ── 识别运行时（侧车用的 Python）状态行与按钮 ─────────────────────────────────
+//
+// 与解析组件小节同一套路：状态与安装都走主包暴露的表面，面板沙箱里只验接线
+// （按钮派发、状态行回显、失败细节上墙、按钮态恢复）。
+
+function setupScanPythonHarness(py?: {
+  getStatus?: () => any;
+  install?: () => Promise<string>;
+}) {
+  const h = setupHarness({});
+  const zt = (h.window as any).Zotero;
+  zt.ZTransplit = py ? { python: py } : undefined;
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  return {
+    ...h,
+    async click(id: string) {
+      const btn = h.doc.getElementById(id);
+      if (!btn) throw new Error(`element #${id} not found`);
+      btn.dispatchEvent(new h.window.Event("command", { bubbles: true }));
+      await flush();
+      await flush();
+    },
+  };
+}
+
+describe("B17 设置 pane：识别运行时状态行与按钮", () => {
+  it("主包未挂载：点击检测显示引导文案，不抛错", async () => {
+    const h = setupScanPythonHarness(undefined);
+    await h.click("ztransplit-pref-scan-python-check");
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    expect(String(status.textContent)).toContain("插件主包未加载");
+    h.dom.window.close();
+  });
+
+  it("已安装：显示版本", async () => {
+    const h = setupScanPythonHarness({
+      getStatus: async () => ({
+        ready: true,
+        version: "3.12.16",
+        path: "/tmp/zotero-data/ztransplit/python-runtime/python/python.exe",
+        managed: true,
+      }),
+    });
+    await h.click("ztransplit-pref-scan-python-check");
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    expect(String(status.textContent)).toContain("3.12.16");
+    h.dom.window.close();
+  });
+
+  it("未安装：显示未安装引导", async () => {
+    const h = setupScanPythonHarness({
+      getStatus: async () => ({ ready: false }),
+    });
+    await h.click("ztransplit-pref-scan-python-check");
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    expect(String(status.textContent)).toContain("未安装");
+    h.dom.window.close();
+  });
+
+  it("平台不支持：主包的本地化错误直接上墙", async () => {
+    const h = setupScanPythonHarness({
+      getStatus: async () => ({
+        ready: false,
+        error: "当前平台没有可用的识别运行时构件",
+      }),
+    });
+    await h.click("ztransplit-pref-scan-python-check");
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    expect(String(status.textContent)).toContain("当前平台没有可用的识别运行时构件");
+    h.dom.window.close();
+  });
+
+  it("安装：点击后按钮禁用并切到「正在安装」，完成后恢复并刷新为已安装", async () => {
+    let installed = false;
+    const h = setupScanPythonHarness({
+      getStatus: async () =>
+        installed
+          ? { ready: true, version: "3.12.16", path: "/tmp/py" }
+          : { ready: false },
+      install: async () => {
+        installed = true;
+        return "/tmp/py";
+      },
+    });
+    const installBtn = h.doc.getElementById("ztransplit-pref-scan-python-install")!;
+    await h.click("ztransplit-pref-scan-python-install");
+    expect(installed).toBe(true);
+    expect(installBtn.hasAttribute("disabled")).toBe(false);
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    expect(String(status.textContent)).toContain("3.12.16");
+    h.dom.window.close();
+  });
+
+  it("安装失败：状态行上墙错误细节，不被未安装引导覆盖", async () => {
+    const h = setupScanPythonHarness({
+      getStatus: async () => ({ ready: false }),
+      install: async () => {
+        throw new Error("Python runtime install failed (cernet-pbs: HTTP 404)");
+      },
+    });
+    await h.click("ztransplit-pref-scan-python-install");
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    expect(String(status.textContent)).toContain("安装失败");
+    expect(String(status.textContent)).toContain("cernet-pbs");
     h.dom.window.close();
   });
 });

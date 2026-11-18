@@ -593,6 +593,27 @@ preferences-ztransplit-pdf-scan-timeout-desc =
     The longest one batch may take; accepts 30–3600, default 600. A timed-out
     batch is recorded as failed (its pages keep the original text) without
     affecting batches that already finished.
+preferences-ztransplit-pdf-scan-python =
+    .value = Recognition runtime
+preferences-ztransplit-pdf-scan-python-desc =
+    The Python runtime the recognition sidecar needs. "Install / Repair…"
+    downloads it for the current platform automatically (roughly 20–70 MB,
+    stored under the Zotero data directory, and only enabled once its
+    fingerprint checks out); the version shows here once installed. The
+    sidecar's model dependencies still need a local install — after that,
+    write the sidecar command as "<managed python> <sidecar.py>".
+preferences-ztransplit-pdf-scan-python-check =
+    .label = Check status
+preferences-ztransplit-pdf-scan-python-install =
+    .label = Install / Repair…
+preferences-ztransplit-pdf-scan-python-installing =
+    .label = Installing…
+preferences-ztransplit-pdf-scan-python-status-not-installed = Not installed
+preferences-ztransplit-pdf-scan-python-status-ready = Installed: Python { $version }
+preferences-ztransplit-pdf-scan-python-status-checking = Checking the recognition runtime…
+preferences-ztransplit-pdf-scan-python-status-installing = Installing the recognition runtime; progress shows in the Zotero main window. This line refreshes when it finishes.
+preferences-ztransplit-pdf-scan-python-status-nobundle = The plugin's main bundle is not loaded, so the recognition runtime cannot be checked or installed. Restart Zotero; if it stays broken, reinstall the plugin.
+preferences-ztransplit-pdf-scan-python-install-failed = Install failed: {detail}
 
 ## ── Word cards ─────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =

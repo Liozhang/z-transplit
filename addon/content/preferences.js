@@ -1430,6 +1430,177 @@
       });
   }
 
+  // ── 识别运行时（侧车用的 Python）：状态检测 + 安装/修复 ─────────────────
+  // 与解析组件小节同一套路：状态与安装都走主包暴露的 Zotero.ZTransplit.python
+  // （面板沙箱无法 import 主包模块）。检测是"文件在 + 跑一次 -V"的探活，
+  // 装在盘上不等于能跑；安装由主包按平台取件，进度弹窗显示在主窗口。
+
+  var scanPythonStrings = {};
+  /** 「安装 / 修复」按钮的原始 label，安装中态结束后恢复。 */
+  var scanPythonInstallLabelBase = "";
+  var scanPythonCheckInFlight = false;
+  var scanPythonInstallInFlight = false;
+
+  function scanPythonApi() {
+    try {
+      var zt = Zotero && Zotero.ZTransplit;
+      var api = zt && zt.python;
+      if (
+        api &&
+        (typeof api.getStatus === "function" ||
+          typeof api.install === "function")
+      ) {
+        return api;
+      }
+    } catch (e) {
+      /* 主包未挂载 */
+    }
+    return null;
+  }
+
+  function setScanPythonStatusText(text) {
+    if (els.scanPythonStatus) els.scanPythonStatus.textContent = text;
+  }
+
+  function setScanPythonButtonsDisabled(disabled) {
+    [els.scanPythonCheckBtn, els.scanPythonInstallBtn].forEach(function (btn) {
+      if (!btn) return;
+      try {
+        if (disabled) btn.setAttribute("disabled", "true");
+        else btn.removeAttribute("disabled");
+      } catch (e) {
+        /* 忽略 */
+      }
+    });
+  }
+
+  function setScanPythonInstallLabel(installing) {
+    if (!els.scanPythonInstallBtn) return;
+    var label = installing
+      ? scanPythonStrings.btnInstalling
+      : scanPythonInstallLabelBase;
+    if (label) {
+      try {
+        els.scanPythonInstallBtn.setAttribute("label", label);
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  /** 读取 getStatus() 的结果并回显到状态行。 */
+  function refreshScanPythonStatus() {
+    var api = scanPythonApi();
+    if (!api || typeof api.getStatus !== "function") {
+      setScanPythonStatusText(scanPythonStrings.nobundle);
+      return Promise.resolve();
+    }
+    setScanPythonStatusText(scanPythonStrings.checking);
+    return Promise.resolve()
+      .then(function () {
+        return api.getStatus();
+      })
+      .then(function (status) {
+        if (status && status.ready) {
+          setScanPythonStatusText(
+            fillJavaTemplate(scanPythonStrings.ready, {
+              version: (status && status.version) || "?",
+            }),
+          );
+        } else if (status && status.error) {
+          // 未安装 / 平台不支持 / 清单损坏：主包已本地化，直接上墙。
+          setScanPythonStatusText(String(status.error));
+        } else {
+          setScanPythonStatusText(scanPythonStrings.notInstalled);
+        }
+      })
+      .catch(function (e) {
+        setScanPythonStatusText(
+          fillJavaTemplate(scanPythonStrings.statusError, {
+            detail: String((e && e.message) || e),
+          }),
+        );
+      });
+  }
+
+  function onScanPythonCheck() {
+    if (scanPythonCheckInFlight) return;
+    scanPythonCheckInFlight = true;
+    var done = function () {
+      scanPythonCheckInFlight = false;
+    };
+    refreshScanPythonStatus().then(done, done);
+  }
+
+  function onScanPythonInstall() {
+    if (scanPythonInstallInFlight) return;
+    var api = scanPythonApi();
+    if (!api || typeof api.install !== "function") {
+      setScanPythonStatusText(scanPythonStrings.nobundle);
+      return;
+    }
+    scanPythonInstallInFlight = true;
+    setScanPythonButtonsDisabled(true);
+    setScanPythonInstallLabel(true);
+    setScanPythonStatusText(scanPythonStrings.statusInstalling);
+    // 安装在主包内执行（ProgressWindow 显示在主窗口）；无论成败这里都恢复
+    // 按钮。失败时状态行显示错误细节（多为网络或平台原因）。
+    Promise.resolve()
+      .then(function () {
+        return api.install();
+      })
+      .catch(function (e) {
+        try {
+          Zotero.debug(
+            "[Z-Transplit] preferences: runtime install failed: " + e,
+          );
+        } catch (e2) {
+          /* 忽略 */
+        }
+        setScanPythonStatusText(
+          fillJavaTemplate(scanPythonStrings.installFailed, {
+            detail: String((e && e.message) || e),
+          }),
+        );
+        return null;
+      })
+      .then(function (failed) {
+        scanPythonInstallInFlight = false;
+        setScanPythonButtonsDisabled(false);
+        setScanPythonInstallLabel(false);
+        if (failed === null) return undefined;
+        return refreshScanPythonStatus();
+      });
+  }
+
+  function cacheScanPythonStrings() {
+    scanPythonStrings.btnInstalling = javaString(
+      "ztransplit-pref-string-scan-python-installing",
+    );
+    scanPythonStrings.notInstalled = javaString(
+      "ztransplit-pref-string-scan-python-status-not-installed",
+    );
+    scanPythonStrings.ready = javaString(
+      "ztransplit-pref-string-scan-python-status-ready",
+    );
+    scanPythonStrings.checking = javaString(
+      "ztransplit-pref-string-scan-python-status-checking",
+    );
+    scanPythonStrings.statusInstalling = javaString(
+      "ztransplit-pref-string-scan-python-status-installing",
+    );
+    scanPythonStrings.nobundle = javaString(
+      "ztransplit-pref-string-scan-python-status-nobundle",
+    );
+    scanPythonStrings.installFailed = javaString(
+      "ztransplit-pref-string-scan-python-install-failed",
+    );
+    scanPythonStrings.statusError = odlStrings.statusError;
+    scanPythonInstallLabelBase = els.scanPythonInstallBtn
+      ? els.scanPythonInstallBtn.getAttribute("label") || ""
+      : "";
+  }
+
   function cacheOdlStrings() {
     odlStrings.btnDownloading = javaString(
       "ztransplit-pref-string-odl-comp-btn-downloading",
@@ -1507,6 +1678,9 @@
     els.odlCheckBtn = $("ztransplit-pref-odl-comp-check");
     els.odlDownloadBtn = $("ztransplit-pref-odl-comp-download");
     els.odlStatus = $("ztransplit-pref-odl-comp-status");
+    els.scanPythonCheckBtn = $("ztransplit-pref-scan-python-check");
+    els.scanPythonInstallBtn = $("ztransplit-pref-scan-python-install");
+    els.scanPythonStatus = $("ztransplit-pref-scan-python-status");
 
     // Zotero 在派发 load 之前已经跑完 document.l10n.translateFragment()，
     // 所以这里读到的 label / textContent 已经是本地化后的文案。
@@ -1600,6 +1774,13 @@
     if (els.odlDownloadBtn) {
       els.odlDownloadBtn.addEventListener("command", onOdlDownload);
     }
+    if (els.scanPythonCheckBtn) {
+      // XUL button 的激活事件是 command。
+      els.scanPythonCheckBtn.addEventListener("command", onScanPythonCheck);
+    }
+    if (els.scanPythonInstallBtn) {
+      els.scanPythonInstallBtn.addEventListener("command", onScanPythonInstall);
+    }
     // 面板每次显示时重新探测：用户可能开着设置窗口去装了 zotero-pdf-translate。
     var root = $("zotero-prefpane-ztransplit");
     if (root) root.addEventListener("showing", syncPDFTranslateStatus);
@@ -1684,6 +1865,7 @@
 
       cacheJavaStrings();
       cacheOdlStrings();
+      cacheScanPythonStrings();
 
       var path = $("ztransplit-pref-pdf-fonts-path");
       if (path) path.textContent = assetsDir();

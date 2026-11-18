@@ -221,6 +221,20 @@ scan-error-sidecar-unconfigured = Scanned pages need recognition, but the recogn
 scan-error-disabled = Scanned-page recognition is turned off in the settings; these pages will keep their original text.
 scan-error-rotated-skipped = The scanned document contains rotated pages; they were skipped and keep their original text.
 
+## Python runtime distribution for the recognition sidecar (src/core/pdf/scan/pythonRuntime.ts)
+py-progress-window = Installing the recognition runtime
+py-progress-checksum = Fetching the artifact checksum list…
+py-progress-probing = Probing available mirrors…
+py-progress-downloading = Downloading the runtime ({ $percent }%)
+py-progress-verifying = Verifying the artifact fingerprint…
+py-progress-extracting = Extracting and probing…
+py-progress-done = The recognition runtime is installed
+py-status-not-installed = Not installed
+py-error-install-failed = Installing the recognition runtime failed. Check your connection and try again
+py-error-unsupported-platform = No recognition runtime artifact is available for this platform
+py-error-manifest-unavailable = The runtime manifest is missing or corrupt. Reinstall the plugin
+py-error-checksum-unavailable = This platform's artifact is absent from the checksum list; the install was stopped (better no runtime than bytes of unknown origin)
+
 ## Reader session (src/core/pdf/scan/readerAccess.ts)
 err-reader-pdf-timeout = The reader's pdf.js did not become ready within 15 s.
 

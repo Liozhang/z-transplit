@@ -503,6 +503,25 @@ preferences-ztransplit-pdf-scan-timeout =
 preferences-ztransplit-pdf-scan-timeout-desc =
     一批页面的最长识别时间，可填 30–3600，默认 600。超时的批按失败记账
     （该批页面保持原文），不影响已完成的批次。
+preferences-ztransplit-pdf-scan-python =
+    .value = 识别运行时
+preferences-ztransplit-pdf-scan-python-desc =
+    识别侧车所需的 Python 运行时。点「安装 / 修复…」由插件按当前平台自动
+    下载（约 20–70 MB，存到 Zotero 数据目录，指纹核对通过才启用）；已安装
+    时此处显示版本。侧车的模型依赖仍需本地安装，装好后把侧车命令写成
+    「<受管 python> <sidecar.py>」即可。
+preferences-ztransplit-pdf-scan-python-check =
+    .label = 检查状态
+preferences-ztransplit-pdf-scan-python-install =
+    .label = 安装 / 修复…
+preferences-ztransplit-pdf-scan-python-installing =
+    .label = 正在安装…
+preferences-ztransplit-pdf-scan-python-status-not-installed = 未安装
+preferences-ztransplit-pdf-scan-python-status-ready = 已安装：Python { $version }
+preferences-ztransplit-pdf-scan-python-status-checking = 正在检查识别运行时…
+preferences-ztransplit-pdf-scan-python-status-installing = 正在安装识别运行时，进度显示在 Zotero 主窗口。完成后此处会自动刷新状态。
+preferences-ztransplit-pdf-scan-python-status-nobundle = 插件主包未加载，无法检查或安装识别运行时。请重启 Zotero；仍未恢复时请重新安装本插件。
+preferences-ztransplit-pdf-scan-python-install-failed = 安装失败：{detail}
 
 ## ── 词卡 ───────────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =
