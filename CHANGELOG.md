@@ -45,6 +45,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unparseable fall back to region-only registration, as before. Table regions
   themselves still keep their source text, matching the product decision for
   digital documents.
+- Recognized pages are now aggregated into the document-level analysis: body
+  text joins `filteredText`, headings and tables join `filteredMarkdown`
+  (table rendering is shared with the digital path), and tables/formulas/
+  chart areas join the document summaries. Digital pages keep their existing
+  aggregates verbatim — the merge replaces only the pages recognition touched,
+  spliced by page-span bookkeeping, so mixed documents don't lose heading
+  levels or list structure. Before this, the document-level view of a scanned
+  page was blank: only the per-page assemblies carried the content. The
+  zero-paragraph failure path now also records an audit line when the sidecar
+  recognized pages and the document has text but the assemblies came out
+  empty — the one case where content could still be lost.
 - Formulas recognized by the sidecar carry native LaTeX and skip the
   vision-model crop entirely (the screenshot preservation path still applies),
   and the single-paragraph translation prompt now also protects `$…$` /

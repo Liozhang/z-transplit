@@ -40,6 +40,7 @@ import type {
 
 import { parseItemPdfToJson } from "./opendataloader-pdf-parser";
 import { PdfParseError, classifyOdlError } from "./PdfParseError";
+import { tableToMarkdown } from "./tableMarkdown";
 
 // ---------------------------------------------------------------------------
 // OpenDataLoader JSON shapes (minimal view of schema.json we care about)
@@ -380,8 +381,14 @@ export function adaptOpenDataLoaderJson(
   // 页界记账。pushFilteredText 与文末 join("\n\n") 的增量
   // 长度严格一致（首段无分隔符，其后每段 +2），页首段起点即页 span.start。
   const filteredPageSpans: Array<{ pageNumber: number; start: number; end: number }> = [];
+  // Markdown 侧同一套记账：表格只进 Markdown 不进纯文本，两边的收集点
+  // 不同，必须各自记各自的 span，文档级聚合才能按页替换（扫描页的聚合
+  // 接入时按 span 拼回，见 scan/scanDocumentAggregate.ts）。
+  const filteredMarkdownPageSpans: Array<{ pageNumber: number; start: number; end: number }> = [];
   let filteredAcc = 0;
+  let markdownAcc = 0;
   let openPageSpan: { pageNumber: number; start: number; end: number } | null = null;
+  let openMarkdownSpan: { pageNumber: number; start: number; end: number } | null = null;
   const pushFilteredText = (content: string, pageNo: number) => {
     // 收集点收敛回本函数——所有调用点都是应进 filteredText 的正文，
     // +2 记账与 join("\n\n") 严格一致。
@@ -396,6 +403,19 @@ export function adaptOpenDataLoaderJson(
     }
     filteredAcc += (filteredAcc === 0 ? 0 : 2) + content.length;
     openPageSpan.end = filteredAcc;
+  };
+  const pushFilteredMarkdown = (content: string, pageNo: number) => {
+    filteredMarkdownParts.push(content);
+    if (!openMarkdownSpan || openMarkdownSpan.pageNumber !== pageNo) {
+      if (openMarkdownSpan) filteredMarkdownPageSpans.push(openMarkdownSpan);
+      openMarkdownSpan = {
+        pageNumber: pageNo,
+        start: markdownAcc === 0 ? 0 : markdownAcc + 2,
+        end: 0,
+      };
+    }
+    markdownAcc += (markdownAcc === 0 ? 0 : 2) + content.length;
+    openMarkdownSpan.end = markdownAcc;
   };
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
@@ -429,9 +449,7 @@ export function adaptOpenDataLoaderJson(
         const block = textPropsToBlock(kid, "heading");
         textBlocks.push(block);
         pushFilteredText(kid.content, pageNum);
-        filteredMarkdownParts.push(
-          `${"#".repeat(kid.headingLevel)} ${kid.content}`,
-        );
+        pushFilteredMarkdown(`${"#".repeat(kid.headingLevel)} ${kid.content}`, pageNum);
         regions.push({
           role: "heading",
           bbox: block.bbox,
@@ -443,7 +461,7 @@ export function adaptOpenDataLoaderJson(
         const block = textPropsToBlock(kid, "body");
         textBlocks.push(block);
         pushFilteredText(kid.content, pageNum);
-        filteredMarkdownParts.push(kid.content);
+        pushFilteredMarkdown(kid.content, pageNum);
         regions.push({
           role: "body",
           bbox: block.bbox,
@@ -455,7 +473,7 @@ export function adaptOpenDataLoaderJson(
         const table = adaptTable(kid);
         tables.push(table);
         allTables.push(table);
-        filteredMarkdownParts.push(tableToMarkdown(table));
+        pushFilteredMarkdown(tableToMarkdown(table), pageNum);
       } else if (isChart(kid)) {
         // ODL explicitly emits chart type with optional chartType field.
         const bbox = toBBox(kid.boundingBox);
@@ -562,7 +580,7 @@ export function adaptOpenDataLoaderJson(
         const block = textPropsToBlock(kid, "body");
         textBlocks.push(block);
         pushFilteredText(kid.content, pageNum);
-        filteredMarkdownParts.push(`- ${kid.content}`);
+        pushFilteredMarkdown(`- ${kid.content}`, pageNum);
         regions.push({
           role: "body",
           bbox: block.bbox,
@@ -584,7 +602,7 @@ export function adaptOpenDataLoaderJson(
             const block = textPropsToBlock(item, "body");
             textBlocks.push(block);
             pushFilteredText(itemText, pageNum);
-            filteredMarkdownParts.push(`- ${itemText}`);
+            pushFilteredMarkdown(`- ${itemText}`, pageNum);
             regions.push({
               role: "body",
               bbox: block.bbox,
@@ -600,7 +618,7 @@ export function adaptOpenDataLoaderJson(
                 const nestedBlock = textPropsToBlock(nested as any, "body");
                 textBlocks.push(nestedBlock);
                 pushFilteredText((nested as any).content, pageNum);
-                filteredMarkdownParts.push((nested as any).content);
+                pushFilteredMarkdown((nested as any).content, pageNum);
               }
             }
           }
@@ -664,6 +682,7 @@ export function adaptOpenDataLoaderJson(
   }
 
   if (openPageSpan) filteredPageSpans.push(openPageSpan);
+  if (openMarkdownSpan) filteredMarkdownPageSpans.push(openMarkdownSpan);
 
   return {
     source: "tier2-opendataloader-pdf",
@@ -676,6 +695,7 @@ export function adaptOpenDataLoaderJson(
     filteredText: filteredTextParts.join("\n\n"),
     filteredPageSpans,
     filteredMarkdown: filteredMarkdownParts.join("\n\n"),
+    filteredMarkdownPageSpans,
     confidence: 0.9,
     processingMs: 0,
   };
@@ -723,23 +743,6 @@ function adaptTable(odl: ODLTable): PdfTable {
     caption: undefined,
     confidence: 1,
   };
-}
-
-function tableToMarkdown(table: PdfTable): string {
-  if (table.rows.length === 0) return "";
-  const cols = table.rows[0].cells.length;
-  const lines: string[] = [];
-  for (let i = 0; i < table.rows.length; i++) {
-    const row = table.rows[i];
-    const line = row.cells
-      .map((c) => `| ${c.text.trim()} `)
-      .join("") + "|";
-    lines.push(line);
-    if (i === 0) {
-      lines.push("|" + " --- |".repeat(cols));
-    }
-  }
-  return lines.join("\n");
 }
 
 function flattenTextBlock(

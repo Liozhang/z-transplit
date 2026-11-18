@@ -63,6 +63,7 @@ import type { PdfDocumentAnalysis } from "../PdfIR";
 import { emptyAnalysisFromProbe, probePdfPages } from "../scan/pdfPageProbe";
 import { runScanPipeline } from "../scan/ScanPipeline";
 import { mergeScannedAssemblies } from "../scan/mergeScannedAssemblies";
+import { mergeScannedDocument } from "../scan/scanDocumentAggregate";
 import { openScanRunState, runStateFingerprint, type ScanRunState } from "../scan/scanRunState";
 import { decideScanRouting } from "../scan/routePages";
 import { openTransientReader } from "../scan/readerAccess";
@@ -499,6 +500,11 @@ export async function translateAndSplitWithOpenDataLoader(
       assemblies = merged.assemblies;
       pageSizes = merged.pageSizes;
       formulaBlocks = merged.formulaBlocks;
+      // 文档级聚合：识别页并回 analysis（正文进 filteredText、标题与表格进
+      // filteredMarkdown、表格/公式/图区进 allXxx）。管线只消费装配，这份
+      // 合并保证"这篇文档有哪些文字"的答案不漏扫描页；数字页的聚合按页界
+      // 原样保留，不重推导。跳过的页保留底本页面（与装配合并同规则）。
+      analysis = mergeScannedDocument({ base: analysis, ocrAnalyses: scan.analyses });
       if (scan.summary.skipReasons.rotated > 0) {
         onProgress(getString("scan-error-rotated-skipped"));
       }
@@ -525,6 +531,14 @@ export async function translateAndSplitWithOpenDataLoader(
     // 文本"——后者在这个场景下等于让用户去检查一个已经尽力了的解析器。
     if (ocrPageNumbers.length > 0 && scanRecognized === 0) {
       throw new Error(getString("scan-error-sidecar-unconfigured"));
+    }
+    if (ocrPageNumbers.length > 0 && scanRecognized > 0) {
+      // 侧车认出了页、文档级聚合也有文本，装配却是零段：内容丢在装配环节。
+      // 这是"不遗漏"承诺的破口，报错之前必须留痕。
+      safeDebug(
+        `[Z-Transplit] opendataloaderSplitAdapter: ${scanRecognized} page(s) recognized, ` +
+          `${analysis.filteredText.length} char(s) of document text, but 0 paragraphs`,
+      );
     }
     throw new Error(getString("odl-error-parse-no-text"));
   }

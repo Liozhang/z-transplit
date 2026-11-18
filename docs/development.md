@@ -122,7 +122,12 @@ python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir 
 （`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖。表格结构还原在插件侧
 完成：侧车给出的表格 HTML 由 `scan/htmlTable.ts`（纯函数，不依赖 DOM 的引号
 感知扫描器）解析成行/单元格，含 colspan/rowspan 与网格列起点，单元格框按
-表格区域均分近似（HTML 不带坐标）；解析失败整表退回只登记区域。
+表格区域均分近似（HTML 不带坐标）；解析失败整表退回只登记区域。文档级聚合
+在 `scan/scanDocumentAggregate.ts`：识别页的正文进 `filteredText`、标题与
+表格进 `filteredMarkdown`（表格渲染与数字路径共享 `core/pdf/tableMarkdown.ts`），
+表格/公式/图区进 `allXxx`；数字页的聚合按页界原样保留、只替换被识别页的
+位置，因此混合文档不丢标题层级。页界记账由 `OpenDataLoaderJsonAdapter` 产出
+（纯文本与 Markdown 各一套，收集点不同必须分别记）。
 
 ### 识别断点与自动续跑（scanRunState）
 

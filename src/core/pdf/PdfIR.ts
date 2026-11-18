@@ -206,6 +206,12 @@ export interface PdfDocumentAnalysis {
    * 降级。可选字段：测试夹具与旧构造点无需补齐。
    */
   filteredPageSpans?: Array<{ pageNumber: number; start: number; end: number }>;
+  /**
+   * 同 filteredPageSpans，但是 filteredMarkdown 坐标系下的页界。Markdown 的
+   * 收集点与纯文本不同（表格只进 Markdown），两边必须各自记账，文档级聚合
+   * 才能按页替换。缺失（旧缓存/未升级）时消费方按整篇无页界降级。
+   */
+  filteredMarkdownPageSpans?: Array<{ pageNumber: number; start: number; end: number }>;
   /** Rich markdown rendering of the full IR */
   filteredMarkdown: string;
   /** Overall pipeline confidence (0–1) */

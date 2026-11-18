@@ -5,8 +5,8 @@
  * 套 IR，于是 odlAnalysisToAssembly、translateParagraphs、
  * LayoutPreservingRenderer 全链路零改动复用。切换识别引擎不改这里——
  * 契约是 sidecarProtocol 的 JSON，不是引擎本身。主管线按页取用本模块的
- * 产出（见 mergeScannedAssemblies），不做文档级聚合——那属第二期，随
- * 朗读/文本导出等消费方一起接入。
+ * 产出：装配路径见 mergeScannedAssemblies，文档级聚合（filteredText /
+ * filteredMarkdown / allXxx）见 scanDocumentAggregate。
  *
  * 三处关键换算：
  *   1. 坐标：位图像素框（原点左上、y 向下）→ PDF 用户空间（原点左下、
