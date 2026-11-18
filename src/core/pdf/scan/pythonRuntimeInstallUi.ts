@@ -72,6 +72,9 @@ async function runInstall(): Promise<boolean> {
         `（${String(e?.message ?? e)}）`,
       15000,
     );
-    return false;
+    // 进度窗已经呈现过失败，但编程面的调用方（设置面板的状态行）还要靠
+    // 这个 rejection 拿细节——与 installOdlJar 的契约一致：install() 只在
+    // 成功时 resolve。
+    throw e;
   }
 }

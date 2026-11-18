@@ -1564,11 +1564,13 @@
         );
         return null;
       })
-      .then(function (failed) {
+      .then(function (ok) {
         scanPythonInstallInFlight = false;
         setScanPythonButtonsDisabled(false);
         setScanPythonInstallLabel(false);
-        if (failed === null) return undefined;
+        // 主包的 install 失败时返回 false 而不抛错（进度窗已经呈现过详情），
+        // 此时不能再刷新状态行——那会把「安装失败：〈细节〉」覆盖成引导文案。
+        if (!ok) return undefined;
         return refreshScanPythonStatus();
       });
   }

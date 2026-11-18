@@ -683,7 +683,17 @@ async function extractArchive(
   archive: "zip" | "tar.gz",
 ): Promise<void> {
   if (archive === "tar.gz") {
-    return extractTarGzArchive(archivePath, destDir);
+    try {
+      return await extractTarGzArchive(archivePath, destDir);
+    } catch (e) {
+      // 解包实现的错误信息是英文的（与 Python 运行时分发共用同一份实现）；
+      // JRE 这条路径的用户可见文案必须本地化，stderr 明细一并带上。
+      throw new Error(
+        getString("java-error-extract-failed", {
+          detail: String((e as any)?.message ?? e),
+        }),
+      );
+    }
   }
   const isWin = isWindows();
 

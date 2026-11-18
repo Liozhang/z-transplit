@@ -1141,6 +1141,8 @@ describe("B17 设置 pane：识别运行时状态行与按钮", () => {
   it("安装失败：状态行上墙错误细节，不被未安装引导覆盖", async () => {
     const h = setupScanPythonHarness({
       getStatus: async () => ({ ready: false }),
+      // 主包的 install 失败时抛出（进度窗呈现详情，rejection 让面板拿细节）——
+      // 与 installPythonRuntimeWithProgress 的真实契约一致。
       install: async () => {
         throw new Error("Python runtime install failed (cernet-pbs: HTTP 404)");
       },

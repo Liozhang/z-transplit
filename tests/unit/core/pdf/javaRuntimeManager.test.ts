@@ -717,4 +717,12 @@ describe("JavaRuntimeManager：JRE 托管安装的中断安全", () => {
     // 走的是 /bin/sh -c 包装
     expect(host.dispatched.some((c) => c.includes("/usr/bin/tar"))).toBe(true);
   });
+
+  it("macOS 解压失败：错误文案本地化（tar.gz 分支与运行时分发共用实现，不能把英文漏给用户）", async () => {
+    host.mode = "mac";
+    buildGlobals();
+    host.tarExits = [1, 1];
+
+    await expect(downloadJRE(17)).rejects.toThrow(/java-error-extract-failed/);
+  });
 });
