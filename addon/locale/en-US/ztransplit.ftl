@@ -211,9 +211,11 @@ odl-progress-shot-failed = , { $count } failed
 
 ## Scanned-page recognition pipeline (src/core/pdf/scan/**)
 scan-progress-start = Recognizing scanned pages ({ $pages } pages)…
+scan-progress-resumed = Reusing { $pages } page(s) recognized last time; only the rest need recognition…
 scan-progress-batch = Recognized batch { $done }/{ $total }
 scan-progress-retry = Batch { $batch } has { $pages } page(s) with little content, retrying at higher resolution…
 scan-progress-summary = Scanned-page recognition done: { $recognized } page(s) with content, { $empty } empty, { $skipped } skipped
+scan-progress-summary-resumed = ({ $resumed } reused from the last run)
 scan-progress-summary-suspect = , { $suspect } still sparse (results kept)
 scan-error-sidecar-unconfigured = Scanned pages need recognition, but the recognition sidecar is not configured. Fill in the sidecar command under "Scanned-page recognition" in the Z-Transplit settings (requires a local PaddleOCR install); these pages will keep their original text.
 scan-error-disabled = Scanned-page recognition is turned off in the settings; these pages will keep their original text.

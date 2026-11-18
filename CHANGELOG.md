@@ -27,6 +27,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Suspect pages (detected-region coverage far below normal — the signature of
   a layout miss) are retried once at higher resolution and, if still sparse,
   keep their results with a "sparse" note rather than being discarded.
+- Recognition results are now checkpointed per page under the Zotero data
+  directory. Re-running recognition on the same source file resumes from the
+  pages already recognized — they are not re-sent to the sidecar — and the
+  completion line reports how many pages were carried over. The checkpoint is
+  keyed to a source fingerprint (modification time plus size): a replaced file
+  discards the old state, because stale coordinates on new pages are worse
+  than no recognition. Full-document runs clear the checkpoint on success;
+  page-range runs keep it, so the next range picks up where the last one left
+  off.
 - Formulas recognized by the sidecar carry native LaTeX and skip the
   vision-model crop entirely (the screenshot preservation path still applies),
   and the single-paragraph translation prompt now also protects `$…$` /

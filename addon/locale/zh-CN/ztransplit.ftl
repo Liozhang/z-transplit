@@ -205,9 +205,11 @@ odl-progress-shot-failed = ，{ $count } 段失败
 
 ## 扫描页识别管线（src/core/pdf/scan/**）
 scan-progress-start = 正在识别扫描页（共 { $pages } 页）…
+scan-progress-resumed = 沿用上次已识别的 { $pages } 页，只认剩余的页…
 scan-progress-batch = 已识别 { $done }/{ $total } 批
 scan-progress-retry = 第 { $batch } 批有 { $pages } 页内容偏少，提高分辨率重试…
 scan-progress-summary = 扫描识别完成：{ $recognized } 页有内容，{ $empty } 页无内容，{ $skipped } 页跳过
+scan-progress-summary-resumed = （其中 { $resumed } 页沿用上次结果）
 scan-progress-summary-suspect = ，{ $suspect } 页内容仍偏少（已保留识别结果）
 scan-error-sidecar-unconfigured = 检测到需要识别的扫描页，但尚未配置扫描识别侧车。请在 Z-Transplit 设置的「扫描页识别」中填写侧车命令（需本地安装 PaddleOCR 环境）；这些页将保持原文。
 scan-error-disabled = 扫描页识别已在设置中关闭，这些页将保持原文。

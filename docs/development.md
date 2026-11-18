@@ -119,8 +119,20 @@ python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir 
 本期以「用户配置侧车命令」为落地形态。管线语义：路由决策
 （`scan/routePages.ts`，纯函数）、逐页分类（`scan/pageClassification.ts`）、
 分批与断点账目（`scan/scanBatchPlan.ts`、`scan/ScanPipeline.ts`）、产出合并
-（`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖；设置面板的「侧车状态
-只读行」与断点清单的读取（自动续跑）同属第二期。
+（`scan/mergeScannedAssemblies.ts`）均有纯函数单测覆盖。
+
+### 识别断点与自动续跑（scanRunState）
+
+每批识别成功的页会逐页落盘到 Zotero 数据目录的
+`ztransplit/scan-state/<附件 id>/page-XXXX.json`，清单 `run-manifest.json`
+记录源文件指纹（修改时间 + 字节数）与已完成页码。重跑同一文件的识别时，
+指纹对得上的页直接沿用（不再送侧车、不参与重试），进度行报"沿用 N 页"；
+指纹对不上（源文件换版）先清空旧状态——旧坐标配新页面比不识别更糟。
+清单在而页文件丢失的页按未完成处理，不冒充已认。整篇运行成功产出后清理状态；
+页码范围运行保留，供下一个范围接着用。状态读写集中在
+`src/core/pdf/scan/scanRunState.ts`（纯函数序列化/校验 + 宿主 IOUtils），
+适配器在 `opendataloaderSplitAdapter.ts` 接线；「侧车状态只读行」面板入口
+属第二期。
 
 ## 质量门控
 

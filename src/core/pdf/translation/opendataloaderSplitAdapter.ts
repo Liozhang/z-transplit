@@ -63,6 +63,7 @@ import type { PdfDocumentAnalysis } from "../PdfIR";
 import { emptyAnalysisFromProbe, probePdfPages } from "../scan/pdfPageProbe";
 import { runScanPipeline } from "../scan/ScanPipeline";
 import { mergeScannedAssemblies } from "../scan/mergeScannedAssemblies";
+import { openScanRunState, runStateFingerprint, type ScanRunState } from "../scan/scanRunState";
 import { decideScanRouting } from "../scan/routePages";
 import { openTransientReader } from "../scan/readerAccess";
 import type { ProgressFraction } from "../../translation/types";
@@ -153,7 +154,24 @@ export interface OdlSplitResult {
 }
 
 /**
- * User cancellation. Callers must detect it by NAME, not message text: the
+ * 源文件指纹（识别断点状态的防过期依据）：修改时间加字节数。取不到
+ * （IOUtils 不可用等）时返回空串——空串永远不等于已存指纹，状态自然
+ * 作废重来，续跑降级为全新运行，不会配错页面。
+ */
+async function sourceFingerprint(filePath: string): Promise<string> {
+  const IOUtils = (globalThis as any).IOUtils;
+  if (!IOUtils?.stat) return "";
+  try {
+    const info = await IOUtils.stat(filePath);
+    return runStateFingerprint(info.lastModified ?? 0, info.size ?? 0);
+  } catch (e) {
+    safeDebug("[Z-Transplit] opendataloaderSplitAdapter: stat failed: " + e);
+    return "";
+  }
+}
+
+/**
+ * 用户取消。调用方必须检测它 by NAME, not message text: the
  * message is localized (FTL), so a hardcoded-string comparison breaks under
  * l10n. The zh/en message deliberately keeps 已取消/cancelled so
  * backendSelector.isInfraError still classifies it as user cancellation.
@@ -453,14 +471,23 @@ export async function translateAndSplitWithOpenDataLoader(
   // OCR 页一页都没认出来时的原因归类：最终 0 段的报错文案据此选择——
   // 扫描件走 OCR 却零产出，报"OpenDataLoader 不识别扫描件"会误导用户。
   let scanRecognized = -1; // -1 = 没有 OCR 页（纯数字文档）
+  // 跨会话续跑状态：整篇运行成功产出后清理；页码范围运行保留（后续范围
+  // 还能接着用，不必重新认已译的页）。
+  let runState: ScanRunState | null = null;
   if (ocrPageNumbers.length > 0) {
     const scanEnabled = getPrefDynamic("pdfParser.scan.enabled") !== false;
     if (scanEnabled) {
+      // 断点续跑：源文件指纹对得上才沿用上次的识别结果；对不上（换版）
+      // openScanRunState 会先清空旧状态，避免旧坐标配新页面。
+      runState = await openScanRunState(sourceItem.id, await sourceFingerprint(inputPath));
+      const resumed = await runState.load();
       const scan = await runScanPipeline({
         pdfPath: inputPath,
         pages: ocrPageNumbers,
         onProgress,
         signal: opts.signal,
+        resumed,
+        persistPage: (page) => runState!.save(page),
       });
       scanRecognized = scan.summary.recognized;
       const merged = mergeScannedAssemblies({
@@ -819,6 +846,15 @@ export async function translateAndSplitWithOpenDataLoader(
       translatedTitle,
       sourceItem,
     );
+  }
+  // 整篇运行成功产出：清掉识别断点状态（它的使命完成了；留着只会无限
+  // 增长）。页码范围运行不清——后续范围还能接着用已认的页。
+  if (runState && !opts.pages) {
+    try {
+      await runState.clear();
+    } catch (e) {
+      safeDebug("[Z-Transplit] opendataloaderSplitAdapter: run state clear failed: " + e);
+    }
   }
 
   // Attachment outcome: the item-tree "translate to attachment" flow stops

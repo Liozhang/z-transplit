@@ -34,7 +34,8 @@ export type ScanSkipReason =
 
 /** 一页的最终去向（账目的最小单位）。 */
 export type ScanPageOutcome =
-  | { kind: "recognized"; page: SidecarPageResult; suspect: boolean }
+  /** resumed = 沿用上次运行的识别结果（未重新调用侧车）。 */
+  | { kind: "recognized"; page: SidecarPageResult; suspect: boolean; resumed?: boolean }
   | { kind: "empty"; page: SidecarPageResult }
   | { kind: "skipped"; reason: ScanSkipReason; detail?: string };
 
@@ -102,8 +103,10 @@ export function reconcileScanOutcomes(
 export interface ScanSummary {
   /** 选中页总数。 */
   selected: number;
-  /** 有识别产出的页。 */
+  /** 有识别产出的页（含沿用的）。 */
   recognized: number;
+  /** 其中沿用上次运行结果、未重新调用侧车的页。 */
+  resumed: number;
   /** 明确无内容的页（空白页或只有不可识别元素）。 */
   empty: number;
   /** 显式跳过的页总数。 */
@@ -139,6 +142,7 @@ export function summarizeScan(
 ): ScanSummary {
   const skipReasons = emptySkipReasons();
   let recognized = 0;
+  let resumed = 0;
   let empty = 0;
   let skipped = 0;
   let suspect = 0;
@@ -149,6 +153,7 @@ export function summarizeScan(
     switch (outcome.kind) {
       case "recognized":
         recognized++;
+        if (outcome.resumed) resumed++;
         if (outcome.suspect) suspect++;
         paragraphs += outcome.page.lines.length;
         formulas += outcome.page.formulas.length;
@@ -166,6 +171,7 @@ export function summarizeScan(
   return {
     selected: selected.length,
     recognized,
+    resumed,
     empty,
     skipped,
     skipReasons,
@@ -177,7 +183,9 @@ export function summarizeScan(
   };
 }
 
-/** 断点清单的一项：一批的状态快照（写盘用，崩溃后续跑有据可查）。 */
+/** 断点清单的一项：一批的状态快照（写盘用，崩溃后续跑有据可查）。
+ *  只写不读——跨会话续跑读的是 scanRunState 的每页状态（见该模块），
+ *  批清单是同一次运行内的诊断记录。 */
 export interface ScanBatchManifest {
   version: 1;
   batch: number;
@@ -188,24 +196,4 @@ export interface ScanBatchManifest {
 
 export function serializeManifest(manifest: ScanBatchManifest): string {
   return JSON.stringify(manifest);
-}
-
-/**
- * 解析断点清单。畸形输入返回 null（对账走"该批无记录"的保守路径）。
- *
- * 注意：读路径属第二期——本期只写不读，"续跑"由用户手工「翻译指定页」
- * 加适配器的按页合并完成。此处保留解析器与序列化器成对存在，作为续跑
- * 功能的接缝，避免二期再从零拼格式。
- */
-export function parseManifest(raw: string): ScanBatchManifest | null {
-  try {
-    const parsed = JSON.parse(raw) as ScanBatchManifest;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.version !== 1) return null;
-    if (!Number.isInteger(parsed.batch) || parsed.batch < 0) return null;
-    if (!Array.isArray(parsed.pages)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
 }

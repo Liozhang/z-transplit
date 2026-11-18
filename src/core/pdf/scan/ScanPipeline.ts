@@ -65,6 +65,13 @@ export interface ScanPipelineOptions {
   writeManifestFile?: (dir: string, name: string, content: string) => Promise<void>;
   dpi?: number;
   batchSize?: number;
+  /**
+   * 上次运行已识别的页（跨会话续跑）。这些页不再调用侧车，按"沿用"记账；
+   * 不参与重试（要重新认它们，请清除识别状态后重跑）。
+   */
+  resumed?: Map<number, SidecarPageResult>;
+  /** 新识别出的页落盘回调（续跑状态的写入方，由调用方注入）。失败只记日志。 */
+  persistPage?: (page: SidecarPageResult) => Promise<void>;
 }
 
 export interface ScanPipelineResult {
@@ -76,6 +83,23 @@ export interface ScanPipelineResult {
   reconciliation: ScanReconciliation;
   /** 是否因取消而提前收手（调用方按统一取消闸口处理）。 */
   cancelled: boolean;
+}
+
+/** 从去向记录导出每页 IR：识别出与明确无内容的页转换，跳过的页为 null。 */
+export function analysesFromOutcomes(
+  outcomes: Map<number, ScanPageOutcome>,
+  pages: number[],
+): Map<number, PdfPageAnalysis | null> {
+  const analyses = new Map<number, PdfPageAnalysis | null>();
+  for (const p of pages) {
+    const outcome = outcomes.get(p);
+    if (outcome && (outcome.kind === "recognized" || outcome.kind === "empty")) {
+      analyses.set(p, sidecarPageToAnalysis(outcome.page));
+    } else {
+      analyses.set(p, null);
+    }
+  }
+  return analyses;
 }
 
 /** 偏好读取失败（无宿主）时退回缺省值——管线永不因配置读取而崩。 */
@@ -118,7 +142,6 @@ export async function runScanPipeline(
   const onProgress = opts.onProgress || (() => {});
   const batchSize = resolveBatchSize(opts.batchSize);
   const dpi = resolveDpi(opts.dpi);
-  const batches = planScanBatches(opts.pages, batchSize);
   const runDir = opts.runDir ?? createWorkDir("ztransplit-scan-run-");
   const writeManifest = opts.writeManifestFile ?? defaultWriteManifest;
   const runBatch =
@@ -133,6 +156,26 @@ export async function runScanPipeline(
   let sidecarUnavailable = false;
 
   onProgress(getString("scan-progress-start", { pages: String(opts.pages.length) }));
+
+  // 续跑：上次已识别的页直接记账，不进批次、不调侧车、不参与重试。
+  const resumedPages = opts.resumed ?? new Map<number, SidecarPageResult>();
+  const selected = new Set(opts.pages);
+  for (const [pageNumber, page] of resumedPages) {
+    if (!selected.has(pageNumber)) continue;
+    outcomes.set(pageNumber, {
+      kind: "recognized",
+      page,
+      suspect: evaluateCoverage(page).suspect,
+      resumed: true,
+    });
+  }
+  if (outcomes.size > 0) {
+    onProgress(
+      getString("scan-progress-resumed", { pages: String(outcomes.size) }),
+    );
+  }
+  const pendingPages = opts.pages.filter((p) => !outcomes.has(p));
+  const batches = planScanBatches(pendingPages, batchSize);
 
   const record = (pageNumber: number, page: SidecarPageResult): boolean => {
     if (page.rotation !== 0 || page.skipReason === "rotated") {
@@ -159,6 +202,19 @@ export async function runScanPipeline(
     const { suspect } = evaluateCoverage(page);
     outcomes.set(pageNumber, { kind: "recognized", page, suspect });
     return suspect;
+  };
+
+  // 新识别的页落盘（续跑状态）。持久化是优化不是正确性前提：写失败只
+  // 记日志，本次运行不受影响。
+  const persist = async (pageNumber: number): Promise<void> => {
+    if (!opts.persistPage) return;
+    const outcome = outcomes.get(pageNumber);
+    if (!outcome || outcome.kind !== "recognized" || outcome.resumed) return;
+    try {
+      await opts.persistPage(outcome.page);
+    } catch (e) {
+      safeDebug("[Z-Transplit] ScanPipeline: persist failed: " + e);
+    }
   };
 
   for (const batch of batches) {
@@ -205,6 +261,8 @@ export async function runScanPipeline(
       if (!page) continue; // 缺口留给对账
       if (record(p, page)) suspects.push(p);
     }
+    // 本批成果逐页落盘（取消/失败前的批次都已持久化，续跑才接得上）。
+    for (const p of batch.pages) await persist(p);
 
     // 取消信号在批内到达：本批已拿到的成果照常入账，但不再重试、不再开
     // 新批。与上面的 aborted 分支合并处理"取消"这一意图，区别只在成果
@@ -282,15 +340,7 @@ export async function runScanPipeline(
     );
   }
 
-  const analyses = new Map<number, PdfPageAnalysis | null>();
-  for (const p of opts.pages) {
-    const outcome = outcomes.get(p);
-    if (outcome && (outcome.kind === "recognized" || outcome.kind === "empty")) {
-      analyses.set(p, sidecarPageToAnalysis(outcome.page));
-    } else {
-      analyses.set(p, null);
-    }
-  }
+  const analyses = analysesFromOutcomes(outcomes, opts.pages);
 
   const summary = summarizeScan(opts.pages, outcomes, retriedBatches);
   onProgress(
@@ -299,6 +349,9 @@ export async function runScanPipeline(
       empty: String(summary.empty),
       skipped: String(summary.skipped),
     }) +
+      (summary.resumed > 0
+        ? getString("scan-progress-summary-resumed", { resumed: String(summary.resumed) })
+        : "") +
       (summary.suspect > 0
         ? getString("scan-progress-summary-suspect", { suspect: String(summary.suspect) })
         : ""),
