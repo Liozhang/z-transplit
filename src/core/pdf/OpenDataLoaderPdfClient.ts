@@ -907,6 +907,64 @@ async function resolveLibSources(): Promise<{
   return { baseDir, packedXpiSource };
 }
 
+/**
+ * Read a data file shipped at core/pdf/lib/<fileName> — from the install tree
+ * when the plugin is unpacked, from inside the packed .xpi when it is not.
+ *
+ * For manifest-style data (PROVENANCE*.json, PYTHON-RUNTIME.json) that must be
+ * identical for every install: reuses resolveLibSources so the file is found
+ * through the same root resolution getJarPath uses, instead of a second,
+ * drifting locator. Returns null when the file is absent or unreadable — the
+ * caller decides whether that is fatal.
+ */
+export async function readBundledLibFile(
+  fileName: string,
+): Promise<string | null> {
+  const { baseDir, packedXpiSource } = await resolveLibSources();
+  if (baseDir) {
+    try {
+      const candidate = joinPath(baseDir, "core", "pdf", "lib", fileName);
+      const IOUtils = (globalThis as any).IOUtils;
+      if (IOUtils?.exists && (await IOUtils.exists(candidate))) {
+        return await IOUtils.readUTF8(candidate);
+      }
+    } catch (e) {
+      safeDebug(
+        `[Z-Transplit ODL] bundled lib file ${fileName} unreadable: ${e}`,
+      );
+    }
+  }
+  if (packedXpiSource) {
+    try {
+      const Cc = (Components as any).classes;
+      const Ci = (Components as any).interfaces;
+      const xpiFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+      xpiFile.initWithPath(packedXpiSource);
+      const zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(
+        Ci.nsIZipReader,
+      );
+      zipReader.open(xpiFile);
+      try {
+        const entryPath = `core/pdf/lib/${fileName}`;
+        if (zipHasEntry(zipReader, entryPath)) {
+          return readZipEntryText(zipReader, entryPath);
+        }
+      } finally {
+        try {
+          zipReader.close();
+        } catch (e) {
+          safeDebug("[Z-Transplit] OpenDataLoaderPdfClient: " + e);
+        }
+      }
+    } catch (e) {
+      safeDebug(
+        `[Z-Transplit ODL] bundled lib file ${fileName} unreadable from XPI: ${e}`,
+      );
+    }
+  }
+  return null;
+}
+
 export async function getJarPath(
   jarFileName = "opendataloader-pdf-cli.jar",
   opts: { allowDownload?: boolean } = {},
