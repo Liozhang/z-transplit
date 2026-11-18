@@ -20,44 +20,15 @@
  * @module core/pdf/translation/ZoteroPdfRasterizer
  */
 
-// ─── Reader access (mirrors useReaderTextSelection.ts:81 + splitView.ts:2557) ──
+// ─── Reader access ───────────────────────────────────────────────────────────
+// 读者查找与内容域解包提取至 core/pdf/scan/readerAccess（扫描件管线是第三个
+// 消费者，避免三处漂移）；行为不变。
 
 import { safeDebug } from "../../../utils/logger";
-
-/**
- * Find the reader instance for a given attachment. Searches Zotero.Reader._readers
- * for one whose underlying item matches attachmentId.
- */
-function findReaderForAttachment(attachmentId: number): any {
-  const readers = (Zotero as any).Reader?.getReaders?.() ||
-    (Zotero as any).Reader?._readers ||
-    [];
-  for (const r of readers) {
-    try {
-      // Reader instances expose the attachment item id via _itemID / itemID / _attachmentId
-      const id = r._itemID ?? r.itemID ?? r._attachmentId ?? r.attachmentID;
-      if (id === attachmentId) return r;
-    } catch (e) {
-      safeDebug("[Z-Transplit] ZoteroPdfRasterizer: " + e);
-      /* skip */
-    }
-  }
-  return null;
-}
-
-/**
- * Get the reader iframe's contentWindow (content realm), unwrapped so we can use
- * its real properties (PDFViewerApplication etc.).
- */
-function getReaderIframeWin(reader: any): any {
-  const internal = reader?._internalReader ?? reader;
-  const primaryView = internal?._primaryView;
-  const iframe = primaryView?._iframe ?? primaryView?._iframeWindow;
-  const iframeWin = iframe?.contentWindow ?? iframe;
-  if (!iframeWin) return null;
-  // Unwrap XPCNativeWrapper to access content-realm globals directly.
-  return iframeWin.wrappedJSObject || iframeWin;
-}
+import {
+  findReaderForAttachment,
+  getReaderIframeWin,
+} from "../scan/readerAccess";
 
 // ─── The render function injected into the reader realm ──
 //
