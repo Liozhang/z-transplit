@@ -321,6 +321,8 @@ describe("resolveManagedPython / getPythonRuntimeStatus", () => {
 
 describe("installPythonRuntime", () => {
   it("完整链路：校验清单 → 探测镜像 → 下载 → 指纹 → 解包 → 探活 → 落地", async () => {
+    // 镜像明确更快：同延迟要靠计时决胜，那样的断言是 flaky 的
+    host.latencyFor = (url) => (url.includes("cernet") ? 1 : 30);
     const exe = await installPythonRuntime({});
     expect(exe).toBe(`${RUNTIME_DIR}\\python\\python.exe`);
     // 落地后的文件在（探活 mock 成功）
@@ -333,7 +335,7 @@ describe("installPythonRuntime", () => {
     );
     expect(probes.length).toBe(2);
     const downloads = host.httpCalls.filter((c) => c.kind === "download");
-    // 两个镜像延迟相同 → 按来源表顺序取第一个（cernet），只下一次
+    // 探测出 cernet 更快 → 只从它下载一次
     expect(downloads).toHaveLength(1);
     expect(downloads[0].url).toContain("mirrors.cernet.edu.cn");
     // 解包目标目录存在过，且暂存区已被清掉
