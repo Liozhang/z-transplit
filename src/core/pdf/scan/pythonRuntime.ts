@@ -1,24 +1,31 @@
 /**
- * pythonRuntime — 识别侧车用的 CPython 运行时：定位、安装、状态、清理。
+ * pythonRuntime — 识别侧车用的 CPython：系统 Python 定位、受管运行时分发。
  *
- * 为什么需要它：扫描识别跑在插件外的 Python 侧车里（addon/scan-sidecar/
+ * 为什么有这一层：扫描识别跑在插件外的 Python 侧车里（addon/scan-sidecar/
  * sidecar.py）。让用户自己装 Python 与依赖是最常见的中途弃坑点，因此运行时
- * 本身由插件分发——按平台取 python-build-standalone 的 install_only 构件，
+ * 本身可以由插件分发——按平台取 python-build-standalone 的 install_only 构件，
  * 装到数据目录，定位后交给侧车命令行使用。
  *
- * 信任链（与 jar 的 PROVENANCE、JRE 的 Adoptium API 同一套形状）：
+ * 但机器上已经有 Python 是常态，为此再下载 20–70 MB 是浪费：解释器按
+ * "受管运行时 → 系统 Python"的顺序解析（resolvePython）。受管优先是因为它
+ * 已装好、核对过指纹、版本已知；受管不存在时系统 Python 直接顶上，一个字节
+ * 都不下载。系统候选要过三关才被采用：版本不低于 3.9、`-m pip` 可用（依赖得
+ * 装进这个环境）、64 位（paddlepaddle 没有 32 位 Windows 轮子，装到一半才
+ * 失败最难查）。三关不过就继续找下一个候选，全不过则装受管运行时。
+ *
+ * 受管运行时的信任链（与 jar 的 PROVENANCE、JRE 的 Adoptium API 同一套形状）：
  *   1. 随包清单 src/core/pdf/lib/PYTHON-RUNTIME.json 声明"哪个平台取哪个
  *      构件、校验和清单在哪"；
  *   2. 安装时现取上游随发行版发布的 SHA256SUMS（信任锚），取出本平台构件
  *      的指纹；
- *   3. 字节必须过 SHA-256 才解包；镜像只负责送字节，对不上就换源；
+ *   3. 字节必须过 SHA-256 才解包；镜像只送字节，对不上就换源；
  *   4. 解到暂存区、跑一次 `python -V` 探活、通过才原子换名落地——解压中断
  *      或装出不跑的运行时都不会占据正式位置。
  *
  * 清单不存单构件指纹：一个发行版六个平台，逐个人工登记只会让人懒得更新，
  * 而"更新时漏登记一个平台"比"不登记"更危险（那会让该平台静默用旧版）。
  *
- * 边界：本模块只分发解释器。侧车脚本的落地、依赖安装与命令回填由
+ * 边界：本模块只管解释器。侧车脚本的落地、依赖安装与命令回填由
  * scan/sidecarEnv.ts 的一键安装接着办（它复用本模块的安装与定位）。
  *
  * Host-coupled (Zotero.HTTP / IOUtils / PathUtils / runProcess /
@@ -61,13 +68,25 @@ function pathJoin(...parts: string[]): string {
   return parts.join("/");
 }
 
+/** 解释器的来源：插件分发的受管运行时，或机器上已有的系统 Python。 */
+export type PythonSource = "managed" | "system";
+
+/** 一个可用的解释器：路径、版本与来源。 */
+export interface ResolvedPython {
+  path: string;
+  version: string;
+  source: PythonSource;
+}
+
 export interface PythonRuntimeStatus {
-  /** 受管运行时可用（存在且探活通过）。 */
+  /** 有一个能用的解释器（受管运行时或系统 Python）。 */
   ready: boolean;
   version?: string;
   path?: string;
-  /** 恒为 true——本模块只管受管运行时，不认系统 Python。 */
-  managed?: boolean;
+  /** 这个解释器从哪来。 */
+  source?: PythonSource;
+  /** 受管运行时已安装且探活通过（与 ready 的来源可能不同）。 */
+  managedInstalled?: boolean;
   error?: string;
 }
 
@@ -90,6 +109,103 @@ export type PythonInstallCallback = (p: PythonInstallProgress) => void;
 
 const CHECKSUM_TIMEOUT_MS = 30000;
 const PROBE_TIMEOUT_MS = 60000;
+
+/**
+ * 系统 Python 的最低版本。与侧车 README 声明的支持面一致：引擎与依赖在
+ * 3.9 以上才有对应轮子。
+ */
+const MIN_SYSTEM_PYTHON = "3.9";
+
+/**
+ * PATH 上的候选可执行名，顺序即优先级。
+ *
+ * 只收"可执行名本身就能启动"的候选：侧车命令是「"<python>" "<script>"」，
+ * 带附加参数的启动器（Windows 的 `py -3`）会让命令形状变复杂，而真装了
+ * Python 的机器上 `python.exe` 基本都在 PATH 上——找不到就装受管运行时，
+ * 那是自足且核对过指纹的。
+ */
+const SYSTEM_PYTHON_CANDIDATES = ["python3", "python"];
+
+/** 版本号比较：`a >= b`（三段数字，缺段按 0）。 */
+function versionAtLeast(a: string, b: string): boolean {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const da = pa[i] ?? 0;
+    const db = pb[i] ?? 0;
+    if (da !== db) return da > db;
+  }
+  return true;
+}
+
+/**
+ * 探测一个候选可执行名是不是"能用来装依赖的解释器"。三条都要过：
+ *
+ *   1. `python -V` 起得来，且版本不低于 3.9；
+ *   2. `python -m pip --version` 可用——依赖要装进这个环境，没有 pip 的
+ *      解释器对一键安装没用；
+ *   3. 64 位——paddlepaddle 没有 32 位 Windows 轮子，装到一半才失败最难查。
+ *
+ * 任何一条不过就换下一个候选；全部不过返回 null（调用方改装受管运行时）。
+ */
+async function probeSystemCandidate(exe: string): Promise<ResolvedPython | null> {
+  const pyOpts = { jvmEncodingArgs: false } as const;
+  const version = await runProcess(exe, ["-V"], PROBE_TIMEOUT_MS, undefined, pyOpts);
+  if (version.exitCode !== 0 || version.aborted) return null;
+  const parsed = parsePythonVersion(version.stdout || version.stderr);
+  if (!parsed || !versionAtLeast(parsed, MIN_SYSTEM_PYTHON)) return null;
+
+  const pip = await runProcess(
+    exe,
+    ["-m", "pip", "--version"],
+    PROBE_TIMEOUT_MS,
+    undefined,
+    pyOpts,
+  );
+  if (pip.exitCode !== 0 || pip.aborted) return null;
+
+  // 指针宽度：32 位解释器装不上主依赖，提前排除。
+  const bits = await runProcess(
+    exe,
+    ["-c", "import struct;print(struct.calcsize('P')*8)"],
+    PROBE_TIMEOUT_MS,
+    undefined,
+    pyOpts,
+  );
+  if (bits.exitCode !== 0 || bits.aborted) return null;
+  if (!/(^|\D)64(\D|$)/.test((bits.stdout || "").trim())) return null;
+
+  return { path: exe, version: parsed, source: "system" };
+}
+
+/**
+ * 机器上已有的 Python（PATH 上第一个合格的候选）。
+ *
+ * 不缓存：状态查询每次现探。会话级缓存会让"使用期间装上的 Python"看不见，
+ * 也会让"卸掉的 Python"继续显示就绪——面板每次显示都查一次，两三段短进程
+ * 启动的代价可以接受（受管运行时那一侧本来也要探一次）。
+ */
+export async function resolveSystemPython(): Promise<ResolvedPython | null> {
+  for (const candidate of SYSTEM_PYTHON_CANDIDATES) {
+    const found = await probeSystemCandidate(candidate);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * 识别该用哪个解释器：受管运行时优先（已装好且核对过指纹、版本已知），
+ * 否则用机器上已有的 Python，两者都没有才由调用方决定安装。
+ *
+ * 受管优先而不是系统优先：已经装过的运行时是自足且验证过的，重复下载一份
+ * 同样的东西没有意义；而"机器上有 Python 就不下载"由这里的第二条分支保证
+ * ——受管运行时不存在时，系统 Python 直接顶上，一个字节都不下载。
+ */
+export async function resolvePython(): Promise<ResolvedPython | null> {
+  const managed = await resolveManagedRuntime();
+  if (managed) return managed;
+  return resolveSystemPython();
+}
 
 /** 当前平台的清单键。探测失败或平台不在覆盖表内返回 null。 */
 export function pythonRuntimePlatformKey(): PythonPlatform | null {
@@ -144,6 +260,11 @@ export async function getManagedPythonPath(): Promise<string | null> {
  * 据此走安装或报错，不把跑不起来的运行时当可用。
  */
 export async function resolveManagedPython(): Promise<string | null> {
+  return (await resolveManagedRuntime())?.path ?? null;
+}
+
+/** resolveManagedPython 带版本：识别入口要一并知道用的是哪个版本。 */
+async function resolveManagedRuntime(): Promise<ResolvedPython | null> {
   const candidate = await getManagedPythonPath();
   if (!candidate) return null;
   try {
@@ -163,43 +284,40 @@ export async function resolveManagedPython(): Promise<string | null> {
     );
     return null;
   }
-  return candidate;
+  return {
+    path: candidate,
+    version: parsePythonVersion(probe.stdout || probe.stderr) ?? "",
+    source: "managed",
+  };
 }
 
-/** 状态查询（面板只读行）。不触发下载。 */
+/**
+ * 状态查询（面板只读行）。不触发下载。
+ *
+ * 回答的是"识别有没有可用的解释器"：受管运行时或机器上已有的 Python 都算。
+ * `managedInstalled` 单独交代受管运行时的情况——它的安装/修复按钮要知道自己
+ * 面对的是已装、已坏还是没装。
+ */
 export async function getPythonRuntimeStatus(): Promise<PythonRuntimeStatus> {
   const platform = pythonRuntimePlatformKey();
   if (!platform) {
     return { ready: false, error: getString("py-error-unsupported-platform") };
   }
-  const path = await getManagedPythonPath();
-  if (!path) {
-    return { ready: false, error: getString("py-status-not-installed") };
+  const managed = await resolveManagedRuntime();
+  const resolved = managed ?? (await resolveSystemPython());
+  if (!resolved) {
+    return {
+      ready: false,
+      managedInstalled: false,
+      error: getString("py-status-not-installed"),
+    };
   }
-  const IOUtils = (globalThis as any).IOUtils;
-  let present = false;
-  try {
-    present = IOUtils?.exists ? await IOUtils.exists(path) : false;
-  } catch (e) {
-    safeDebug("[Z-Transplit] pythonRuntime: " + e);
-  }
-  if (!present) {
-    return { ready: false, error: getString("py-status-not-installed") };
-  }
-  // 一次探活同时判可用与取版本——resolveManagedPython 已经探过一次，这里
-  // 不再跑第二遍（每次查询都是用户点一下，少一次进程启动就少一秒等待）。
-  const probe = await runProcess(path, ["-V"], PROBE_TIMEOUT_MS, undefined, {
-    jvmEncodingArgs: false,
-  });
-  if (probe.exitCode !== 0 || probe.aborted) {
-    return { ready: false, error: getString("py-status-not-installed") };
-  }
-  const version = parsePythonVersion(probe.stdout || probe.stderr);
   return {
     ready: true,
-    path,
-    managed: true,
-    ...(version ? { version } : {}),
+    path: resolved.path,
+    source: resolved.source,
+    managedInstalled: Boolean(managed),
+    ...(resolved.version ? { version: resolved.version } : {}),
   };
 }
 

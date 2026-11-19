@@ -39,6 +39,8 @@ import {
   parsePythonVersion,
   pythonRuntimePlatformKey,
   resolveManagedPython,
+  resolvePython,
+  resolveSystemPython,
 } from "../../../../../src/core/pdf/scan/pythonRuntime";
 import { acquisitionInFlightCount } from "../../../../../src/core/pdf/artifactAcquire";
 
@@ -121,6 +123,16 @@ let host: {
   /** 每个 URL 子串对应的是否可探测（Range 请求）。 */
   reachable: (url: string) => boolean;
   latencyFor: (url: string) => number;
+  /**
+   * 机器上"已有"的系统 Python 形态。默认 none——绝大多数用例只关心受管运行时，
+   * 系统解析按需开启。
+   *   none  PATH 上没有可用的解释器
+   *   good  版本够、有 pip、64 位（直接采用）
+   *   old   版本低于 3.9（淘汰）
+   *   nopip 没有 pip（淘汰：依赖装不进去）
+   *   x86   32 位（淘汰：主依赖没有 32 位轮子）
+   */
+  systemPython: "none" | "good" | "old" | "nopip" | "x86";
 };
 
 /** 好字节与它们的真实 SHA-256（模拟"上游 SHA256SUMS 里登记的指纹"）。 */
@@ -147,6 +159,7 @@ function installHost(): void {
     bytesFor: () => GOOD_BYTES,
     reachable: () => true,
     latencyFor: () => 5,
+    systemPython: "none",
   };
   probeExits = [0];
 
@@ -198,7 +211,53 @@ function installHost(): void {
     name === "PYTHON-RUNTIME.json" ? MANIFEST_TEXT : null,
   );
   runProcess.mockReset();
-  runProcess.mockImplementation(async () => {
+  runProcess.mockImplementation(async (exe: string, argv: string[]) => {
+    // 系统候选探测（PATH 上的 python3 / python）。"none" 表示 PATH 上没有：
+    // 启动即失败（真实 Subprocess 对不存在的可执行文件就是这样）。
+    if (exe === "python3" || exe === "python") {
+      if (host.systemPython === "none") {
+        return {
+          exitCode: -1,
+          stdout: "",
+          stderr: `File at path "${exe}" does not exist`,
+          timedOut: false,
+          aborted: false,
+        };
+      }
+      if (argv.includes("-V")) {
+        const version =
+          host.systemPython === "old" ? "Python 3.8.10" : "Python 3.12.16";
+        return {
+          exitCode: 0,
+          stdout: version,
+          stderr: "",
+          timedOut: false,
+          aborted: false,
+        };
+      }
+      if (argv.includes("pip")) {
+        const ok = host.systemPython !== "nopip";
+        return {
+          exitCode: ok ? 0 : 1,
+          stdout: ok ? "pip 24.0 from C:\\Python312\\Lib\\site-packages\\pip" : "",
+          stderr: ok ? "" : "No module named pip",
+          timedOut: false,
+          aborted: false,
+        };
+      }
+      // 指针宽度探测是 `-c "<一段代码>"`：代码作为一个整体参数，"struct"
+      // 不是独立元素，要按子串找。
+      if (argv.some((a) => a.includes("struct"))) {
+        const bits = host.systemPython === "x86" ? "32" : "64";
+        return {
+          exitCode: 0,
+          stdout: bits,
+          stderr: "",
+          timedOut: false,
+          aborted: false,
+        };
+      }
+    }
     const exit = probeExits.length > 1 ? probeExits.shift()! : probeExits[0]!;
     return {
       exitCode: exit,
@@ -301,7 +360,8 @@ describe("resolveManagedPython / getPythonRuntimeStatus", () => {
     const status = await getPythonRuntimeStatus();
     expect(status.ready).toBe(true);
     expect(status.version).toBe("3.12.16");
-    expect(status.managed).toBe(true);
+    expect(status.source).toBe("managed");
+    expect(status.managedInstalled).toBe(true);
     expect(status.path).toBe(exe);
   });
 
@@ -313,6 +373,95 @@ describe("resolveManagedPython / getPythonRuntimeStatus", () => {
     const status = await getPythonRuntimeStatus();
     expect(status.ready).toBe(false);
     expect(await getManagedPythonPath()).toBe(`${RUNTIME_DIR}\\python\\bin\\python3`);
+  });
+});
+
+// ─── 系统 Python：机器上已有就先用 ────────────────────────────────────────────
+
+describe("resolveSystemPython", () => {
+  it("PATH 上有合格的解释器：直接采用，带版本与来源", async () => {
+    host.systemPython = "good";
+    const found = await resolveSystemPython();
+    expect(found).toEqual({ path: "python3", version: "3.12.16", source: "system" });
+  });
+
+  it("三关各挡一类：版本过低、没有 pip、32 位——都不采用", async () => {
+    host.systemPython = "old";
+    expect(await resolveSystemPython()).toBeNull();
+    host.systemPython = "nopip";
+    expect(await resolveSystemPython()).toBeNull();
+    host.systemPython = "x86";
+    expect(await resolveSystemPython()).toBeNull();
+  });
+
+  it("PATH 上没有解释器：返回 null（调用方改装受管运行时）", async () => {
+    host.systemPython = "none";
+    expect(await resolveSystemPython()).toBeNull();
+  });
+
+  it("候选按顺序探测：python3 不合格才试 python", async () => {
+    host.systemPython = "good";
+    const calls: string[] = [];
+    const realImpl = runProcess.getMockImplementation()!;
+    runProcess.mockImplementation(async (exe: string, argv: string[]) => {
+      calls.push(`${exe} ${argv.join(" ")}`);
+      return realImpl(exe, argv);
+    });
+    await resolveSystemPython();
+    // 第一个候选就合格：只探测 python3，不碰 python
+    expect(calls.every((c) => c.startsWith("python3 "))).toBe(true);
+    expect(calls.some((c) => c.startsWith("python "))).toBe(false);
+  });
+
+  it("每次现探：不缓存（装上的 Python 立刻可见，卸掉的立刻消失）", async () => {
+    host.systemPython = "good";
+    expect((await resolveSystemPython())?.path).toBe("python3");
+    const before = runProcess.mock.calls.length;
+    // 用户卸掉了那个解释器：下一次查询就要反映出来，不能吃缓存
+    host.systemPython = "none";
+    expect(await resolveSystemPython()).toBeNull();
+    expect(runProcess.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("清理受管运行时时不影响系统解析（两者互不相干）", async () => {
+    host.systemPython = "good";
+    expect((await resolveSystemPython())?.source).toBe("system");
+    await discardManagedPython();
+    expect((await resolveSystemPython())?.source).toBe("system");
+  });
+});
+
+describe("resolvePython", () => {
+  it("受管运行时优先：已装好就用它，不去找系统 Python", async () => {
+    host.systemPython = "good";
+    const exe = `${RUNTIME_DIR}\\python\\python.exe`;
+    await fs.makeDirectory(`${RUNTIME_DIR}\\python`);
+    await fs.write(exe, new TextEncoder().encode("MZ"));
+    const resolved = await resolvePython();
+    expect(resolved).toEqual({ path: exe, version: "3.12.16", source: "managed" });
+  });
+
+  it("受管运行时不在：系统 Python 顶上，一个字节都不下载", async () => {
+    host.systemPython = "good";
+    const resolved = await resolvePython();
+    expect(resolved?.source).toBe("system");
+    expect(resolved?.path).toBe("python3");
+    expect(host.httpCalls.filter((c) => c.kind === "download")).toHaveLength(0);
+  });
+
+  it("两者都没有：返回 null", async () => {
+    host.systemPython = "none";
+    expect(await resolvePython()).toBeNull();
+  });
+
+  it("受管运行时装了但探活不过：退回系统 Python", async () => {
+    host.systemPython = "good";
+    const exe = `${RUNTIME_DIR}\\python\\python.exe`;
+    await fs.makeDirectory(`${RUNTIME_DIR}\\python`);
+    await fs.write(exe, new TextEncoder().encode("MZ"));
+    probeExits = [1, 1]; // 受管探活一律失败
+    const resolved = await resolvePython();
+    expect(resolved?.source).toBe("system");
   });
 });
 

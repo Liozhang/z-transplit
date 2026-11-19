@@ -146,6 +146,11 @@ let host: {
   prefWriteFails: boolean;
   /** 随包 sidecar.py / requirements.txt 是否读得到。 */
   bundlePresent: boolean;
+  /**
+   * 机器上"已有"的系统 Python。默认 none——既有用例都走受管运行时；
+   * good 表示 PATH 上有一个合格的解释器（直接使用，不下载运行时）。
+   */
+  systemPython: "none" | "good";
 };
 
 function installHost(): void {
@@ -159,6 +164,7 @@ function installHost(): void {
     timedOut: false,
     prefWriteFails: false,
     bundlePresent: true,
+    systemPython: "none",
   };
 
   (globalThis as any).Zotero = {
@@ -251,7 +257,41 @@ function installHost(): void {
     return null;
   });
   runProcess.mockReset();
-  runProcess.mockImplementation(async (_exe: string, argv: string[]) => {
+  runProcess.mockImplementation(async (exe: string, argv: string[]) => {
+    // 系统候选探测（PATH 上的 python3 / python）。默认 none：绝大多数用例
+    // 走受管运行时，系统解析按需开启。
+    if (exe === "python3" || exe === "python") {
+      if (host.systemPython === "none") {
+        return {
+          exitCode: -1,
+          stdout: "",
+          stderr: `File at path "${exe}" does not exist`,
+          timedOut: false,
+          aborted: false,
+        };
+      }
+      if (argv.includes("-V")) {
+        return {
+          exitCode: 0,
+          stdout: "Python 3.12.16",
+          stderr: "",
+          timedOut: false,
+          aborted: false,
+        };
+      }
+      if (argv.includes("pip")) {
+        return {
+          exitCode: 0,
+          stdout: "pip 24.0 from C:\\Python312\\Lib\\site-packages\\pip",
+          stderr: "",
+          timedOut: false,
+          aborted: false,
+        };
+      }
+      if (argv.some((a) => a.includes("struct"))) {
+        return { exitCode: 0, stdout: "64", stderr: "", timedOut: false, aborted: false };
+      }
+    }
     if (argv.includes("-V")) {
       return {
         exitCode: 0,
@@ -411,6 +451,58 @@ describe("installSidecarEnv", () => {
     const out = await installSidecarEnv({});
     expect(out.sidecarPath).toBe(SIDECAR_PY);
     expect(new TextDecoder().decode(await fs.read(SIDECAR_PY))).toBe("# sidecar.py\n");
+  });
+
+  it("机器上已有合格的 Python：直接用它，一个字节的运行时都不下载", async () => {
+    host.systemPython = "good";
+    const phases: string[] = [];
+    const out = await installSidecarEnv({
+      onProgress: (p) => {
+        if (phases[phases.length - 1] !== p.phase) phases.push(p.phase);
+      },
+    });
+
+    // 用的是 PATH 上的 python3，不是受管运行时
+    expect(out.pythonPath).toBe("python3");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(`"python3" "${SIDECAR_PY}"`);
+    // 受管运行时没有下载、没有解包、没有落地
+    expect(host.httpCalls.filter((c) => c.kind === "download")).toHaveLength(0);
+    expect(host.httpCalls.filter((c) => c.kind === "sums")).toHaveLength(0);
+    expect(await fs.exists(PYTHON_EXE)).toBe(false);
+    // 标记记下来源：状态查询据此知道依赖装在哪个环境里
+    const marker = JSON.parse(
+      new TextDecoder().decode(await fs.read(`${SIDECAR_DIR}\\env.json`)),
+    );
+    expect(marker.pythonSource).toBe("system");
+    expect(marker.pythonPath).toBe("python3");
+    // 没有"安装运行时"这一阶段（没有东西要装）
+    expect(phases).toEqual(["script", "dependencies", "selftest", "done"]);
+
+    // 状态查询同样认它
+    const status = await getSidecarEnvStatus();
+    expect(status.ready).toBe(true);
+    expect(status.pythonSource).toBe("system");
+    expect(status.pythonPath).toBe("python3");
+  });
+
+  it("系统 Python 存在但没有安装标记：解释器算就绪，依赖算缺失", async () => {
+    host.systemPython = "good";
+    const status = await getSidecarEnvStatus();
+    expect(status.interpreter).toBe(true);
+    expect(status.pythonSource).toBe("system");
+    expect(status.dependencies).toBe(false);
+    expect(status.error).toContain("sidecar-status-deps-missing");
+  });
+
+  it("系统 Python 被换掉（升级/卸载）：状态回到依赖缺失，不冒充就绪", async () => {
+    host.systemPython = "good";
+    await installSidecarEnv({});
+    // 用户卸载了那个解释器：标记还在，但解析不到它了
+    host.systemPython = "none";
+    const status = await getSidecarEnvStatus();
+    expect(status.interpreter).toBe(false);
+    expect(status.ready).toBe(false);
+    expect(status.error).toContain("py-status-not-installed");
   });
 
   it("只差命令回填：直接补写命令，不重跑 pip 与自检", async () => {

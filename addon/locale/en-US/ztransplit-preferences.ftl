@@ -596,27 +596,30 @@ preferences-ztransplit-pdf-scan-timeout-desc =
 preferences-ztransplit-pdf-scan-python =
     .value = Recognition runtime
 preferences-ztransplit-pdf-scan-python-desc =
-    The Python runtime the recognition sidecar needs. "Install / Repair…"
-    downloads it for the current platform automatically (roughly 20–70 MB,
-    stored under the Zotero data directory, and only enabled once its
-    fingerprint checks out); the version shows here once installed. The
-    dependencies and models are installed by "Recognition environment" below —
-    this row stays available as a separate repair entry.
+    The Python the recognition sidecar needs. Recognition uses a Python already
+    on this machine directly when it qualifies (3.9 or newer, with pip, 64-bit)
+    — no extra download; "Install / Repair…" explicitly installs the runtime the
+    plugin distributes itself (roughly 20–70 MB, stored under the Zotero data
+    directory, and only enabled once its fingerprint checks out). The
+    dependencies and models are installed by "Recognition environment" below.
 preferences-ztransplit-pdf-scan-env =
     .value = Recognition environment
 preferences-ztransplit-pdf-scan-env-desc =
-    One click installs everything that scanned-page recognition needs: the
-    Python runtime, the recognition dependencies and the models, then fills in
-    the "recognition sidecar command" above for you. The first install downloads
-    a few hundred MB (the recognition engine is large) and may take several to a
-    dozen minutes; progress shows in the Zotero main window. If it fails, this
-    line says which step failed; "Repair" deletes the installed environment
-    first and then reinstalls it.
+    One click installs everything that scanned-page recognition needs: an
+    interpreter, the recognition dependencies and the models, then fills in the
+    "recognition sidecar command" above for you. A Python already on this machine
+    is used directly when it qualifies (the dependencies are installed into that
+    environment); only when there is none does the plugin download its own
+    runtime. The first install downloads a few hundred MB (the recognition engine
+    is large) and may take several to a dozen minutes; progress shows in the
+    Zotero main window. If it fails, this line says which step failed; "Repair"
+    deletes the installed environment first and then reinstalls it.
 preferences-ztransplit-pdf-scan-env-install =
     .label = Install the recognition environment
 preferences-ztransplit-pdf-scan-env-installing =
     .label = Installing…
 preferences-ztransplit-pdf-scan-env-ready = Ready — no command to fill in
+preferences-ztransplit-pdf-scan-env-ready-system = Ready (using the Python already on this machine) — no command to fill in
 preferences-ztransplit-pdf-scan-env-repair =
     .label = Repair (reinstall)…
 preferences-ztransplit-pdf-scan-python-check =
@@ -626,7 +629,8 @@ preferences-ztransplit-pdf-scan-python-install =
 preferences-ztransplit-pdf-scan-python-installing =
     .label = Installing…
 preferences-ztransplit-pdf-scan-python-status-not-installed = Not installed
-preferences-ztransplit-pdf-scan-python-status-ready = Installed: Python { $version }
+preferences-ztransplit-pdf-scan-python-status-ready = Installed: Python { $version } (distributed by the plugin)
+preferences-ztransplit-pdf-scan-python-status-ready-system = Installed: Python { $version } (already on this machine; the plugin-distributed runtime is not in use)
 preferences-ztransplit-pdf-scan-python-status-checking = Checking the recognition runtime…
 preferences-ztransplit-pdf-scan-python-status-installing = Installing the recognition runtime; progress shows in the Zotero main window. This line refreshes when it finishes.
 preferences-ztransplit-pdf-scan-python-status-nobundle = The plugin's main bundle is not loaded, so the recognition runtime cannot be checked or installed. Restart Zotero; if it stays broken, reinstall the plugin.

@@ -1167,6 +1167,25 @@ describe("B17 设置 pane：识别环境一键安装", () => {
     h.dom.window.close();
   });
 
+  it("识别环境已就绪且用系统 Python：状态行同样说明来源", async () => {
+    const h = setupEnvHarness({
+      getStatus: async () => ({
+        ready: true,
+        interpreter: true,
+        dependencies: true,
+        commandConfigured: true,
+        pythonSource: "system",
+      }),
+      install: async () => true,
+    });
+    const root = h.doc.getElementById("zotero-prefpane-ztransplit")!;
+    root.dispatchEvent(new h.window.Event("showing"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    expect(String(status.textContent)).toContain("机器上已有的 Python");
+    h.dom.window.close();
+  });
+
   it("面板显示时刷新状态行（这一行没有「检查状态」按钮，不刷就是空白）", async () => {
     let statusChecks = 0;
     const h = setupEnvHarness({
@@ -1228,12 +1247,29 @@ describe("B17 设置 pane：识别运行时状态行与按钮", () => {
         ready: true,
         version: "3.12.16",
         path: "/tmp/zotero-data/ztransplit/python-runtime/python/python.exe",
-        managed: true,
+        source: "managed",
       }),
     });
     await h.click("ztransplit-pref-scan-python-check");
     const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
     expect(String(status.textContent)).toContain("3.12.16");
+    h.dom.window.close();
+  });
+
+  it("机器上已有 Python：状态行说明来源，不让人以为插件又装了一份", async () => {
+    const h = setupScanPythonHarness({
+      getStatus: async () => ({
+        ready: true,
+        version: "3.12.3",
+        path: "python3",
+        source: "system",
+      }),
+    });
+    await h.click("ztransplit-pref-scan-python-check");
+    const status = h.doc.getElementById("ztransplit-pref-scan-python-status")!;
+    const text = String(status.textContent);
+    expect(text).toContain("3.12.3");
+    expect(text).toContain("机器上已有");
     h.dom.window.close();
   });
 

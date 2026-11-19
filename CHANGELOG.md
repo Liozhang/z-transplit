@@ -101,6 +101,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Cancellation now takes effect between pages on the per-page translation path
   (previously a cancel waited for the whole document to finish translating).
 
+### Changed
+
+- Scanned-page recognition now uses a Python that is already on the machine when
+  there is a usable one, instead of always downloading the plugin's own runtime.
+  A system interpreter is adopted when it launches, reports 3.9 or newer, has
+  `pip` (the dependencies have to be installed into that environment) and is
+  64-bit (paddlepaddle ships no 32-bit Windows wheels — failing halfway through
+  the install is the hardest kind to diagnose). Anything that fails a check
+  falls through to the next candidate and finally to the managed runtime, so
+  machines without a usable Python behave exactly as before. The settings pane
+  says which interpreter is in use, and the one-click install states that the
+  dependencies are installed into the system environment rather than quietly
+  modifying it. Resolution is deliberately not cached: a cached answer would
+  hide a Python installed while Zotero is open, and would keep reporting a
+  Python that was uninstalled.
+
 ### Fixed
 
 - Two defects that made the recognition paths unrunnable on Windows, both found

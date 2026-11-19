@@ -9,7 +9,8 @@
  *   1. 把随包的 sidecar.py 与 requirements.txt 落到数据目录——打包安装时脚本
  *      在 XPI 里，不能直接当命令执行；这一步每次都做（几 KB、不联网），插件
  *      升级带来新版侧车时不能沿用盘上的旧脚本；
- *   2. 受管 Python 运行时（pythonRuntime，按平台取件、指纹核对、探活）；
+ *   2. 解释器：机器上已有合格的 Python（版本 ≥ 3.9、带 pip、64 位）或已装好的
+ *      受管运行时就直接用，一个字节都不下载；两者都没有才装受管运行时；
  *   3. pip install 依赖：并发探测 PyPI 索引取最快的一个，用 pip 的
  *      --index-url 传入（进程运行器不传环境变量，也不需要）；
  *   4. 跑一次 `sidecar.py --selftest`：构建识别引擎，这一步会把模型权重下载
@@ -17,6 +18,9 @@
  *   5. 把「"<python>" "<sidecar.py>"」写进 pdfParser.scan.sidecarPath，用户不
  *      需要手动填任何命令。
  * 依赖与脚本都已就绪、只差命令时，第 2–4 步整段跳过，直接补写命令。
+ *
+ * 用系统 Python 意味着依赖装进用户自己的那个环境（pip 的常规行为），这一点
+ * 在 UI 文案里说明，不悄悄改用户的全局环境。
  *
  * 失败语义：任一步失败都抛带本地化文案的错误，且不写安装标记、不回填命令——
  * 半成品环境不会被当成装好了。取消与超时单独归类（取消按名字识别，文案与
@@ -45,8 +49,9 @@ import { readBundledFile, runProcess } from "../OpenDataLoaderPdfClient";
 import { pypiIndexUrls } from "../OdlJarDownloader";
 import {
   installPythonRuntime,
-  resolveManagedPython,
+  resolvePython,
   type PythonInstallProgress,
+  type PythonSource,
 } from "./pythonRuntime";
 
 /** 侧车命令偏好键（addon/prefs.js 声明）。 */
@@ -94,6 +99,8 @@ export interface SidecarEnvStatus {
   /** 侧车脚本在数据目录里的路径（已落地时给出）。 */
   sidecarPath?: string;
   pythonPath?: string;
+  /** 解释器从哪来：插件分发的受管运行时，或机器上已有的 Python。 */
+  pythonSource?: PythonSource;
   /** 不就绪时的原因（已本地化）。 */
   error?: string;
 }
@@ -101,6 +108,8 @@ export interface SidecarEnvStatus {
 interface SidecarEnvMarker {
   pythonPath: string;
   sidecarPath: string;
+  /** 这个解释器是受管运行时还是机器上已有的 Python。 */
+  pythonSource: PythonSource;
   /** 识别引擎版本（paddleocr），不是解释器版本——名字按内容起。 */
   engineVersion?: string;
   pipIndex: string;
@@ -233,10 +242,12 @@ export async function getSidecarEnvStatus(): Promise<SidecarEnvStatus> {
       return false;
     }
   })();
-  // 一次探活，两处使用：解释器是否可用、以及标记里的解释器路径是否仍然对。
-  const resolved = await resolveManagedPython();
+  // 一次解析，两处使用：解释器是否可用、以及标记里的解释器路径是否仍然对。
+  // 受管运行时或机器上已有的 Python 都算就绪。
+  const resolved = await resolvePython();
   const interpreter = Boolean(resolved);
-  const pythonPath = marker?.pythonPath ?? resolved;
+  const pythonPath = marker?.pythonPath ?? resolved?.path;
+  const pythonSource = resolved?.source ?? marker?.pythonSource;
   const dependencies = Boolean(marker) && scriptLanded && marker?.pythonPath === pythonPath;
   const configured = await (async () => {
     try {
@@ -269,6 +280,7 @@ export async function getSidecarEnvStatus(): Promise<SidecarEnvStatus> {
       dependencies: false,
       commandConfigured: false,
       ...(pythonPath ? { pythonPath } : {}),
+      ...(pythonSource ? { pythonSource } : {}),
       error: getString("sidecar-status-deps-missing"),
     };
   }
@@ -280,6 +292,7 @@ export async function getSidecarEnvStatus(): Promise<SidecarEnvStatus> {
       commandConfigured: false,
       sidecarPath,
       ...(pythonPath ? { pythonPath } : {}),
+      ...(pythonSource ? { pythonSource } : {}),
       error: getString("sidecar-status-command-missing"),
     };
   }
@@ -291,6 +304,7 @@ export async function getSidecarEnvStatus(): Promise<SidecarEnvStatus> {
     commandConfigured: true,
     sidecarPath,
     ...(pythonPath ? { pythonPath } : {}),
+    ...(pythonSource ? { pythonSource } : {}),
   };
 }
 
@@ -330,32 +344,42 @@ export async function installSidecarEnv(opts: {
     return { pythonPath: status.pythonPath, sidecarPath };
   }
 
-  // 3) 解释器（自身带探测、指纹核对、镜像竞速与进度）。
-  emit(5, "runtime");
-  const pythonPath = await installPythonRuntime({
-    onProgress: (p: PythonInstallProgress) => {
-      // 解释器阶段占前 40%：依赖与自检才是耗时大头，但解释器是它们的前提。
-      // 百分比只增不减——下载到一半又跳回 0 会让用户以为重新开始。
-      switch (p.phase) {
-        case "checksum":
-          emit(2, "runtime");
-          break;
-        case "probing":
-          emit(5, "runtime");
-          break;
-        case "downloading":
-          emit(5 + Math.round(p.percent * 0.35), "runtime");
-          break;
-        case "verifying":
-        case "extracting":
-          emit(40, "runtime");
-          break;
-        default:
-          emit(40, "runtime");
-      }
-    },
-    signal: opts.signal,
-  });
+  // 3) 解释器。机器上已有合格的 Python（或已装好的受管运行时）就直接用——
+  //    为此再下载 20–70 MB 是浪费；只有两者都没有时才装受管运行时。
+  let pythonPath: string;
+  let pythonSource: PythonSource;
+  const existing = await resolvePython();
+  if (existing) {
+    pythonPath = existing.path;
+    pythonSource = existing.source;
+  } else {
+    emit(5, "runtime");
+    pythonPath = await installPythonRuntime({
+      onProgress: (p: PythonInstallProgress) => {
+        // 解释器阶段占前 40%：依赖与自检才是耗时大头，但解释器是它们的前提。
+        // 百分比只增不减——下载到一半又跳回 0 会让用户以为重新开始。
+        switch (p.phase) {
+          case "checksum":
+            emit(2, "runtime");
+            break;
+          case "probing":
+            emit(5, "runtime");
+            break;
+          case "downloading":
+            emit(5 + Math.round(p.percent * 0.35), "runtime");
+            break;
+          case "verifying":
+          case "extracting":
+            emit(40, "runtime");
+            break;
+          default:
+            emit(40, "runtime");
+        }
+      },
+      signal: opts.signal,
+    });
+    pythonSource = "managed";
+  }
 
   // 4) 依赖。
   emit(45, "dependencies");
@@ -418,6 +442,7 @@ export async function installSidecarEnv(opts: {
   await writeMarker({
     pythonPath,
     sidecarPath,
+    pythonSource,
     engineVersion: parseEngineVersionOf(probe.stdout),
     pipIndex: index,
     installedAt: Date.now(),

@@ -1502,8 +1502,13 @@
       })
       .then(function (status) {
         if (status && status.ready) {
+          // 区分来源：系统 Python 不占数据目录，也不该让人以为插件又装了一份
+          var readyKey =
+            status.source === "system"
+              ? "ztransplit-pref-string-scan-python-status-ready-system"
+              : "ztransplit-pref-string-scan-python-status-ready";
           setScanPythonStatusText(
-            fillJavaTemplate(scanPythonStrings.ready, {
+            fillJavaTemplate(javaString(readyKey), {
               version: (status && status.version) || "?",
             }),
           );
@@ -1642,7 +1647,12 @@
       })
       .then(function (status) {
         if (status && status.ready) {
-          setScanEnvStatusText(scanEnvStrings.ready);
+          // 用机器上已有的 Python 时说明白：依赖装在用户自己的环境里
+          setScanEnvStatusText(
+            status.pythonSource === "system"
+              ? scanEnvStrings.readySystem
+              : scanEnvStrings.ready,
+          );
         } else if (status && status.error) {
           setScanEnvStatusText(String(status.error));
         } else {
@@ -1711,6 +1721,7 @@
   function cacheScanEnvStrings() {
     scanEnvStrings.btnInstalling = javaString("ztransplit-pref-string-scan-env-installing");
     scanEnvStrings.ready = javaString("ztransplit-pref-string-scan-env-ready");
+    scanEnvStrings.readySystem = javaString("ztransplit-pref-string-scan-env-ready-system");
     scanEnvStrings.notReady = javaString(
       "ztransplit-pref-string-scan-python-status-not-installed",
     );

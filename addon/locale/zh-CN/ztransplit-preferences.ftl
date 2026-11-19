@@ -506,22 +506,24 @@ preferences-ztransplit-pdf-scan-timeout-desc =
 preferences-ztransplit-pdf-scan-python =
     .value = 识别运行时
 preferences-ztransplit-pdf-scan-python-desc =
-    识别侧车所需的 Python 运行时。点「安装 / 修复…」由插件按当前平台自动
-    下载（约 20–70 MB，存到 Zotero 数据目录，指纹核对通过才启用）；已安装
-    时此处显示版本。识别依赖与模型由下面的「识别环境」一键装好，运行时这
-    一行只作为单独的修复入口。
+    识别侧车所需的 Python。机器上已有合格的 Python（3.9 以上、带 pip、64 位）时
+    识别直接用它，不额外下载；点「安装 / 修复…」则显式安装插件自己分发的运行时
+    （约 20–70 MB，存到 Zotero 数据目录，指纹核对通过才启用）。识别依赖与模型
+    由下面的「识别环境」一键装好。
 preferences-ztransplit-pdf-scan-env =
     .value = 识别环境
 preferences-ztransplit-pdf-scan-env-desc =
-    一键装好扫描识别所需的全部组件：Python 运行时、识别依赖与模型，装好后自动
-    填好上面的「识别侧车命令」。首次安装要下载几百 MB（识别引擎较大），可能持续
-    几分钟到十几分钟，进度显示在 Zotero 主窗口。安装失败时，这里会说明失败发生
-    在哪一步；「修复」先删掉已装的环境再重装。
+    一键装好扫描识别所需的全部组件：解释器、识别依赖与模型，装好后自动填好上面的
+    「识别侧车命令」。机器上已有合格的 Python 时直接使用它（依赖会装入那个环境），
+    没有时才下载插件分发的运行时。首次安装要下载几百 MB（识别引擎较大），可能持续
+    几分钟到十几分钟，进度显示在 Zotero 主窗口。安装失败时，这里会说明失败发生在
+    哪一步；「修复」先删掉已装的环境再重装。
 preferences-ztransplit-pdf-scan-env-install =
     .label = 一键安装识别环境
 preferences-ztransplit-pdf-scan-env-installing =
     .label = 正在安装…
 preferences-ztransplit-pdf-scan-env-ready = 已就绪，无需再填命令
+preferences-ztransplit-pdf-scan-env-ready-system = 已就绪（使用机器上已有的 Python），无需再填命令
 preferences-ztransplit-pdf-scan-env-repair =
     .label = 修复（重装）…
 preferences-ztransplit-pdf-scan-python-check =
@@ -531,7 +533,8 @@ preferences-ztransplit-pdf-scan-python-install =
 preferences-ztransplit-pdf-scan-python-installing =
     .label = 正在安装…
 preferences-ztransplit-pdf-scan-python-status-not-installed = 未安装
-preferences-ztransplit-pdf-scan-python-status-ready = 已安装：Python { $version }
+preferences-ztransplit-pdf-scan-python-status-ready = 已安装：Python { $version }（插件分发）
+preferences-ztransplit-pdf-scan-python-status-ready-system = 已安装：Python { $version }（机器上已有，未使用插件分发的运行时）
 preferences-ztransplit-pdf-scan-python-status-checking = 正在检查识别运行时…
 preferences-ztransplit-pdf-scan-python-status-installing = 正在安装识别运行时，进度显示在 Zotero 主窗口。完成后此处会自动刷新状态。
 preferences-ztransplit-pdf-scan-python-status-nobundle = 插件主包未加载，无法检查或安装识别运行时。请重启 Zotero；仍未恢复时请重新安装本插件。
