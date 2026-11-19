@@ -319,7 +319,7 @@ describe("Windows runner — argv 原样直达 Subprocess，无 bat / 无 shell"
 
   it("Unicode/空格/& % ! ( ) 参数逐字抵达，UTF-8 JVM 属性在最前", async () => {
     installWindowsHost();
-    const p = runProcess(EXE, ARGS, 5000);
+    const p = runProcess(EXE, ARGS, 5000, undefined, { jvmEncodingArgs: true });
     const proc = spawn();
     proc.finish(0);
     const r = await p;
@@ -335,6 +335,32 @@ describe("Windows runner — argv 原样直达 Subprocess，无 bat / 无 shell"
     ]);
     expect(r.exitCode).toBe(0);
     expect(r.timedOut).toBe(false);
+  });
+
+  it("Python 进程不注入 JVM 属性（-D 会让它以 Unknown option 退出）", async () => {
+    installWindowsHost();
+    // 识别侧车与受管 Python 的探活 / pip / 自检都走这条路：可执行文件名是
+    // python.exe，按名字就不注入；调用方也可显式传 false（自定义解释器名）。
+    const p = runProcess("C:\\ZoteroData\\ztransplit\\python-runtime\\python\\python.exe", [
+      "-V",
+    ], 5000);
+    spawn(["Python 3.12.16"]).finish(0);
+    const r = await p;
+    expect(callRecords[0].arguments).toEqual(["-V"]);
+    expect(r.exitCode).toBe(0);
+
+    const p2 = runProcess("C:\\工具\\my python\\python.exe", ["-m", "pip", "install"], 5000);
+    spawn().finish(0);
+    await p2;
+    expect(callRecords[1].arguments).toEqual(["-m", "pip", "install"]);
+
+    // 显式关闭对 java 也生效（默认按文件名注入，选项优先）
+    const p3 = runProcess("java", ["-version"], 5000, undefined, {
+      jvmEncodingArgs: false,
+    });
+    spawn().finish(0);
+    await p3;
+    expect(callRecords[2].arguments).toEqual(["-version"]);
   });
 
   it("不创建 bat、不派生 nsIProcess（Components 从不被触碰）", async () => {

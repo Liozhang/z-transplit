@@ -74,15 +74,30 @@ const WHEEL_PACKAGE_HASH_PATH: Record<string, string> = {
  * PyPI 轮子；轮子内嵌 opendataloader_pdf/jar/opendataloader-pdf-cli.jar，
  * 其 SHA-256 与 PROVENANCE.json 的指纹逐字节一致（已实测核对）。GitHub
  * Release 区间可达，整包境内常超时，仅作全球兜底。
+ *
+ * 每项两个地址各司其职：`base` 是轮子文件主机（拼 /packages/… 内容寻址
+ * 路径），`index` 是简单索引主机（pip 的 --index-url）。官方源这两者不是
+ * 同一个域名：files.pythonhosted.org 只放文件、没有 /simple/ 索引（实测
+ * 404），pip 的索引在 pypi.org——把文件主机当索引用，官方源会永远探测失败。
  */
 const PYPI_MIRRORS = [
-  { id: "aliyun-pypi", base: "https://mirrors.aliyun.com/pypi" },
-  { id: "tuna-pypi", base: "https://pypi.tuna.tsinghua.edu.cn" },
-  { id: "tencent-pypi", base: "https://mirrors.cloud.tencent.com/pypi" },
-  { id: "huawei-pypi", base: "https://mirrors.huaweicloud.com/repository/pypi" },
-  { id: "ustc-pypi", base: "https://mirrors.ustc.edu.cn/pypi" },
-  { id: "pypi", base: "https://files.pythonhosted.org" },
+  { id: "aliyun-pypi", base: "https://mirrors.aliyun.com/pypi", index: "https://mirrors.aliyun.com/pypi/simple" },
+  { id: "tuna-pypi", base: "https://pypi.tuna.tsinghua.edu.cn", index: "https://pypi.tuna.tsinghua.edu.cn/simple" },
+  { id: "tencent-pypi", base: "https://mirrors.cloud.tencent.com/pypi", index: "https://mirrors.cloud.tencent.com/pypi/simple" },
+  { id: "huawei-pypi", base: "https://mirrors.huaweicloud.com/repository/pypi", index: "https://mirrors.huaweicloud.com/repository/pypi/simple" },
+  { id: "ustc-pypi", base: "https://mirrors.ustc.edu.cn/pypi", index: "https://mirrors.ustc.edu.cn/pypi/simple" },
+  { id: "pypi", base: "https://files.pythonhosted.org", index: "https://pypi.org/simple" },
 ];
+
+/**
+ * PyPI 简单索引地址表（pip 的 --index-url 候选）。识别环境的一键安装
+ * （scan/sidecarEnv.ts）要用同一套镜像给 pip 选索引源——两处各存一份必然
+ * 漂移，从这里导出。与 `base`（轮子文件主机）分开：官方源的两个角色在
+ * 不同域名上。
+ */
+export function pypiIndexUrls(): string[] {
+  return PYPI_MIRRORS.map((m) => m.index);
+}
 
 /**
  * 候选来源列表。镜像在前（境内友好），规范发布渠道（GitHub Release）殿后；

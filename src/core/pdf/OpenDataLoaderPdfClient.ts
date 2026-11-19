@@ -156,7 +156,9 @@ export async function checkHealth(): Promise<HealthResult> {
   // Run `java -version` directly (NOT through the JAR) to verify Java works.
   // execJava() prepends `-jar <jarPath>` which would pass `-version` to the
   // opendataloader-pdf CLI and cause a non-zero exit.
-  let result = await runProcess(javaExe, ["-version"], 10000);
+  let result = await runProcess(javaExe, ["-version"], 10000, undefined, {
+    jvmEncodingArgs: true,
+  });
   log(
     `[Z-Transplit ODL] checkHealth: java -version exitCode=${result.exitCode} timedOut=${result.timedOut}`,
   );
@@ -174,7 +176,9 @@ export async function checkHealth(): Promise<HealthResult> {
     const fallbackExe = resolveJavaExecutable();
     if (fallbackExe && fallbackExe !== javaExe) {
       javaExe = fallbackExe;
-      result = await runProcess(javaExe, ["-version"], 10000);
+      result = await runProcess(javaExe, ["-version"], 10000, undefined, {
+        jvmEncodingArgs: true,
+      });
       log(
         `[Z-Transplit ODL] checkHealth: retry javaExe="${javaExe}" exitCode=${result.exitCode}`,
       );
@@ -307,7 +311,9 @@ export async function execJar(
   try {
     // M-20: pass the caller's AbortSignal down so user cancellation kills the
     // JVM immediately instead of waiting out the hard timeout.
-    return await runProcess(javaExe, commandArgs, timeoutMs, signal);
+    return await runProcess(javaExe, commandArgs, timeoutMs, signal, {
+      jvmEncodingArgs: true,
+    });
   } finally {
     release();
   }
@@ -908,30 +914,28 @@ async function resolveLibSources(): Promise<{
 }
 
 /**
- * Read a data file shipped at core/pdf/lib/<fileName> — from the install tree
- * when the plugin is unpacked, from inside the packed .xpi when it is not.
+ * Read a data file shipped in the addon bundle, by path relative to the addon
+ * root — from the install tree when the plugin is unpacked, from inside the
+ * packed .xpi when it is not.
  *
- * For manifest-style data (PROVENANCE*.json, PYTHON-RUNTIME.json) that must be
- * identical for every install: reuses resolveLibSources so the file is found
- * through the same root resolution getJarPath uses, instead of a second,
- * drifting locator. Returns null when the file is absent or unreadable — the
- * caller decides whether that is fatal.
+ * For manifest-style data (PROVENANCE*.json, PYTHON-RUNTIME.json) and for
+ * scripts that must be copied out before they can run (the recognition
+ * sidecar): reuses resolveLibSources so the file is found through the same
+ * root resolution getJarPath uses, instead of a second, drifting locator.
+ * Returns null when the file is absent or unreadable — the caller decides
+ * whether that is fatal.
  */
-export async function readBundledLibFile(
-  fileName: string,
-): Promise<string | null> {
+export async function readBundledFile(relativePath: string): Promise<string | null> {
   const { baseDir, packedXpiSource } = await resolveLibSources();
   if (baseDir) {
     try {
-      const candidate = joinPath(baseDir, "core", "pdf", "lib", fileName);
+      const candidate = joinPath(baseDir, ...relativePath.split("/"));
       const IOUtils = (globalThis as any).IOUtils;
       if (IOUtils?.exists && (await IOUtils.exists(candidate))) {
         return await IOUtils.readUTF8(candidate);
       }
     } catch (e) {
-      safeDebug(
-        `[Z-Transplit ODL] bundled lib file ${fileName} unreadable: ${e}`,
-      );
+      safeDebug(`[Z-Transplit ODL] bundled file ${relativePath} unreadable: ${e}`);
     }
   }
   if (packedXpiSource) {
@@ -945,7 +949,7 @@ export async function readBundledLibFile(
       );
       zipReader.open(xpiFile);
       try {
-        const entryPath = `core/pdf/lib/${fileName}`;
+        const entryPath = relativePath.split("/").join("/");
         if (zipHasEntry(zipReader, entryPath)) {
           return readZipEntryText(zipReader, entryPath);
         }
@@ -958,11 +962,16 @@ export async function readBundledLibFile(
       }
     } catch (e) {
       safeDebug(
-        `[Z-Transplit ODL] bundled lib file ${fileName} unreadable from XPI: ${e}`,
+        `[Z-Transplit ODL] bundled file ${relativePath} unreadable from XPI: ${e}`,
       );
     }
   }
   return null;
+}
+
+/** core/pdf/lib/<fileName> 的随包读取（清单类数据的便捷入口）。 */
+export async function readBundledLibFile(fileName: string): Promise<string | null> {
+  return readBundledFile(["core", "pdf", "lib", fileName].join("/"));
 }
 
 export async function getJarPath(
@@ -1277,13 +1286,26 @@ type RunOutcome =
 
 /** Windows-only: pin the JVM's default charset and stdio stream encodings to
  *  UTF-8 so Chinese paths/messages round-trip under a CP936 host. Prepended to
- *  the caller's argv — every runProcess caller invokes Java, and JVM options
- *  must precede the main class / -jar. */
+ *  the caller's argv — JVM options must precede the main class / -jar. */
 const WINDOWS_JVM_ENCODING_ARGS = [
   "-Dfile.encoding=UTF-8",
   "-Dstdout.encoding=UTF-8",
   "-Dstderr.encoding=UTF-8",
 ];
+
+/**
+ * 是否给这次进程调用注入 JVM 编码属性。
+ *
+ * 这些属性只对 Java 有意义：Python 见到 `-D` 会以「Unknown option: -D」退出
+ * （退出码 2），识别侧车与受管 Python 的每次调用都会因此失败。默认按可执行
+ * 文件名判断（java / javaw 才注入）；Java 调用方显式传 true，不靠文件名猜，
+ * 非 Java 调用方显式传 false 同样成立。
+ */
+function wantsJvmEncodingArgs(resolvedExe: string, explicit?: boolean): boolean {
+  if (typeof explicit === "boolean") return explicit;
+  const base = resolvedExe.split(/[\\/]/).pop() ?? "";
+  return /^java(?:w)?(?:\.exe)?$/i.test(base);
+}
 
 function isWindowsHost(): boolean {
   const Services = (globalThis as any).Services as any;
@@ -1357,6 +1379,7 @@ export function runProcess(
   args: string[],
   timeoutMs: number,
   signal?: AbortSignal, // M-20: cooperative cancellation
+  opts?: { jvmEncodingArgs?: boolean },
 ): Promise<ExecResult> {
   // M-20: already cancelled before spawn — don't even start the JVM.
   if (signal?.aborted) {
@@ -1369,7 +1392,7 @@ export function runProcess(
     });
   }
   return isWindowsHost()
-    ? runProcessWindows(resolvedExe, args, timeoutMs, signal)
+    ? runProcessWindows(resolvedExe, args, timeoutMs, signal, opts)
     : runProcessUnix(resolvedExe, args, timeoutMs, signal);
 }
 
@@ -1407,6 +1430,7 @@ async function runProcessWindows(
   args: string[],
   timeoutMs: number,
   signal?: AbortSignal,
+  opts?: { jvmEncodingArgs?: boolean },
 ): Promise<ExecResult> {
   // Held in a box so async continuation points don't fight TS control-flow
   // narrowing of a reassigned local.
@@ -1497,7 +1521,12 @@ async function runProcessWindows(
     const Subprocess = getSubprocess();
     proc = await Subprocess.call({
       command: resolvedExe,
-      arguments: [...WINDOWS_JVM_ENCODING_ARGS, ...args],
+      arguments: [
+        ...(wantsJvmEncodingArgs(resolvedExe, opts?.jvmEncodingArgs)
+          ? WINDOWS_JVM_ENCODING_ARGS
+          : []),
+        ...args,
+      ],
       stderr: "pipe",
     });
   } catch (e: any) {
