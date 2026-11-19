@@ -45,6 +45,19 @@ export const MIN_PAGE_COVERAGE = 0.2;
 /** 重试时的分辨率放大倍数（200dpi → 300dpi）。 */
 export const RETRY_DPI_FACTOR = 1.5;
 
+/**
+ * 重试用的 dpi：基础值乘放大系数，并钳回侧车的接受范围（72–600）。
+ *
+ * 钳位必须做在插件侧：侧车对越界 dpi 是静默取边界的，若插件按 900 发起
+ * 重试而侧车按 600 执行，同一分辨率会原样重跑一遍，而 manifest 记的
+ * attemptDpi 与 result.json 的 dpi 对不上——用户看到"重试跑了但可疑页仍
+ * 可疑"，却查不出原因。
+ */
+export function retryDpiFor(baseDpi: number): number {
+  const scaled = Math.round(baseDpi * RETRY_DPI_FACTOR);
+  return Math.max(72, Math.min(600, scaled));
+}
+
 /** 每批最多重试一次——无限重试会把一批坏页变成无限循环。 */
 export const MAX_BATCH_RETRIES = 1;
 

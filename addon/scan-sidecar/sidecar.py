@@ -9,10 +9,10 @@ swapped without touching the plugin.
 Pipeline (composable small models, all CPU-capable):
 
   pypdfium2            render the page to a bitmap at the requested dpi
-  PP-DocLayoutV3       (inside PPStructureV3) layout regions + reading order
-  PP-OCRv6             per-line text boxes (det + rec)
-  PP-FormulaNet        formula regions -> LaTeX
-  SLANet-plus          table regions -> HTML
+  PP-StructureV3       layout regions + reading order + formulas + tables
+                       (one pipeline; the exact model versions are whatever
+                       the installed PaddleOCR ships as defaults)
+  PaddleOCR            per-line text boxes (det + rec)
 
 Usage:
     python sidecar.py --pdf paper.pdf --pages 1-5,7 --out workdir --dpi 200
@@ -40,7 +40,7 @@ import json
 import os
 import sys
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 # ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -156,7 +156,13 @@ def _union_area(boxes: List[List[float]], page_w: float, page_h: float) -> float
 
 class Engines:
     """Lazily-built recognizer set. Import failures surface as one clear
-    fatal diagnostic instead of a stack trace per page."""
+    fatal diagnostic instead of a stack trace per page.
+
+    Once construction has failed, every later call raises the same error. An
+    earlier version returned the still-None engine after the first failure,
+    which turned page 1 into a real failure and every later page into a
+    confusing "'NoneType' object has no attribute 'predict'" warning — the
+    real cause was visible only on the first page."""
 
     def __init__(self) -> None:
         self._structure = None
@@ -164,42 +170,46 @@ class Engines:
         self._import_error: Optional[str] = None
 
     def structure(self):
-        if self._structure is None and self._import_error is None:
-            try:
-                from paddleocr import PPStructureV3
+        if self._structure is not None:
+            return self._structure
+        if self._import_error is not None:
+            raise RuntimeError(self._import_error)
+        try:
+            from paddleocr import PPStructureV3
 
-                self._structure = PPStructureV3(
-                    use_doc_orientation_classify=False,
-                    use_doc_unwarping=False,
-                    use_textline_orientation=False,
-                )
-            except Exception as exc:  # pragma: no cover - environment dependent
-                self._import_error = f"PPStructureV3 unavailable: {exc}"
-                raise RuntimeError(self._import_error)
+            self._structure = PPStructureV3(
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        except Exception as exc:  # pragma: no cover - environment dependent
+            self._import_error = f"PPStructureV3 unavailable: {exc}"
+            raise RuntimeError(self._import_error)
         return self._structure
 
     def ocr(self):
-        if self._ocr is None and self._import_error is None:
-            try:
-                from paddleocr import PaddleOCR
+        if self._ocr is not None:
+            return self._ocr
+        if self._import_error is not None:
+            raise RuntimeError(self._import_error)
+        try:
+            from paddleocr import PaddleOCR
 
-                self._ocr = PaddleOCR(
-                    use_doc_orientation_classify=False,
-                    use_doc_unwarping=False,
-                    use_textline_orientation=False,
-                )
-            except Exception as exc:  # pragma: no cover - environment dependent
-                self._import_error = f"PaddleOCR unavailable: {exc}"
-                raise RuntimeError(self._import_error)
+            self._ocr = PaddleOCR(
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        except Exception as exc:  # pragma: no cover - environment dependent
+            self._import_error = f"PaddleOCR unavailable: {exc}"
+            raise RuntimeError(self._import_error)
         return self._ocr
 
 
-def _iter_results(result: Any):
+def _iter_results(result: Any) -> List[Any]:
     """PP-StructureV3/PaddleOCR `predict` may return a list or a generator."""
     if result is None:
         return []
-    if isinstance(result, (list, tuple)):
-        return list(result)
     return list(result)
 
 
@@ -232,6 +242,9 @@ CAPTION_LABELS = {"figure_caption", "table_caption", "caption", "formula_caption
 
 def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, Any]:
     """Run the engine set over one rendered page; return the protocol dict."""
+    # Inside the caller's per-page try: an engine that cannot be built (import
+    # failure, architecture mismatch) is a clear per-page reason, and the
+    # "degrade to text-only" promise still holds for a layout-only failure.
     structure = engines.structure()
     ocr = engines.ocr()
 
@@ -243,7 +256,12 @@ def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, An
     try:
         for res in _iter_results(ocr.predict(image)):
             payload = _result_payload(res)
-            rec_texts = _first(payload, "rec_texts", "texts", default=[])
+            rec_texts = _first(payload, "rec_texts", "texts", default=None)
+            if rec_texts is None:
+                # 字段名漂移：读不到文本列表时记一条 warning，别静默交出空页
+                # （README 承诺"读不到的字段进 diagnostics.warnings"）。
+                warnings.append("page OCR result carries no text field (rec_texts)")
+                continue
             rec_boxes = _first(payload, "rec_boxes", "dt_polys", "boxes", default=[])
             rec_scores = _first(payload, "rec_scores", "scores", default=[])
             for idx, text in enumerate(rec_texts):
@@ -269,7 +287,10 @@ def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, An
     try:
         for res in _iter_results(structure.predict(image)):
             payload = _result_payload(res)
-            items = _first(payload, "parsing_res_list", "res_list", default=[])
+            items = _first(payload, "parsing_res_list", "res_list", default=None)
+            if items is None:
+                warnings.append("layout result carries no block list (parsing_res_list)")
+                continue
             for item in items:
                 if not isinstance(item, dict):
                     continue
@@ -369,13 +390,81 @@ def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, An
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def selftest() -> int:
+    """Build the recognition engines once and report readiness as one JSON
+    line on stdout.
+
+    The plugin runs this right after installing dependencies: constructing
+    the pipeline is what downloads the model weights, so a successful
+    selftest means the first real recognition won't stall mid-document —
+    and a broken environment surfaces here, at setup time, with a clear
+    reason instead of a per-page failure during translation.
+
+    The check covers every third-party wheel the recognition path imports:
+    both engines *and* pypdfium2, which is a separate package that fails on
+    its own (missing VC++ runtime on Windows, wrong wheel architecture).
+    Checking only the engines would let a pypdfium2 breakage through to the
+    first real translation.
+    """
+    engines = Engines()
+    try:
+        engines.structure()
+        engines.ocr()
+        _render_probe()
+    except Exception as exc:
+        _diag("fatal", f"selftest failed: {exc}")
+        return 1
+    engine_version = ""
+    try:
+        import paddleocr
+
+        engine_version = getattr(paddleocr, "__version__", "")
+    except Exception:
+        pass
+    _diag("selftest-ok", f"engines ready (paddleocr {engine_version or 'version unknown'})")
+    print(json.dumps({"selftest": "ok", "engineVersion": engine_version}, ensure_ascii=False))
+    return 0
+
+
+def _render_probe() -> None:
+    """Render one tiny blank page: proves pypdfium2 imports, creates a
+    document, rasterizes and hands back a PIL image (the exact calls the
+    recognition path makes)."""
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument.new()
+    page = pdf.new_page(8, 8)
+    image = page.render(scale=1.0, rotation=0).to_pil()
+    if image.width <= 0 or image.height <= 0:
+        raise RuntimeError("render probe produced an empty bitmap")
+    page.close()
+    pdf.close()
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Scanned-page recognition sidecar")
-    parser.add_argument("--pdf", required=True, help="source PDF path")
-    parser.add_argument("--pages", required=True, help='1-based page spec, e.g. "1-5,7"')
-    parser.add_argument("--out", required=True, help="output directory for result.json")
+    parser.add_argument("--pdf", help="source PDF path")
+    parser.add_argument("--pages", help='1-based page spec, e.g. "1-5,7"')
+    parser.add_argument("--out", help="output directory for result.json")
     parser.add_argument("--dpi", type=int, default=200, help="render resolution (72-600)")
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="build the engines and exit (pre-downloads model weights)",
+    )
     args = parser.parse_args(argv)
+
+    if args.selftest:
+        return selftest()
+
+    missing = [name for name, value in (
+        ("--pdf", args.pdf), ("--pages", args.pages), ("--out", args.out),
+    ) if not value]
+    if missing:
+        # 退出码 1（致命），与文档一致：argparse 的 parser.error 给的是 2，
+        # 而 2 在契约里表示"部分成功"，插件会把参数错读成部分失败。
+        _diag("fatal", "missing required arguments: " + ", ".join(missing))
+        return 1
 
     warnings: List[str] = []
     dpi = max(72, min(600, int(args.dpi)))
@@ -402,6 +491,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         _diag("fatal", f"bad --pages spec: {exc}")
         return 1
 
+    if not pages:
+        # 空规格（"--pages 0"、"--pages ''"）：一个页面都没请求。0 在契约里
+        # 表示"全部成功"，不能拿它收场——按致命处理。
+        _diag("fatal", f"no valid pages in --pages spec: {args.pages!r}")
+        return 1
+
     engines = Engines()
     engine_version = ""
     try:
@@ -418,6 +513,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         if index < 0 or index >= len(pdf):
             failed += 1
             warnings.append(f"page {page_number} out of range")
+            # 越界页也进 stderr：整批越界时只有 warnings 的话，stderr 上
+            # 看不到页码与文档总页数，排障要靠翻 result.json。
+            _diag(
+                "page-out-of-range",
+                f"page {page_number} out of range (document has {len(pdf)} page(s))",
+                page=page_number,
+            )
             continue
         try:
             page = pdf[index]

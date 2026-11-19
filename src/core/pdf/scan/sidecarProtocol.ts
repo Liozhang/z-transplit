@@ -3,9 +3,14 @@
  *
  * 侧车是一个独立进程（默认 python sidecar.py），插件按批调用：
  *   sidecar --pdf <路径> --pages 1-5,7 --out <目录> --dpi 200
- * 侧车在 <目录> 写一个 result.json（本文件定义的 SidecarBatchOutput），
- * stdout 只放诊断信息。契约与引擎无关：换 RapidDoc 或自组 ONNX 都不用
- * 改插件侧，只要产出同一份 JSON。
+ * 侧车在 <目录> 写一个 result.json（本文件定义的 SidecarBatchOutput）。
+ * 两条输出流分工：stderr 每行一个 JSON 诊断（进度、单页失败、致命原因），
+ * stdout 只放结果行——`--selftest` 成功时的一行 {"selftest":"ok",…}。
+ * 契约与引擎无关：换 RapidDoc 或自组 ONNX 都不用改插件侧，只要产出同一份
+ * JSON。
+ *
+ * 退出码：0 全部成功；2 部分成功（JSON 仍含成功页）；1 致命（参数错、PDF
+ * 打不开、引擎导入失败、渲染探活失败）。
  *
  * 坐标约定：bbox 为位图像素框（原点左上、y 向下），页面尺寸同时给点
  * （pageSizePt）和位图实际尺寸（renderSizePx）——缩放以实际尺寸为基准，

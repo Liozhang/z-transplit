@@ -14,6 +14,7 @@ import {
   reconcileScanOutcomes,
   serializeManifest,
   summarizeScan,
+  retryDpiFor,
   MIN_PAGE_COVERAGE,
   type ScanPageOutcome,
 } from "../../../../../src/core/pdf/scan/scanBatchPlan";
@@ -38,6 +39,23 @@ function page(pageNumber: number, coverage: number, over: Partial<SidecarPageRes
 function recognized(pageNumber: number, coverage = 0.5, suspect = false): ScanPageOutcome {
   return { kind: "recognized", page: page(pageNumber, coverage), suspect };
 }
+
+describe("retryDpiFor", () => {
+  it("默认 200dpi 重试到 300dpi", () => {
+    expect(retryDpiFor(200)).toBe(300);
+  });
+
+  it("顶到侧车上限：600 的重试仍是 600（侧车会静默钳位，账目必须对齐）", () => {
+    // 若插件按 900 发起而侧车按 600 执行，同一分辨率原样重跑，manifest 的
+    // attemptDpi 与 result.json 的 dpi 对不上——重试成了空操作。
+    expect(retryDpiFor(600)).toBe(600);
+    expect(retryDpiFor(450)).toBe(600);
+  });
+
+  it("不会低于侧车下限", () => {
+    expect(retryDpiFor(40)).toBe(72);
+  });
+});
 
 describe("planScanBatches", () => {
   it("按批大小切分，尾批可以不满", () => {

@@ -1,7 +1,7 @@
 /**
  * pythonRuntime — 识别侧车用的 CPython 运行时：定位、安装、状态、清理。
  *
- * 为什么需要它：扫描识别跑在插件外的 Python 侧车里（tools/scan-sidecar/
+ * 为什么需要它：扫描识别跑在插件外的 Python 侧车里（addon/scan-sidecar/
  * sidecar.py）。让用户自己装 Python 与依赖是最常见的中途弃坑点，因此运行时
  * 本身由插件分发——按平台取 python-build-standalone 的 install_only 构件，
  * 装到数据目录，定位后交给侧车命令行使用。
@@ -18,9 +18,8 @@
  * 清单不存单构件指纹：一个发行版六个平台，逐个人工登记只会让人懒得更新，
  * 而"更新时漏登记一个平台"比"不登记"更危险（那会让该平台静默用旧版）。
  *
- * 已知边界：本模块只分发解释器。侧车的模型依赖（onnxruntime、rapidocr 等）
- * 体积大且与识别引擎强耦合，仍由用户在设置里配置带依赖的命令行；受管运行时
- * 落地后，那条命令行可以直接写 `<受管 python> <sidecar.py>`。
+ * 边界：本模块只分发解释器。侧车脚本的落地、依赖安装与命令回填由
+ * scan/sidecarEnv.ts 的一键安装接着办（它复用本模块的安装与定位）。
  *
  * Host-coupled (Zotero.HTTP / IOUtils / PathUtils / runProcess /
  * extractTarGzArchive) — 宿主边界在 tests/unit/core/pdf/pythonRuntime.test.ts
@@ -33,6 +32,7 @@ import { getString } from "../../../utils/locale";
 import { safeDebug } from "../../../utils/logger";
 import { isMac, isWindows } from "../platform";
 import { isArm64Host } from "../platformArch";
+import { ZTransplitCancelledError } from "../CancelledError";
 import { readBundledLibFile, runProcess } from "../OpenDataLoaderPdfClient";
 import { extractTarGzArchive } from "../JavaRuntimeManager";
 import { acquireArtifact, type AcquireProgress } from "../artifactAcquire";
@@ -153,7 +153,10 @@ export async function resolveManagedPython(): Promise<string | null> {
     safeDebug("[Z-Transplit] pythonRuntime: " + e);
     return null;
   }
-  const probe = await runProcess(candidate, ["-V"], PROBE_TIMEOUT_MS);
+  const probe = await runProcess(candidate, ["-V"], PROBE_TIMEOUT_MS, undefined, {
+    // 受管运行时是 CPython，不是 JVM（Windows 上 -D 会让它直接退出）。
+    jvmEncodingArgs: false,
+  });
   if (probe.exitCode !== 0 || probe.aborted) {
     safeDebug(
       `[Z-Transplit] pythonRuntime: probe failed (exit ${probe.exitCode}): ${probe.stderr}`,
@@ -185,7 +188,9 @@ export async function getPythonRuntimeStatus(): Promise<PythonRuntimeStatus> {
   }
   // 一次探活同时判可用与取版本——resolveManagedPython 已经探过一次，这里
   // 不再跑第二遍（每次查询都是用户点一下，少一次进程启动就少一秒等待）。
-  const probe = await runProcess(path, ["-V"], PROBE_TIMEOUT_MS);
+  const probe = await runProcess(path, ["-V"], PROBE_TIMEOUT_MS, undefined, {
+    jvmEncodingArgs: false,
+  });
   if (probe.exitCode !== 0 || probe.aborted) {
     return { ready: false, error: getString("py-status-not-installed") };
   }
@@ -244,12 +249,12 @@ async function fetchSha256Sums(
   manifest: PythonRuntimeManifest,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (signal?.aborted) throw new Error("cancelled");
+  if (signal?.aborted) throw new ZTransplitCancelledError();
   const resp = await (Zotero as any).HTTP.request("GET", manifest.sha256Sums, {
     responseType: "text",
     timeout: CHECKSUM_TIMEOUT_MS,
   } as any);
-  if (signal?.aborted) throw new Error("cancelled");
+  if (signal?.aborted) throw new ZTransplitCancelledError();
   if (resp?.status !== 200 || typeof resp.response !== "string") {
     throw new Error(`SHA256SUMS request returned HTTP ${resp?.status}`);
   }
@@ -329,7 +334,9 @@ export async function installPythonRuntime(opts: {
           throw new Error(`executable ${artifact.executable} missing after extract`);
         }
         // 探活通过才原子换位：解压中断或架构不符都不占据正式位置。
-        const probe = await runProcess(exe, ["-V"], PROBE_TIMEOUT_MS);
+        const probe = await runProcess(exe, ["-V"], PROBE_TIMEOUT_MS, undefined, {
+          jvmEncodingArgs: false,
+        });
         if (probe.exitCode !== 0 || probe.aborted) {
           throw new Error(`probe failed (exit ${probe.exitCode}): ${probe.stderr}`);
         }

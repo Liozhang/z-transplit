@@ -16,6 +16,13 @@ import {
   installPythonRuntime,
 } from "./core/pdf/scan/pythonRuntime";
 import { installPythonRuntimeWithProgress } from "./core/pdf/scan/pythonRuntimeInstallUi";
+import {
+  getSidecarEnvStatus,
+} from "./core/pdf/scan/sidecarEnv";
+import {
+  installSidecarEnvWithProgress,
+  repairSidecarEnvWithProgress,
+} from "./core/pdf/scan/sidecarEnvInstallUi";
 
 /**
  * Addon singleton, published as `Zotero.ZTransplit` by src/index.ts (the name
@@ -77,6 +84,17 @@ class Addon {
     getStatus: typeof getPythonRuntimeStatus;
     install: typeof installPythonRuntimeWithProgress;
   };
+  /**
+   * 扫描识别环境（侧车用的 Python + 依赖 + 模型）的一键安装入口，与
+   * java/odlJar/python 同一约定：getStatus 只读检查四步是否齐备；
+   * install 一次点击装完并回填侧车命令；repair 先清旧环境再装。失败时
+   * install 抛出（进度窗已呈现），面板的状态行靠它拿细节。
+   */
+  public sidecarEnv: {
+    getStatus: typeof getSidecarEnvStatus;
+    install: typeof installSidecarEnvWithProgress;
+    repair: typeof repairSidecarEnvWithProgress;
+  };
 
   constructor() {
     this.data = {
@@ -101,6 +119,11 @@ class Addon {
     this.python = {
       getStatus: getPythonRuntimeStatus,
       install: installPythonRuntimeWithProgress,
+    };
+    this.sidecarEnv = {
+      getStatus: getSidecarEnvStatus,
+      install: installSidecarEnvWithProgress,
+      repair: repairSidecarEnvWithProgress,
     };
   }
 }

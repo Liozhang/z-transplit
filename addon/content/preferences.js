@@ -1575,6 +1575,160 @@
       });
   }
 
+  // ── 识别环境一键安装 ─────────────────────────────────────────────────────
+  // 与识别运行时同一套路：状态与安装都走主包暴露的 Zotero.ZTransplit.sidecarEnv。
+  // install 装完四步（解释器/脚本/依赖/自检）并回填侧车命令；失败时抛出，状态
+  // 行显示卡在哪一步。repair 先清旧环境再装。
+
+  var scanEnvStrings = {};
+  var scanEnvInstallLabelBase = "";
+  var scanEnvInFlight = false;
+
+  function scanEnvApi() {
+    try {
+      var zt = Zotero && Zotero.ZTransplit;
+      var api = zt && zt.sidecarEnv;
+      if (
+        api &&
+        (typeof api.getStatus === "function" ||
+          typeof api.install === "function")
+      ) {
+        return api;
+      }
+    } catch (e) {
+      /* 主包未挂载 */
+    }
+    return null;
+  }
+
+  function setScanEnvStatusText(text) {
+    if (els.scanEnvStatus) els.scanEnvStatus.textContent = text;
+  }
+
+  function setScanEnvButtonsDisabled(disabled) {
+    [els.scanEnvInstallBtn, els.scanEnvRepairBtn].forEach(function (btn) {
+      if (!btn) return;
+      try {
+        if (disabled) btn.setAttribute("disabled", "true");
+        else btn.removeAttribute("disabled");
+      } catch (e) {
+        /* 忽略 */
+      }
+    });
+  }
+
+  function setScanEnvInstallLabel(installing) {
+    if (!els.scanEnvInstallBtn) return;
+    var label = installing ? scanEnvStrings.btnInstalling : scanEnvInstallLabelBase;
+    if (label) {
+      try {
+        els.scanEnvInstallBtn.setAttribute("label", label);
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+  }
+
+  function refreshScanEnvStatus() {
+    var api = scanEnvApi();
+    if (!api || typeof api.getStatus !== "function") {
+      setScanEnvStatusText(scanEnvStrings.nobundle);
+      return Promise.resolve();
+    }
+    setScanEnvStatusText(scanEnvStrings.checking);
+    return Promise.resolve()
+      .then(function () {
+        return api.getStatus();
+      })
+      .then(function (status) {
+        if (status && status.ready) {
+          setScanEnvStatusText(scanEnvStrings.ready);
+        } else if (status && status.error) {
+          setScanEnvStatusText(String(status.error));
+        } else {
+          setScanEnvStatusText(scanEnvStrings.notReady);
+        }
+      })
+      .catch(function (e) {
+        setScanEnvStatusText(
+          fillJavaTemplate(scanEnvStrings.statusError, {
+            detail: String((e && e.message) || e),
+          }),
+        );
+      });
+  }
+
+  function runScanEnvInstall(api, repairing) {
+    if (scanEnvInFlight) return;
+    scanEnvInFlight = true;
+    setScanEnvButtonsDisabled(true);
+    setScanEnvInstallLabel(true);
+    // 修复也是安装（先清旧环境再装），文案同一句就够
+    setScanEnvStatusText(scanEnvStrings.statusInstalling);
+    // 安装在主包内执行（进度窗显示在主窗口）；失败时它抛出，状态行显示卡在
+    // 哪一步；成功则刷新成「已就绪」。
+    Promise.resolve()
+      .then(function () {
+        return repairing && typeof api.repair === "function" ? api.repair() : api.install();
+      })
+      .catch(function (e) {
+        try {
+          Zotero.debug("[Z-Transplit] preferences: recognition env install failed: " + e);
+        } catch (e2) {
+          /* 忽略 */
+        }
+        setScanEnvStatusText(String((e && e.message) || e));
+        return false;
+      })
+      .then(function (ok) {
+        scanEnvInFlight = false;
+        setScanEnvButtonsDisabled(false);
+        setScanEnvInstallLabel(false);
+        if (!ok) return undefined;
+        return refreshScanEnvStatus();
+      });
+  }
+
+  function onScanEnvInstall() {
+    var api = scanEnvApi();
+    if (!api || typeof api.install !== "function") {
+      setScanEnvStatusText(scanEnvStrings.nobundle);
+      return;
+    }
+    runScanEnvInstall(api, false);
+  }
+
+  function onScanEnvRepair() {
+    var api = scanEnvApi();
+    // 修复入口只需要 install 或 repair 之一（主包两个都有，缺一个是版本不齐）
+    if (!api || (typeof api.install !== "function" && typeof api.repair !== "function")) {
+      setScanEnvStatusText(scanEnvStrings.nobundle);
+      return;
+    }
+    runScanEnvInstall(api, true);
+  }
+
+  function cacheScanEnvStrings() {
+    scanEnvStrings.btnInstalling = javaString("ztransplit-pref-string-scan-env-installing");
+    scanEnvStrings.ready = javaString("ztransplit-pref-string-scan-env-ready");
+    scanEnvStrings.notReady = javaString(
+      "ztransplit-pref-string-scan-python-status-not-installed",
+    );
+    scanEnvStrings.checking = javaString(
+      "ztransplit-pref-string-scan-python-status-checking",
+    );
+    scanEnvStrings.statusInstalling = javaString(
+      "ztransplit-pref-string-scan-python-status-installing",
+    );
+    scanEnvStrings.nobundle = javaString(
+      "ztransplit-pref-string-scan-python-status-nobundle",
+    );
+    scanEnvStrings.statusError = odlStrings.statusError;
+    scanEnvInstallLabelBase = els.scanEnvInstallBtn
+      ? els.scanEnvInstallBtn.getAttribute("label") || ""
+      : "";
+  }
+
   function cacheScanPythonStrings() {
     scanPythonStrings.btnInstalling = javaString(
       "ztransplit-pref-string-scan-python-installing",
@@ -1683,6 +1837,9 @@
     els.scanPythonCheckBtn = $("ztransplit-pref-scan-python-check");
     els.scanPythonInstallBtn = $("ztransplit-pref-scan-python-install");
     els.scanPythonStatus = $("ztransplit-pref-scan-python-status");
+    els.scanEnvInstallBtn = $("ztransplit-pref-scan-env-install");
+    els.scanEnvRepairBtn = $("ztransplit-pref-scan-env-repair");
+    els.scanEnvStatus = $("ztransplit-pref-scan-env-status");
 
     // Zotero 在派发 load 之前已经跑完 document.l10n.translateFragment()，
     // 所以这里读到的 label / textContent 已经是本地化后的文案。
@@ -1783,9 +1940,22 @@
     if (els.scanPythonInstallBtn) {
       els.scanPythonInstallBtn.addEventListener("command", onScanPythonInstall);
     }
+    if (els.scanEnvInstallBtn) {
+      els.scanEnvInstallBtn.addEventListener("command", onScanEnvInstall);
+    }
+    if (els.scanEnvRepairBtn) {
+      els.scanEnvRepairBtn.addEventListener("command", onScanEnvRepair);
+    }
     // 面板每次显示时重新探测：用户可能开着设置窗口去装了 zotero-pdf-translate。
+    // 识别环境这一行没有「检查状态」按钮（另外三行都有），若不在显示时刷一次，
+    // 已装好的用户每次打开设置看到的都是空白状态行。
     var root = $("zotero-prefpane-ztransplit");
-    if (root) root.addEventListener("showing", syncPDFTranslateStatus);
+    if (root) {
+      root.addEventListener("showing", function () {
+        syncPDFTranslateStatus();
+        refreshScanEnvStatus();
+      });
+    }
   }
 
   function onLoad() {
@@ -1868,6 +2038,7 @@
       cacheJavaStrings();
       cacheOdlStrings();
       cacheScanPythonStrings();
+      cacheScanEnvStrings();
 
       var path = $("ztransplit-pref-pdf-fonts-path");
       if (path) path.textContent = assetsDir();

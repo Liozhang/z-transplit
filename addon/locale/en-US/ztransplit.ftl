@@ -217,7 +217,7 @@ scan-progress-retry = Batch { $batch } has { $pages } page(s) with little conten
 scan-progress-summary = Scanned-page recognition done: { $recognized } page(s) with content, { $empty } empty, { $skipped } skipped
 scan-progress-summary-resumed = ({ $resumed } reused from the last run)
 scan-progress-summary-suspect = , { $suspect } still sparse (results kept)
-scan-error-sidecar-unconfigured = Scanned pages need recognition, but the recognition sidecar is not configured. Fill in the sidecar command under "Scanned-page recognition" in the Z-Transplit settings (requires a local PaddleOCR install); these pages will keep their original text.
+scan-error-sidecar-unconfigured = Scanned pages need recognition, but the recognition environment is not ready. Click "Install the recognition environment" under "Scanned-page recognition" in the Z-Transplit settings (the command is filled in for you); these pages will keep their original text.
 scan-error-disabled = Scanned-page recognition is turned off in the settings; these pages will keep their original text.
 scan-error-rotated-skipped = The scanned document contains rotated pages; they were skipped and keep their original text.
 
@@ -234,6 +234,22 @@ py-error-install-failed = Installing the recognition runtime failed. Check your 
 py-error-unsupported-platform = No recognition runtime artifact is available for this platform
 py-error-manifest-unavailable = The runtime manifest is missing or corrupt. Reinstall the plugin
 py-error-checksum-unavailable = This platform's artifact is absent from the checksum list; the install was stopped (better no runtime than bytes of unknown origin)
+
+## One-click recognition environment install (src/core/pdf/scan/sidecarEnv.ts)
+sidecar-progress-window = Installing the scanned-page recognition environment
+sidecar-progress-runtime = Installing the Python runtime…
+sidecar-progress-script = Deploying the recognition script…
+sidecar-progress-dependencies = Installing recognition dependencies (the first install downloads a few hundred MB and may take several to a dozen minutes)…
+sidecar-progress-selftest = Building the recognition engines and self-checking (the first run downloads the model weights)…
+sidecar-progress-done = The recognition environment is installed and the command is filled in
+sidecar-status-deps-missing = Recognition dependencies are not installed
+sidecar-status-command-missing = Dependencies are installed, but the recognition sidecar command is not filled in
+sidecar-error-bundle-missing = The plugin package is missing { $file }. Reinstall the plugin
+sidecar-error-no-mirror = None of the Python package sources is reachable. Check your connection and try again
+sidecar-error-pip = Installing the recognition dependencies failed: { $detail }
+sidecar-error-selftest = The recognition engine self-check did not pass: { $detail }
+sidecar-error-timeout = The recognition environment install did not finish within { $minutes } minutes. Check your connection and try again
+sidecar-error-pref-write = The recognition environment is ready, but writing the command to the settings failed. Fill the recognition sidecar command in by hand: { $command }
 
 ## Reader session (src/core/pdf/scan/readerAccess.ts)
 err-reader-pdf-timeout = The reader's pdf.js did not become ready within 15 s.

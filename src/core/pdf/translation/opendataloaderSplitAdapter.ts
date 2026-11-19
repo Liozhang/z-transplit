@@ -57,6 +57,7 @@
 
 import { parsePdfWithOpenDataLoader } from "../backendSelector";
 import { PdfParseError } from "../PdfParseError";
+import { ZTransplitCancelledError as TranslationCancelledError } from "../CancelledError";
 import { odlAnalysisToAssembly } from "./odlToAssembly";
 import type { FormulaBlock } from "./odlToAssembly";
 import type { PdfDocumentAnalysis } from "../PdfIR";
@@ -172,17 +173,10 @@ async function sourceFingerprint(filePath: string): Promise<string> {
 }
 
 /**
- * 用户取消。调用方必须检测它 by NAME, not message text: the
- * message is localized (FTL), so a hardcoded-string comparison breaks under
- * l10n. The zh/en message deliberately keeps 已取消/cancelled so
- * backendSelector.isInfraError still classifies it as user cancellation.
+ * 用户取消（ZTransplitCancelledError 的本文件别名）。调用方必须按 name 识别，
+ * 不能按消息文本比较——消息走 FTL 本地化，硬编码字符串在切语言后就会失效。
+ * 类的定义与约定见 core/pdf/CancelledError.ts。
  */
-export class TranslationCancelledError extends Error {
-  constructor() {
-    super(getString("odl-progress-cancelled"));
-    this.name = "ZTransplitCancelled";
-  }
-}
 
 /** User-overridable font directory under the Zotero data directory. */
 function translationAssetsDir(): string {

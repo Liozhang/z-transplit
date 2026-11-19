@@ -15,12 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   small CPU-capable models (layout, line-level OCR, formula recognition, table
   structure). A document OpenDataLoader cannot read at all — a pure scan — no
   longer dead-ends at "no text": a pdf.js probe sizes the pages and the whole
-  document goes through recognition. The sidecar is configured in the settings
-  (command line), and the Python runtime it needs is installed by the plugin
-  from the same settings pane; the sidecar's model dependencies still come
-  from a local install. Nothing is dropped silently: every page ends up
-  either recognized, explicitly empty, or skipped with a recorded reason
-  (rotated, sidecar not configured, batch failed, cancelled), and the
+  document goes through recognition. The sidecar ships inside the plugin and is
+  set up from the settings pane: one click installs the Python runtime, the
+  dependencies and the model weights, and fills in the sidecar command, so no
+  command line has to be copied by hand. Nothing is dropped silently: every
+  page ends up either recognized, explicitly empty, or skipped with a recorded
+  reason (rotated, sidecar not configured, batch failed, cancelled), and the
   completion summary counts each category.
 - Recognition runs in batches with checkpoint manifests, so a long document
   only ever risks the batch in flight and can be continued with "Translate
@@ -70,10 +70,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is the trust anchor, fetched fresh at install time. Verified against the
   2026-11-10 release of python-build-standalone (CPython 3.12.16): all six
   artifacts exist, the education-network mirror carries byte-identical
-  checksums, and two artifacts were downloaded and hashed end to end. Only
-  the interpreter is distributed — the sidecar's model dependencies still
-  need a local install, after which the sidecar command can point at the
-  managed runtime.
+  checksums, and two artifacts were downloaded and hashed end to end.
+- The recognition environment is now installed in one click. The previous
+  path asked the user to install Python, run `pip install`, and copy a command
+  line into the settings; any one of the three steps failing meant no
+  recognition at all. One install now does all four steps in order: the
+  managed Python runtime, the bundled sidecar script materialized into the
+  Zotero data directory (a packed install keeps it inside the XPI, where it
+  cannot be executed), `pip install` against the fastest reachable package
+  mirror, and a `--selftest` run that builds the recognition engines and
+  pre-downloads the model weights — so a stalled model download happens
+  during installation instead of halfway through a translation. The sidecar
+  command is filled in automatically, and the install is refused to look
+  half-done: a failed step throws with the tail of its output (version
+  conflicts, missing mirror packages, architecture mismatches all print
+  there), writes no install marker, and leaves the command untouched. The
+  settings pane gained a "Recognition environment" row with a four-level
+  status (no interpreter / missing dependencies / command not filled in /
+  ready), install and repair; the size and duration are stated up front —
+  the first install fetches a few hundred megabytes and can take a quarter
+  of an hour on a slow connection. Cancelling and timing out are reported as
+  such rather than as a failed install, and an environment that is ready
+  except for the command only gets the command written instead of a full
+  reinstall.
 - Formulas recognized by the sidecar carry native LaTeX and skip the
   vision-model crop entirely (the screenshot preservation path still applies),
   and the single-paragraph translation prompt now also protects `$…$` /
@@ -81,6 +100,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rewritten by the translator.
 - Cancellation now takes effect between pages on the per-page translation path
   (previously a cancel waited for the whole document to finish translating).
+
+### Fixed
+
+- Two defects that made the recognition paths unrunnable on Windows, both found
+  by review after the runtime distribution and one-click install landed. First,
+  the shared process runner prepended the JVM's `-Dfile.encoding=UTF-8` options
+  to *every* external process on Windows — Python rejects `-D` outright, so
+  every `python -V` probe, `pip install` and sidecar invocation exited with
+  "Unknown option: -D" and the runtime install failed with a message about the
+  network. Injection is now decided per executable (Java launchers only; Java
+  callers pass it explicitly, the sidecar and the managed Python opt out), with
+  a test that assembles the real argv. Second, the pip index table reused the
+  wheel *file* hosts as simple-index hosts: the official entry
+  (`files.pythonhosted.org`) has no `/simple/` index and answers 404, so on a
+  network that can only reach the official source the install failed with "no
+  mirror is reachable" while the connection was fine. The table now carries both
+  addresses per entry (file host and index host), which for the official source
+  are different domains.
+- The recognition sidecar no longer misreports a broken engine. After a failed
+  first construction the engine getters returned the still-unbuilt engine, so
+  page one failed with the real cause and every later page degraded into a
+  confusing "'NoneType' object has no attribute 'predict'" warning; the getters
+  now keep raising the original error. `--selftest` also covers pypdfium2 — a
+  separate wheel that fails on its own (missing VC++ runtime, wrong
+  architecture) and that the engine-only check could not see — by importing it
+  and rasterizing one blank page. Argument errors and an empty page spec now
+  exit 1 as documented instead of argparse's 2, which the contract reserves for
+  "partial success". Dependencies are pinned with upper bounds so the same
+  requirements file installs the same behavior over time.
+- The retry pass for coverage-suspect pages now clamps its resolution on the
+  plugin side. At a base dpi of 600 the retry asked the sidecar for 900, the
+  sidecar silently clamped it back to 600, and the same resolution was
+  re-rendered while the manifest recorded 900 — a retry that looked like it ran
+  and changed nothing.
 
 ## [1.21.1] - 2026-11-13
 

@@ -211,7 +211,7 @@ scan-progress-retry = 第 { $batch } 批有 { $pages } 页内容偏少，提高�
 scan-progress-summary = 扫描识别完成：{ $recognized } 页有内容，{ $empty } 页无内容，{ $skipped } 页跳过
 scan-progress-summary-resumed = （其中 { $resumed } 页沿用上次结果）
 scan-progress-summary-suspect = ，{ $suspect } 页内容仍偏少（已保留识别结果）
-scan-error-sidecar-unconfigured = 检测到需要识别的扫描页，但尚未配置扫描识别侧车。请在 Z-Transplit 设置的「扫描页识别」中填写侧车命令（需本地安装 PaddleOCR 环境）；这些页将保持原文。
+scan-error-sidecar-unconfigured = 检测到需要识别的扫描页，但识别环境尚未就绪。请在 Z-Transplit 设置的「扫描页识别」里点「一键安装识别环境」（装好后命令会自动填好），这些页将保持原文。
 scan-error-disabled = 扫描页识别已在设置中关闭，这些页将保持原文。
 scan-error-rotated-skipped = 扫描页含旋转页面，已跳过识别并保持原文。
 
@@ -228,6 +228,22 @@ py-error-install-failed = 识别运行时安装失败，请检查网络后重试
 py-error-unsupported-platform = 当前平台没有可用的识别运行时构件
 py-error-manifest-unavailable = 运行时清单缺失或损坏，请重新安装插件
 py-error-checksum-unavailable = 校验清单里没有本平台构件，安装已中止（宁可不装，也不装来路不明的字节）
+
+## 识别环境一键安装（src/core/pdf/scan/sidecarEnv.ts）
+sidecar-progress-window = 正在安装扫描识别环境
+sidecar-progress-runtime = 正在安装 Python 运行时…
+sidecar-progress-script = 正在部署识别脚本…
+sidecar-progress-dependencies = 正在安装识别依赖（首次约几百 MB，可能持续几分钟到十几分钟）…
+sidecar-progress-selftest = 正在构建识别引擎并自检（首次运行需下载模型权重）…
+sidecar-progress-done = 识别环境安装完成，命令已自动填好
+sidecar-status-deps-missing = 未安装识别依赖
+sidecar-status-command-missing = 依赖已装好，但「识别侧车命令」尚未填好
+sidecar-error-bundle-missing = 安装包里缺少 { $file }，请重新安装插件
+sidecar-error-no-mirror = 所有 Python 软件源均不可达，请检查网络后重试
+sidecar-error-pip = 识别依赖安装失败：{ $detail }
+sidecar-error-selftest = 识别引擎自检未通过：{ $detail }
+sidecar-error-timeout = 识别环境安装等待超过 { $minutes } 分钟仍未结束，请检查网络后重试
+sidecar-error-pref-write = 识别环境装好了，但命令写入设置失败。请在「识别侧车命令」一栏手动填写：{ $command }
 
 ## 阅读器会话（src/core/pdf/scan/readerAccess.ts）
 err-reader-pdf-timeout = 阅读器的 pdf.js 未在 15 秒内就绪。

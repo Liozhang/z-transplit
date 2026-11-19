@@ -100,17 +100,23 @@ npm run check:jar                            # 对账（同时校验 ODL jar 与
 `src/core/pdf/OriginalTextRemovalClient.ts` 头注释；
 可行性验证数据见 `prototype/region-text-remover/README.md`。
 
-### 扫描页识别侧车（tools/scan-sidecar/sidecar.py）
+### 扫描页识别侧车（addon/scan-sidecar/sidecar.py）
 
 扫描件与乱码文本层页的识别在插件外的一个 Python 侧车里跑（版面 + 行级文字 +
 公式 + 表格，全部 CPU 可跑的小模型），插件只认 JSON 契约
-（`src/core/pdf/scan/sidecarProtocol.ts`），换引擎不用改插件。本地联调：
+（`src/core/pdf/scan/sidecarProtocol.ts`），换引擎不用改插件。侧车脚本随插件
+分发（XPI 里带 `addon/scan-sidecar/`），用户不需要自己找脚本；一键安装见下
+一节。本地联调（高级用户自己搭环境时）：
 
 ```bash
-pip install -r tools/scan-sidecar/requirements.txt
-python tools/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir --dpi 200
+pip install -r addon/scan-sidecar/requirements.txt
+python addon/scan-sidecar/sidecar.py --pdf 样本.pdf --pages 1-5 --out workdir --dpi 200
 # workdir/result.json 即插件读取的批次结果；stderr 每行一个 JSON 诊断
 ```
+
+`--selftest` 只构建识别引擎并退出（首次运行会下载模型权重），不认页面。一键
+安装用它把"翻译到一半才卡在模型下载"提前到安装阶段暴露。诊断与结果分流：
+stderr 每行一个 JSON 诊断，stdout 只放结果与自检的 JSON 行。
 
 然后在设置 → PDF 分屏翻译 →「识别侧车命令」填完整命令行（带空格的路径加引号），
 对一篇纯扫描 PDF 执行「翻译全文」即可走通全链路。侧车的纯函数（页码解析、框
@@ -171,9 +177,65 @@ install_only_stripped 构件六个平台齐备；`mirrors.cernet.edu.cn` 收录�
 win-x64 与 mac-arm64 两个构件已完整下载并核对指纹（355ee61b…、2f11b8aa…）。
 
 入口：设置 → PDF 分屏翻译 →「识别运行时」的「检查状态 / 安装 / 修复…」
-（`Zotero.ZTransplit.python`，进度窗显示在主窗口）。已知边界：本模块只分发
-解释器，侧车的模型依赖（onnxruntime、rapidocr 等）仍需本地安装；装好后把
-侧车命令写成「<受管 python> <sidecar.py>」即可。
+（`Zotero.ZTransplit.python`，进度窗显示在主窗口）。本模块只分发解释器；侧车
+脚本落地与模型依赖由下一节的一键安装接着办完。
+
+### 识别环境一键安装（sidecarEnv）
+
+用户此前的路径是「自己装 Python → 自己 pip install → 自己抄一条命令进设置」，
+三步任何一步卡住，扫描识别就用不上。`src/core/pdf/scan/sidecarEnv.ts` 把三步
+合成一次点击，五步顺序即依赖关系：
+
+1. 把随包的 `scan-sidecar/sidecar.py` 与 `requirements.txt` 落到数据目录
+   `ztransplit/scan-sidecar/`——打包安装时脚本在 XPI 里，不能直接当命令执行。
+   这一步每次都做（几 KB、不联网）：插件升级带来新版侧车时，已就绪的短路
+   不能沿用盘上的旧脚本；
+2. 受管 Python 运行时（复用上一节，按平台取件、指纹核对、探活）；
+3. `pip install -r requirements.txt`：并发探测 PyPI 简单索引取最快的一个，用
+   pip 的 `--index-url` 传入（进程运行器不传环境变量，也不需要）。索引地址表
+   与 jar 取件共用（`OdlJarDownloader.pypiIndexUrls`）——官方源的文件主机
+   （files.pythonhosted.org）与索引主机（pypi.org）不是同一个域名，拿文件
+   主机当索引会永远探测失败，只连通官方源的网络就装不上；
+4. `sidecar.py --selftest`：构建识别引擎并预热模型权重——模型下载发生在安装
+   阶段，而不是用户翻译到一半；
+5. 把「"<python>" "<sidecar.py>"」写进 `pdfParser.scan.sidecarPath`，用户不
+   需要手填任何命令。
+
+依赖与脚本都已就绪、只差命令时（第 2–4 步的结果都在，只是偏好被清掉），整段
+跳过，直接补写命令——那可能是几分钟到十几分钟，不该重跑。
+
+安装标记 `env.json` 记下解释器、脚本、索引源与引擎版本（`engineVersion`，
+自检时从引擎读到，不是解释器版本），状态查询据此分四层报"未装解释器 / 缺依赖
+/ 命令没填好 / 已就绪"。
+
+失败语义：任一步失败都抛带本地化文案的错误（pip 与自检的错误带上输出末尾
+400 字——版本冲突、镜像缺件、架构不符都写在那里），且不写安装标记、不回填
+命令，半成品环境不会被当成装好了。取消与超时单独归类：取消抛
+`ZTransplitCancelledError`（名字识别，见 `core/pdf/CancelledError.ts`），
+超时用单独文案说明等了多久——两者都不该显示成"安装失败"。已就绪时零网络
+直接返回（脚本刷新除外）。
+
+入口：设置 → PDF 分屏翻译 →「识别环境」的「一键安装 / 修复…」
+（`Zotero.ZTransplit.sidecarEnv`，进度窗显示在主窗口；修复先删旧环境再装）。
+「修复」删掉 `ztransplit/scan-sidecar/` 并清掉命令偏好，避免它指向失效路径。
+这一行没有「检查状态」按钮（运行时、Java、解析组件三行都有），状态在面板
+每次显示时刷新，否则已装好的用户每次打开设置看到的都是空白。
+体积与耗时如实告知用户：首次安装下载几百兆（paddlepaddle 一个包就有 100–
+186 MB，模型权重另算），弱网下可能持续十几分钟，UI 文案必须说清楚。
+
+测试：`tests/unit/core/pdf/scan/sidecarEnv.test.ts`（假宿主全链路：五步产物、
+pip 与自检的 argv、命令回填、已就绪零网络、脚本刷新、只差命令时跳过重装、
+命令写入失败、四类失败不写标记、取消与超时分类、状态四层、清理与重装）。
+
+### 进程运行器的 JVM 参数（runProcess）
+
+`runProcess` 在 Windows 上会给参数最前注入 JVM 的 UTF-8 编码属性
+（`-Dfile.encoding=UTF-8` 等，CP936 主机下中文路径与消息才能 round-trip）。
+这些参数只对 Java 有意义：Python 见到 `-D` 会以 "Unknown option: -D" 退出
+（退出码 2），因此注入改为按可执行文件名判断（java / javaw 才注入），Java
+调用方显式传 `{ jvmEncodingArgs: true }`，侧车与受管 Python 显式传 `false`。
+此前是无条件注入——扫描识别的每次 Python 调用都会失败，而测试全部 mock 掉
+`runProcess`，覆盖不到。
 
 ## 质量门控
 

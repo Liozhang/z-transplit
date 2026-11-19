@@ -508,8 +508,22 @@ preferences-ztransplit-pdf-scan-python =
 preferences-ztransplit-pdf-scan-python-desc =
     识别侧车所需的 Python 运行时。点「安装 / 修复…」由插件按当前平台自动
     下载（约 20–70 MB，存到 Zotero 数据目录，指纹核对通过才启用）；已安装
-    时此处显示版本。侧车的模型依赖仍需本地安装，装好后把侧车命令写成
-    「<受管 python> <sidecar.py>」即可。
+    时此处显示版本。识别依赖与模型由下面的「识别环境」一键装好，运行时这
+    一行只作为单独的修复入口。
+preferences-ztransplit-pdf-scan-env =
+    .value = 识别环境
+preferences-ztransplit-pdf-scan-env-desc =
+    一键装好扫描识别所需的全部组件：Python 运行时、识别依赖与模型，装好后自动
+    填好上面的「识别侧车命令」。首次安装要下载几百 MB（识别引擎较大），可能持续
+    几分钟到十几分钟，进度显示在 Zotero 主窗口。安装失败时，这里会说明失败发生
+    在哪一步；「修复」先删掉已装的环境再重装。
+preferences-ztransplit-pdf-scan-env-install =
+    .label = 一键安装识别环境
+preferences-ztransplit-pdf-scan-env-installing =
+    .label = 正在安装…
+preferences-ztransplit-pdf-scan-env-ready = 已就绪，无需再填命令
+preferences-ztransplit-pdf-scan-env-repair =
+    .label = 修复（重装）…
 preferences-ztransplit-pdf-scan-python-check =
     .label = 检查状态
 preferences-ztransplit-pdf-scan-python-install =

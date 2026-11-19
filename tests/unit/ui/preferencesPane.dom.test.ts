@@ -749,9 +749,9 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 39 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
-    // 的五项（侧车命令 / dpi / 每批页数 / 单批超时 / 识别运行时）。
-    expect(labels.length).toBe(39);
+    // 40 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
+    // 的六项（侧车命令 / dpi / 每批页数 / 单批超时 / 识别运行时 / 识别环境）。
+    expect(labels.length).toBe(40);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
@@ -1069,6 +1069,149 @@ function setupScanPythonHarness(py?: {
     },
   };
 }
+
+describe("B17 设置 pane：识别环境一键安装", () => {
+  function setupEnvHarness(env?: {
+    getStatus?: () => any;
+    install?: () => Promise<boolean>;
+    repair?: () => Promise<boolean>;
+  }) {
+    const h = setupHarness({});
+    const zt = (h.window as any).Zotero;
+    zt.ZTransplit = env ? { sidecarEnv: env } : undefined;
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    return {
+      ...h,
+      async click(id: string) {
+        const btn = h.doc.getElementById(id);
+        if (!btn) throw new Error(`element #${id} not found`);
+        btn.dispatchEvent(new h.window.Event("command", { bubbles: true }));
+        await flush();
+        await flush();
+      },
+    };
+  }
+
+  it("主包未挂载：点击安装显示引导文案，不抛错", async () => {
+    const h = setupEnvHarness(undefined);
+    await h.click("ztransplit-pref-scan-env-install");
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    expect(String(status.textContent)).toContain("插件主包未加载");
+    h.dom.window.close();
+  });
+
+  it("已就绪：点安装直接返回并就绪（主包侧零网络短路）", async () => {
+    let installs = 0;
+    const h = setupEnvHarness({
+      getStatus: async () => ({ ready: true, interpreter: true, dependencies: true, commandConfigured: true }),
+      install: async () => {
+        installs += 1;
+        return true;
+      },
+    });
+    await h.click("ztransplit-pref-scan-env-install");
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    expect(String(status.textContent)).toContain("已就绪");
+    expect(installs).toBe(1);
+    h.dom.window.close();
+  });
+
+  it("安装：点击后按钮禁用并切到「正在安装」，成功后恢复并刷新", async () => {
+    let installed = false;
+    const h = setupEnvHarness({
+      getStatus: async () =>
+        installed
+          ? { ready: true, interpreter: true, dependencies: true, commandConfigured: true }
+          : { ready: false, interpreter: true, dependencies: false, commandConfigured: false, error: "未安装识别依赖" },
+      install: async () => {
+        installed = true;
+        return true;
+      },
+    });
+    const installBtn = h.doc.getElementById("ztransplit-pref-scan-env-install")!;
+    await h.click("ztransplit-pref-scan-env-install");
+    expect(installed).toBe(true);
+    expect(installBtn.hasAttribute("disabled")).toBe(false);
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    expect(String(status.textContent)).toContain("已就绪");
+    h.dom.window.close();
+  });
+
+  it("安装失败：错误详情上墙，不被就绪/引导文案覆盖", async () => {
+    const h = setupEnvHarness({
+      getStatus: async () => ({ ready: false, interpreter: true, dependencies: false }),
+      install: async () => {
+        throw new Error("识别依赖安装失败：No matching distribution found for paddlepaddle");
+      },
+    });
+    await h.click("ztransplit-pref-scan-env-install");
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    expect(String(status.textContent)).toContain("识别依赖安装失败");
+    expect(String(status.textContent)).toContain("paddlepaddle");
+    h.dom.window.close();
+  });
+
+  it("修复：走 repair（先清旧环境再装），成功后刷新状态", async () => {
+    let repaired = false;
+    const h = setupEnvHarness({
+      getStatus: async () => (repaired ? { ready: true } : { ready: false, error: "未安装识别依赖" }),
+      repair: async () => {
+        repaired = true;
+        return true;
+      },
+    });
+    await h.click("ztransplit-pref-scan-env-repair");
+    expect(repaired).toBe(true);
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    expect(String(status.textContent)).toContain("已就绪");
+    h.dom.window.close();
+  });
+
+  it("面板显示时刷新状态行（这一行没有「检查状态」按钮，不刷就是空白）", async () => {
+    let statusChecks = 0;
+    const h = setupEnvHarness({
+      getStatus: async () => {
+        statusChecks += 1;
+        return { ready: true, interpreter: true, dependencies: true, commandConfigured: true };
+      },
+      install: async () => true,
+    });
+    const status = h.doc.getElementById("ztransplit-pref-scan-env-status")!;
+    const root = h.doc.getElementById("zotero-prefpane-ztransplit")!;
+    root.dispatchEvent(new h.window.Event("showing"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(statusChecks).toBe(1);
+    expect(String(status.textContent)).toContain("已就绪");
+    h.dom.window.close();
+  });
+
+  it("安装进行中连点第二次不重复触发（在飞行去重）", async () => {
+    let installs = 0;
+    let release: (() => void) | null = null;
+    const h = setupEnvHarness({
+      getStatus: async () => ({ ready: false, interpreter: true, dependencies: false }),
+      install: async () => {
+        installs += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return true;
+      },
+    });
+    const installBtn = h.doc.getElementById("ztransplit-pref-scan-env-install")!;
+    installBtn.dispatchEvent(new h.window.Event("command", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // 安装还没返回：此时按钮应处于禁用状态
+    expect(installBtn.hasAttribute("disabled")).toBe(true);
+    installBtn.dispatchEvent(new h.window.Event("command", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(installs).toBe(1);
+    release!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(installs).toBe(1);
+    h.dom.window.close();
+  });
+});
 
 describe("B17 设置 pane：识别运行时状态行与按钮", () => {
   it("主包未挂载：点击检测显示引导文案，不抛错", async () => {

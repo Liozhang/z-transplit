@@ -1,0 +1,15 @@
+# 扫描页识别侧车依赖。CPU 可跑；GPU 非必需。
+#
+# 版本同时给上界：诊断信息里硬编码了引擎标识（pp-structurev3+pp-ocrv6），
+# 而 PaddleOCR 的默认模型与结果字段名跟随小版本变化，跨大版本可能改名或改
+# 导入路径。加上界让"同一份 requirements 在不同时间装出同一套行为"，升级
+# 时改这里并重跑 sidecar.py --selftest 验证。
+# 已验证组合（2026-11）：paddleocr 3.4.x + pypdfium2 4.30+（Python 3.12）。
+# paddleocr 提供 PP-StructureV3（版面/公式/表格）与 PaddleOCR（行级文字）。
+paddleocr>=3.3,<4
+# PDF 渲染（无 GTK 依赖的纯二进制渲染器）。自检会渲染一页做导入与栅格化
+# 探活——Windows 上缺 VC++ 运行库或轮子架构不符都在这一步暴露。
+pypdfium2>=4.30,<6
+# 结果结构的数值处理（PaddleOCR 传递依赖，显式声明便于审计）。
+numpy>=1.24
+Pillow>=9.0

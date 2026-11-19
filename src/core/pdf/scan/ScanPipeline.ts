@@ -37,7 +37,7 @@ import {
   serializeManifest,
   summarizeScan,
   MAX_BATCH_RETRIES,
-  RETRY_DPI_FACTOR,
+  retryDpiFor,
   type ScanPageOutcome,
   type ScanReconciliation,
   type ScanSkipReason,
@@ -279,7 +279,7 @@ export async function runScanPipeline(
       !retriedBatchIndexes.has(batch.index) &&
       retriedBatchIndexes.size < MAX_BATCH_RETRIES * batches.length
     ) {
-      const retryDpi = Math.round(dpi * RETRY_DPI_FACTOR);
+      const retryDpi = retryDpiFor(dpi);
       onProgress(
         getString("scan-progress-retry", {
           batch: String(batch.index + 1),

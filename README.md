@@ -81,9 +81,10 @@ existing translation is opened instead of re-running the pipeline.
   progress window and one failure never stopping the rest
 - Scanned documents (experimental): every page is classified before translation;
   scanned pages and pages with a garbled text layer go to a local recognition
-  sidecar that restores text and formulas. Configure the sidecar command in the
-  settings; unconfigured or skipped pages keep their original text — nothing is
-  dropped silently
+  sidecar that restores text and formulas. One click in the settings installs
+  the Python runtime, the dependencies and the model weights and fills in the
+  sidecar command; unconfigured or skipped pages keep their original text —
+  nothing is dropped silently
 
 ### 3. Split-screen Reading
 

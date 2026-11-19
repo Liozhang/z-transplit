@@ -141,6 +141,9 @@ export async function runSidecarBatch(
       args,
       timeoutMs,
       params.signal,
+      // 侧车是 Python 进程，不是 JVM：显式关掉 Windows 上的 JVM 编码属性注入
+      // （Python 见到 -D 会以「Unknown option」退出）。
+      { jvmEncodingArgs: false },
     );
 
     if (result.aborted) {

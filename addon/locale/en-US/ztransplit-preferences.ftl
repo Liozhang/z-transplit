@@ -600,8 +600,25 @@ preferences-ztransplit-pdf-scan-python-desc =
     downloads it for the current platform automatically (roughly 20–70 MB,
     stored under the Zotero data directory, and only enabled once its
     fingerprint checks out); the version shows here once installed. The
-    sidecar's model dependencies still need a local install — after that,
-    write the sidecar command as "<managed python> <sidecar.py>".
+    dependencies and models are installed by "Recognition environment" below —
+    this row stays available as a separate repair entry.
+preferences-ztransplit-pdf-scan-env =
+    .value = Recognition environment
+preferences-ztransplit-pdf-scan-env-desc =
+    One click installs everything that scanned-page recognition needs: the
+    Python runtime, the recognition dependencies and the models, then fills in
+    the "recognition sidecar command" above for you. The first install downloads
+    a few hundred MB (the recognition engine is large) and may take several to a
+    dozen minutes; progress shows in the Zotero main window. If it fails, this
+    line says which step failed; "Repair" deletes the installed environment
+    first and then reinstalls it.
+preferences-ztransplit-pdf-scan-env-install =
+    .label = Install the recognition environment
+preferences-ztransplit-pdf-scan-env-installing =
+    .label = Installing…
+preferences-ztransplit-pdf-scan-env-ready = Ready — no command to fill in
+preferences-ztransplit-pdf-scan-env-repair =
+    .label = Repair (reinstall)…
 preferences-ztransplit-pdf-scan-python-check =
     .label = Check status
 preferences-ztransplit-pdf-scan-python-install =
