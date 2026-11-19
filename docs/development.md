@@ -153,18 +153,31 @@ stderr 每行一个 JSON 诊断，stdout 只放结果与自检的 JSON 行。
 都没有才由插件按平台分发受管运行时，落地在数据目录 `ztransplit/python-runtime/`
 （内部即上游发行版的 `python/` 布局，可执行文件路径以清单为准）。
 
-系统候选的采用条件（三条都要过，任一不过就换下一个候选，全不过则装受管运行时）：
+系统候选的采用条件（三关，任一不过就换下一个候选，全不过则装受管运行时）：
 
-1. `python -V` 起得来，版本不低于 3.9（引擎与依赖的支持面）；
-2. `python -m pip --version` 可用——依赖要装进这个环境，没有 pip 的解释器对
-   一键安装没用；
+1. 起得来，版本不低于 3.9（引擎与依赖的支持面）；
+2. pip 可导入——依赖要装进这个环境，没有 pip 的解释器对一键安装没用；
 3. 64 位——paddlepaddle 没有 32 位 Windows 轮子，装到一半才失败最难查。
 
-候选只收"可执行名本身就能启动"的 `python3` / `python`（顺序即优先级）。Windows
-的 `py` 启动器要带附加参数，会让侧车命令形状变复杂，而真装了 Python 的机器上
-`python.exe` 基本都在 PATH 上。解析不缓存：会话级缓存会让"使用期间装上的
-Python"看不见，也会让"卸掉的 Python"继续显示就绪；面板每次显示现探的代价是
-两三段短进程启动，与受管运行时那一侧本来就要做的探活同量级。
+三关合成一条 `python -c` 命令（版本 / 指针宽度 / pip 可导入，输出三行）。分成
+三次调用时状态查询实测要两秒（Windows 每次冷进程启动几百毫秒），合成后 286 毫秒。
+
+两条真机教训（都已钉进测试）：
+
+1. **Gecko 的 Subprocess 不做 PATH 查找**。按名字启动
+   （`Subprocess.call({ command: "python" })`）会以
+   "File at path \"python\" does not exist, or is not executable" 失败，哪怕
+   PATH 里就有那个文件（真机实测：Zotero 10.0.8 / Windows，PATH 含
+   `C:\Python313`）。因此候选必须先用 `pathSearch` 解析成绝对路径——否则
+   "用机器上已有的 Python"这条路永远不会触发，只会静默退回下载受管运行时。
+   顺带把 javaLocator 的 PATH 搜索也收敛到同一份实现。
+2. **不要给系统解析加会话级缓存**。第一版做了缓存，立刻被测试打脸：缓存会让
+   "使用期间装上的 Python"看不见，也会让"卸掉的 Python"继续显示就绪。现在每次
+   现探。
+
+候选只收 `python3` / `python`（顺序即优先级）：Windows 的 `py` 启动器要带附加
+参数，会让侧车命令形状变复杂，而真装了 Python 的机器上 `python.exe` 基本都在
+PATH 上。
 
 受管运行时的链路与 jar、JRE 同一形状：
 
@@ -328,7 +341,10 @@ node scripts/qa/real-machine.mjs shoot                   # 结束
 `allPanes`、`sectionState`、`listCommands`、`odlStatus`（解析组件状态检查，直调
 `Zotero.ZTransplit.odlJar.getStatus`）、`odlInstall`（解析组件下载/修复入口）、
 `odlHashProbe`（宿主 WebCrypto 大文件哈希探测）、`odlZipApi`（nsIZipReader
-真实接口面与 findEntries/extract 行为探查）。
+真实接口面与 findEntries/extract 行为探查）、`pyStatus` / `envStatus`（识别
+解释器与识别环境状态，直调 `Zotero.ZTransplit.python.getStatus` 与
+`sidecarEnv.getStatus`——这两个查询会真的起进程探活，是"系统 Python 在 Zotero
+自己的进程环境里找不找得到"唯一能在真机确认的地方）。
 
 多会话隔离：通道根目录默认 `D:\zt-qa`，可用环境变量 `QA_ROOT` 覆盖（启动器与
 探针副本同步改写，`shoot` 只结束当前根目录下的实例）。私有根目录名避开 `zt-qa`

@@ -34,6 +34,7 @@
 
 import { safeDebug } from "../../utils/logger";
 import { isMac, isWindows } from "./platform";
+import { findExecutablesOnPath, readEnvVar } from "./pathSearch";
 
 /** 已存在且可执行的 java 候选路径，按优先级排序。 */
 export function findJavaCandidates(): string[] {
@@ -192,19 +193,9 @@ function macCandidates(): string[] {
 // ─── PATH 候选 ───────────────────────────────────────────────────
 
 function pathCandidates(): string[] {
-  const pathStr = readEnv("PATH") || "";
-  const separator = isWindows() ? ";" : ":";
-  const binName = isWindows() ? "java.exe" : "java";
-  const dirSeparator = isWindows() ? "\\" : "/";
-  const out: string[] = [];
-  for (const dir of pathStr.split(separator)) {
-    // 去掉首尾空白与末尾斜杠：PATH 条目里 "C:\Java\bin\" 这种写法很常见，
-    // 直接拼接会产出双斜杠，nsIFile 虽能容忍但没必要。
-    const trimmed = dir.trim().replace(/[\\/]+$/, "");
-    if (!trimmed) continue;
-    out.push(`${trimmed}${dirSeparator}${binName}`);
-  }
-  return out;
+  // PATH 搜索与解释器定位共用一份（pathSearch）：两处各写一遍，分隔符、
+  // 扩展名与"可执行"的判定必然漂移。
+  return findExecutablesOnPath("java");
 }
 
 // ─── 宿主小工具 ──────────────────────────────────────────────────
@@ -237,19 +228,8 @@ function childDirs(dir: string): string[] {
   }
 }
 
-function readEnv(name: string): string | undefined {
-  try {
-    const Cc = (Components as any).classes;
-    const Ci = (Components as any).interfaces;
-    const env = Cc["@mozilla.org/process/environment;1"]?.getService?.(
-      Ci.nsIEnvironment,
-    );
-    return env?.get(name) ?? undefined;
-  } catch (e) {
-    safeDebug("[Z-Transplit] javaLocator: " + e);
-    return undefined;
-  }
-}
+/** 环境变量读取复用 pathSearch 的实现（JAVA_HOME 与 PATH 都要读）。 */
+const readEnv = readEnvVar;
 
 /** JAVA_HOME → <home>/bin/java(.exe)，容忍末尾斜杠与缺失的 bin。 */
 function joinBin(javaHome: string): string {

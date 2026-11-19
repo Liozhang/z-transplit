@@ -1033,3 +1033,38 @@
     };
   };
 })();
+
+/**
+ * pyStatus / envStatus — 识别解释器与识别环境的状态查询（真机）。
+ *
+ * 直调主包暴露的 Zotero.ZTransplit.python.getStatus 与
+ * Zotero.ZTransplit.sidecarEnv.getStatus。这两个查询会真的起进程探活，
+ * 因此它验证的是单元测试覆盖不到的部分：模块在真实 bundle 里能否加载、
+ * 数据目录路径解析、以及 resolveSystemPython 在 Zotero 自己的进程环境里
+ * 到底能不能找到 PATH 上的 Python（图形启动的 Zotero 继承的 PATH 与 shell
+ * 里的不一定一致，这是"用系统 Python"这条路径最关键、也最只能在真机确认
+ * 的假设）。
+ */
+(function () {
+  PROBE_CMDS.pyStatus = async function () {
+    const t0 = Date.now();
+    try {
+      const status = await Zotero.ZTransplit.python.getStatus();
+      return { status, ms: Date.now() - t0 };
+    } catch (e) {
+      return { error: String((e && e.stack) || e), ms: Date.now() - t0 };
+    }
+  };
+
+  PROBE_CMDS.envStatus = async function () {
+    const t0 = Date.now();
+    try {
+      const status = await Zotero.ZTransplit.sidecarEnv.getStatus();
+      return { status, ms: Date.now() - t0 };
+    } catch (e) {
+      return { error: String((e && e.stack) || e), ms: Date.now() - t0 };
+    }
+  };
+})();
+
+

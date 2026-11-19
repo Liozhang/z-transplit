@@ -105,6 +105,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Scanned-page recognition now uses a Python that is already on the machine when
   there is a usable one, instead of always downloading the plugin's own runtime.
+  The first cut of this looked done and passed every unit test, and was still
+  dead on arrival: Gecko's Subprocess does not search PATH, so launching a bare
+  `python` fails with "File at path \"python\" does not exist, or is not
+  executable" even when the interpreter is right there on PATH — the feature
+  never triggered and silently fell back to the download. A real Zotero 10.0.8
+  run (isolated profile, QA harness) caught it; candidates are now resolved to
+  absolute paths first, and the PATH search is shared with the Java locator so
+  the two cannot drift. The same run also showed the three acceptance probes
+  taking two seconds as separate cold process launches; they are now one
+  `python -c` command, and the status query answers in under 300 ms.
   A system interpreter is adopted when it launches, reports 3.9 or newer, has
   `pip` (the dependencies have to be installed into that environment) and is
   64-bit (paddlepaddle ships no 32-bit Windows wheels — failing halfway through

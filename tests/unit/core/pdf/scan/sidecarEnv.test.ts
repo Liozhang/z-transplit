@@ -114,6 +114,9 @@ const SIDECAR_DIR = `${DATA_DIR}\\ztransplit\\scan-sidecar`;
 const PYTHON_EXE = `${RUNTIME_DIR}\\python\\python.exe`;
 const SIDECAR_PY = `${SIDECAR_DIR}\\sidecar.py`;
 const PREF_KEY = "extensions.zotero.ztransplit.pdfParser.scan.sidecarPath";
+/** 假 PATH 上的"系统 Python"（解析后的绝对路径）。 */
+const SYSTEM_PYTHON_DIR = "D:\\Python313";
+const SYSTEM_PYTHON_PATH = `${SYSTEM_PYTHON_DIR}\\python.exe`;
 
 /** 好字节与它们的真实 SHA-256（模拟"上游 SHA256SUMS 里登记的指纹"）。 */
 const GOOD_BYTES = new TextEncoder().encode("good python runtime archive");
@@ -222,6 +225,43 @@ function installHost(): void {
   (globalThis as any).PathUtils = {
     join: (...parts: string[]) => parts.join("\\"),
   };
+  // PATH 搜索（pathSearch）要 nsIFile 与 nsIEnvironment：系统候选先按 PATH 把
+  // 名字解析成绝对路径——Gecko 的 Subprocess 不做 PATH 查找（真机实测）。
+  (globalThis as any).Components = {
+    classes: {
+      "@mozilla.org/file/local;1": {
+        createInstance: () => ({
+          path: "",
+          initWithPath(this: any, p: string) {
+            this.path = p;
+          },
+          exists(this: any) {
+            return host.systemPython === "none"
+              ? false
+              : this.path === SYSTEM_PYTHON_PATH;
+          },
+          isDirectory() {
+            return false;
+          },
+          isExecutable(this: any) {
+            return this.exists();
+          },
+          QueryInterface(this: any) {
+            return this;
+          },
+        }),
+      },
+      "@mozilla.org/process/environment;1": {
+        getService: () => ({
+          get: (name: string) => (name === "PATH" ? SYSTEM_PYTHON_DIR : ""),
+        }),
+      },
+    },
+    interfaces: {
+      nsIFile: { name: "nsIFile" },
+      nsIEnvironment: { name: "nsIEnvironment" },
+    },
+  };
   // 假本地化：测试里没有 Fluent 源，getString 会退回键名。这里造一个把参数
   // 拼进结果的格式化器，"错误信息带上了 pip 的 stderr 尾巴"才可断言。
   (globalThis as any)._globalThis = {
@@ -260,7 +300,7 @@ function installHost(): void {
   runProcess.mockImplementation(async (exe: string, argv: string[]) => {
     // 系统候选探测（PATH 上的 python3 / python）。默认 none：绝大多数用例
     // 走受管运行时，系统解析按需开启。
-    if (exe === "python3" || exe === "python") {
+    if (exe === SYSTEM_PYTHON_PATH) {
       if (host.systemPython === "none") {
         return {
           exitCode: -1,
@@ -270,26 +310,15 @@ function installHost(): void {
           aborted: false,
         };
       }
-      if (argv.includes("-V")) {
+      // 三关合成一条 `-c` 命令：版本 / 指针宽度 / pip 可导入，输出三行
+      if (argv.includes("-c")) {
         return {
           exitCode: 0,
-          stdout: "Python 3.12.16",
+          stdout: "3.12.16\r\n64\r\npip\r\n",
           stderr: "",
           timedOut: false,
           aborted: false,
         };
-      }
-      if (argv.includes("pip")) {
-        return {
-          exitCode: 0,
-          stdout: "pip 24.0 from C:\\Python312\\Lib\\site-packages\\pip",
-          stderr: "",
-          timedOut: false,
-          aborted: false,
-        };
-      }
-      if (argv.some((a) => a.includes("struct"))) {
-        return { exitCode: 0, stdout: "64", stderr: "", timedOut: false, aborted: false };
       }
     }
     if (argv.includes("-V")) {
@@ -338,6 +367,7 @@ afterEach(() => {
   delete (globalThis as any).Zotero;
   delete (globalThis as any).IOUtils;
   delete (globalThis as any).PathUtils;
+  delete (globalThis as any).Components;
   delete (globalThis as any)._globalThis;
 });
 
@@ -462,9 +492,11 @@ describe("installSidecarEnv", () => {
       },
     });
 
-    // 用的是 PATH 上的 python3，不是受管运行时
-    expect(out.pythonPath).toBe("python3");
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(`"python3" "${SIDECAR_PY}"`);
+    // 用的是 PATH 上解析出来的那个解释器，不是受管运行时
+    expect(out.pythonPath).toBe(SYSTEM_PYTHON_PATH);
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(
+      `"${SYSTEM_PYTHON_PATH}" "${SIDECAR_PY}"`,
+    );
     // 受管运行时没有下载、没有解包、没有落地
     expect(host.httpCalls.filter((c) => c.kind === "download")).toHaveLength(0);
     expect(host.httpCalls.filter((c) => c.kind === "sums")).toHaveLength(0);
@@ -474,7 +506,7 @@ describe("installSidecarEnv", () => {
       new TextDecoder().decode(await fs.read(`${SIDECAR_DIR}\\env.json`)),
     );
     expect(marker.pythonSource).toBe("system");
-    expect(marker.pythonPath).toBe("python3");
+    expect(marker.pythonPath).toBe(SYSTEM_PYTHON_PATH);
     // 没有"安装运行时"这一阶段（没有东西要装）
     expect(phases).toEqual(["script", "dependencies", "selftest", "done"]);
 
@@ -482,7 +514,7 @@ describe("installSidecarEnv", () => {
     const status = await getSidecarEnvStatus();
     expect(status.ready).toBe(true);
     expect(status.pythonSource).toBe("system");
-    expect(status.pythonPath).toBe("python3");
+    expect(status.pythonPath).toBe(SYSTEM_PYTHON_PATH);
   });
 
   it("系统 Python 存在但没有安装标记：解释器算就绪，依赖算缺失", async () => {

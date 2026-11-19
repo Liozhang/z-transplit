@@ -114,6 +114,9 @@ class FakeFS {
 
 const DATA_DIR = "D:\\ZoteroData";
 const RUNTIME_DIR = `${DATA_DIR}\\ztransplit\\python-runtime`;
+/** 假 PATH：只有一个目录，里面放着"系统 Python"。 */
+const SYSTEM_PYTHON_DIR = "D:\\Python313";
+const SYSTEM_PYTHON_PATH = `${SYSTEM_PYTHON_DIR}\\python.exe`;
 
 let fs: FakeFS;
 let host: {
@@ -205,6 +208,44 @@ function installHost(): void {
     classes: {},
     interfaces: {},
   };
+  // PATH 搜索（pathSearch）要 nsIFile 与 nsIEnvironment：系统候选探测先按
+  // PATH 把名字解析成绝对路径——Gecko 的 Subprocess 不做 PATH 查找，按名字
+  // 启动必然失败（真机实测）。
+  (globalThis as any).Components = {
+    classes: {
+      "@mozilla.org/file/local;1": {
+        createInstance: () => ({
+          path: "",
+          initWithPath(this: any, p: string) {
+            this.path = p;
+          },
+          exists(this: any) {
+            return host.systemPython === "none"
+              ? false
+              : this.path === SYSTEM_PYTHON_PATH;
+          },
+          isDirectory() {
+            return false;
+          },
+          isExecutable(this: any) {
+            return this.exists();
+          },
+          QueryInterface(this: any) {
+            return this;
+          },
+        }),
+      },
+      "@mozilla.org/process/environment;1": {
+        getService: () => ({
+          get: (name: string) => (name === "PATH" ? SYSTEM_PYTHON_DIR : ""),
+        }),
+      },
+    },
+    interfaces: {
+      nsIFile: { name: "nsIFile" },
+      nsIEnvironment: { name: "nsIEnvironment" },
+    },
+  };
 
   readBundledLibFile.mockReset();
   readBundledLibFile.mockImplementation(async (name: string) =>
@@ -214,7 +255,7 @@ function installHost(): void {
   runProcess.mockImplementation(async (exe: string, argv: string[]) => {
     // 系统候选探测（PATH 上的 python3 / python）。"none" 表示 PATH 上没有：
     // 启动即失败（真实 Subprocess 对不存在的可执行文件就是这样）。
-    if (exe === "python3" || exe === "python") {
+    if (exe === SYSTEM_PYTHON_PATH) {
       if (host.systemPython === "none") {
         return {
           exitCode: -1,
@@ -224,34 +265,17 @@ function installHost(): void {
           aborted: false,
         };
       }
-      if (argv.includes("-V")) {
-        const version =
-          host.systemPython === "old" ? "Python 3.8.10" : "Python 3.12.16";
+      // 三关合成一条 `-c` 命令：版本 / 指针宽度 / pip 可导入，输出三行。
+      // 任何一关不过就让对应的行缺失或不对。
+      if (argv.includes("-c")) {
+        const rows = [
+          host.systemPython === "old" ? "3.8.10" : "3.12.16",
+          host.systemPython === "x86" ? "32" : "64",
+          host.systemPython === "nopip" ? "" : "pip",
+        ];
         return {
           exitCode: 0,
-          stdout: version,
-          stderr: "",
-          timedOut: false,
-          aborted: false,
-        };
-      }
-      if (argv.includes("pip")) {
-        const ok = host.systemPython !== "nopip";
-        return {
-          exitCode: ok ? 0 : 1,
-          stdout: ok ? "pip 24.0 from C:\\Python312\\Lib\\site-packages\\pip" : "",
-          stderr: ok ? "" : "No module named pip",
-          timedOut: false,
-          aborted: false,
-        };
-      }
-      // 指针宽度探测是 `-c "<一段代码>"`：代码作为一个整体参数，"struct"
-      // 不是独立元素，要按子串找。
-      if (argv.some((a) => a.includes("struct"))) {
-        const bits = host.systemPython === "x86" ? "32" : "64";
-        return {
-          exitCode: 0,
-          stdout: bits,
+          stdout: rows.join("\r\n") + "\r\n",
           stderr: "",
           timedOut: false,
           aborted: false,
@@ -382,7 +406,11 @@ describe("resolveSystemPython", () => {
   it("PATH 上有合格的解释器：直接采用，带版本与来源", async () => {
     host.systemPython = "good";
     const found = await resolveSystemPython();
-    expect(found).toEqual({ path: "python3", version: "3.12.16", source: "system" });
+    expect(found).toEqual({
+      path: SYSTEM_PYTHON_PATH,
+      version: "3.12.16",
+      source: "system",
+    });
   });
 
   it("三关各挡一类：版本过低、没有 pip、32 位——都不采用", async () => {
@@ -399,7 +427,21 @@ describe("resolveSystemPython", () => {
     expect(await resolveSystemPython()).toBeNull();
   });
 
-  it("候选按顺序探测：python3 不合格才试 python", async () => {
+  it("按 PATH 把名字解析成绝对路径后再启动（Subprocess 不做 PATH 查找）", async () => {
+    host.systemPython = "good";
+    const calls: string[] = [];
+    const realImpl = runProcess.getMockImplementation()!;
+    runProcess.mockImplementation(async (exe: string, argv: string[]) => {
+      calls.push(`${exe} ${argv.join(" ")}`);
+      return realImpl(exe, argv);
+    });
+    const found = await resolveSystemPython();
+    expect(found?.path).toBe(SYSTEM_PYTHON_PATH);
+    // 每一次进程调用都带着绝对路径，没有一次是裸名字
+    expect(calls.every((c) => c.startsWith(SYSTEM_PYTHON_PATH + " "))).toBe(true);
+  });
+
+  it("候选按顺序探测：第一个候选不合格才试下一个", async () => {
     host.systemPython = "good";
     const calls: string[] = [];
     const realImpl = runProcess.getMockImplementation()!;
@@ -408,19 +450,22 @@ describe("resolveSystemPython", () => {
       return realImpl(exe, argv);
     });
     await resolveSystemPython();
-    // 第一个候选就合格：只探测 python3，不碰 python
-    expect(calls.every((c) => c.startsWith("python3 "))).toBe(true);
-    expect(calls.some((c) => c.startsWith("python "))).toBe(false);
+    // 第一个候选就合格：只探测它一个
+    expect(new Set(calls.map((c) => c.split(" ")[0]))).toEqual(
+      new Set([SYSTEM_PYTHON_PATH]),
+    );
   });
 
   it("每次现探：不缓存（装上的 Python 立刻可见，卸掉的立刻消失）", async () => {
     host.systemPython = "good";
-    expect((await resolveSystemPython())?.path).toBe("python3");
+    expect((await resolveSystemPython())?.path).toBe(SYSTEM_PYTHON_PATH);
     const before = runProcess.mock.calls.length;
-    // 用户卸掉了那个解释器：下一次查询就要反映出来，不能吃缓存
+    // 第二次查询照样起进程探活：没有把第一次的结果背下来
+    expect((await resolveSystemPython())?.path).toBe(SYSTEM_PYTHON_PATH);
+    expect(runProcess.mock.calls.length).toBeGreaterThan(before);
+    // 用户卸掉了那个解释器（PATH 上没有了）：下一次查询就反映出来
     host.systemPython = "none";
     expect(await resolveSystemPython()).toBeNull();
-    expect(runProcess.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("清理受管运行时时不影响系统解析（两者互不相干）", async () => {
@@ -445,7 +490,7 @@ describe("resolvePython", () => {
     host.systemPython = "good";
     const resolved = await resolvePython();
     expect(resolved?.source).toBe("system");
-    expect(resolved?.path).toBe("python3");
+    expect(resolved?.path).toBe(SYSTEM_PYTHON_PATH);
     expect(host.httpCalls.filter((c) => c.kind === "download")).toHaveLength(0);
   });
 

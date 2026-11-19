@@ -40,6 +40,7 @@ import { safeDebug } from "../../../utils/logger";
 import { isMac, isWindows } from "../platform";
 import { isArm64Host } from "../platformArch";
 import { ZTransplitCancelledError } from "../CancelledError";
+import { findExecutablesOnPath } from "../pathSearch";
 import { readBundledLibFile, runProcess } from "../OpenDataLoaderPdfClient";
 import { extractTarGzArchive } from "../JavaRuntimeManager";
 import { acquireArtifact, type AcquireProgress } from "../artifactAcquire";
@@ -126,6 +127,20 @@ const MIN_SYSTEM_PYTHON = "3.9";
  */
 const SYSTEM_PYTHON_CANDIDATES = ["python3", "python"];
 
+/**
+ * 把候选名解析成绝对路径。Gecko 的 Subprocess 不做 PATH 查找——按名字启动
+ * 会以 "File at path \"python\" does not exist, or is not executable" 失败
+ * （真机实测：Zotero 10.0.8 / Windows，PATH 里明明有 C:\\Python313）。
+ * 不先解析的话，"用机器上已有的 Python"这条路永远不会触发。
+ */
+function systemCandidatePaths(): string[] {
+  const out: string[] = [];
+  for (const name of SYSTEM_PYTHON_CANDIDATES) {
+    for (const abs of findExecutablesOnPath(name)) out.push(abs);
+  }
+  return out;
+}
+
 /** 版本号比较：`a >= b`（三段数字，缺段按 0）。 */
 function versionAtLeast(a: string, b: string): boolean {
   const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
@@ -139,55 +154,62 @@ function versionAtLeast(a: string, b: string): boolean {
 }
 
 /**
- * 探测一个候选可执行名是不是"能用来装依赖的解释器"。三条都要过：
+ * 一次探测拿全三样信息：版本、指针宽度、pip 是否可导入。
  *
- *   1. `python -V` 起得来，且版本不低于 3.9；
- *   2. `python -m pip --version` 可用——依赖要装进这个环境，没有 pip 的
- *      解释器对一键安装没用；
+ * 合成一条命令而不是三次调用：Windows 上每次冷进程启动要几百毫秒，状态查询
+ * （面板每次显示都跑）分三次探实测要两秒（真机，Zotero 10.0.8 / Windows）。
+ *
+ * 输出三行：版本号、指针位数、`pip` 或空行。任何一行读不到都判不合格——
+ * 宁可多装一份受管运行时，也不把一个状况不明的解释器当可用。
+ */
+const SYSTEM_PYTHON_PROBE =
+  'import sys, struct, importlib.util; print(sys.version.split()[0]); ' +
+  'print(struct.calcsize("P") * 8); ' +
+  'print("pip" if importlib.util.find_spec("pip") else "")';
+
+/**
+ * 探测一个候选可执行文件是不是"能用来装依赖的解释器"。三关：
+ *
+ *   1. 起得来，且版本不低于 3.9；
+ *   2. pip 可导入——依赖要装进这个环境，没有 pip 的解释器对一键安装没用；
  *   3. 64 位——paddlepaddle 没有 32 位 Windows 轮子，装到一半才失败最难查。
  *
  * 任何一条不过就换下一个候选；全部不过返回 null（调用方改装受管运行时）。
  */
 async function probeSystemCandidate(exe: string): Promise<ResolvedPython | null> {
   const pyOpts = { jvmEncodingArgs: false } as const;
-  const version = await runProcess(exe, ["-V"], PROBE_TIMEOUT_MS, undefined, pyOpts);
-  if (version.exitCode !== 0 || version.aborted) return null;
-  const parsed = parsePythonVersion(version.stdout || version.stderr);
-  if (!parsed || !versionAtLeast(parsed, MIN_SYSTEM_PYTHON)) return null;
-
-  const pip = await runProcess(
+  const probe = await runProcess(
     exe,
-    ["-m", "pip", "--version"],
+    ["-c", SYSTEM_PYTHON_PROBE],
     PROBE_TIMEOUT_MS,
     undefined,
     pyOpts,
   );
-  if (pip.exitCode !== 0 || pip.aborted) return null;
-
+  if (probe.exitCode !== 0 || probe.aborted) return null;
+  const lines = (probe.stdout || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const version = lines[0] ?? "";
+  if (!/^\d+\.\d+/.test(version) || !versionAtLeast(version, MIN_SYSTEM_PYTHON)) {
+    return null;
+  }
   // 指针宽度：32 位解释器装不上主依赖，提前排除。
-  const bits = await runProcess(
-    exe,
-    ["-c", "import struct;print(struct.calcsize('P')*8)"],
-    PROBE_TIMEOUT_MS,
-    undefined,
-    pyOpts,
-  );
-  if (bits.exitCode !== 0 || bits.aborted) return null;
-  if (!/(^|\D)64(\D|$)/.test((bits.stdout || "").trim())) return null;
-
-  return { path: exe, version: parsed, source: "system" };
+  if (lines[1] !== "64") return null;
+  if (lines[2] !== "pip") return null;
+  return { path: exe, version, source: "system" };
 }
 
 /**
  * 机器上已有的 Python（PATH 上第一个合格的候选）。
  *
  * 不缓存：状态查询每次现探。会话级缓存会让"使用期间装上的 Python"看不见，
- * 也会让"卸掉的 Python"继续显示就绪——面板每次显示都查一次，两三段短进程
- * 启动的代价可以接受（受管运行时那一侧本来也要探一次）。
+ * 也会让"卸掉的 Python"继续显示就绪——面板每次显示都查一次，代价是一段短
+ * 进程启动（三关合成一条命令，见 SYSTEM_PYTHON_PROBE）。
  */
 export async function resolveSystemPython(): Promise<ResolvedPython | null> {
-  for (const candidate of SYSTEM_PYTHON_CANDIDATES) {
-    const found = await probeSystemCandidate(candidate);
+  for (const exe of systemCandidatePaths()) {
+    const found = await probeSystemCandidate(exe);
     if (found) return found;
   }
   return null;
