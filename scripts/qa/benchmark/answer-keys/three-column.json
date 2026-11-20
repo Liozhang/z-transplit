@@ -1,6 +1,11 @@
 {
  "fixture": "three-column",
  "columns": 3,
+ "columnLeftEdges": [
+  42.75,
+  218.67,
+  394.59
+ ],
  "landscape": false,
  "sourceScript": "latin",
  "elements": [

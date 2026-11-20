@@ -1,6 +1,7 @@
 {
  "fixture": "landscape-slides",
  "columns": 1,
+ "columnLeftEdges": [],
  "landscape": true,
  "sourceScript": "latin",
  "elements": [

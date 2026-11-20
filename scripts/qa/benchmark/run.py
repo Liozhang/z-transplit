@@ -644,6 +644,9 @@ WATCHED: list[tuple[str, str, str]] = [
     ("parse.match.meanSim", "ratio", "higher"),
     ("parse.match.byType.*.recall", "ratio", "higher"),
     ("parse.column.crossColumnRatio", "ratio", "lower"),
+    # 合并块才是该门禁的：通栏标题与图注本来就超宽，宽度判据有一个下不去的最低
+    # 值；而跨栏合并块吞掉邻段，通栏元素不吞，这一项能真正归零。
+    ("parse.column.mergedBlockRatio", "ratio", "lower"),
     ("parse.heading.agreement", "ratio", "higher"),
     ("parse.readingOrder.tau", "ratio", "higher"),
     ("layout.biou", "ratio", "higher"),
@@ -773,6 +776,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "公式召回率",
         "段落 F1",
         "栏串位率",
+        "合并块率",
         "交并比",
         "框内滞留",
         "未翻译块",
@@ -795,6 +799,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             fmt(parse.get("formula", {}).get("recall")),
             fmt(parse.get("match", {}).get("f1")),
             fmt(parse.get("column", {}).get("crossColumnRatio")),
+            fmt(parse.get("column", {}).get("mergedBlockRatio")),
             fmt(layout.get("biou")),
             fmt(layout.get("boxPrecision")),
             str(layout.get("utb", "")),

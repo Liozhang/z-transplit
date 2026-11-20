@@ -1,6 +1,9 @@
 {
  "fixture": "reading-brain",
  "columns": 1,
+ "columnLeftEdges": [
+  73.5
+ ],
  "landscape": false,
  "sourceScript": "latin",
  "elements": [

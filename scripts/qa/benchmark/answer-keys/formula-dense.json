@@ -1,6 +1,10 @@
 {
  "fixture": "formula-dense",
  "columns": 2,
+ "columnLeftEdges": [
+  45.0,
+  310.1
+ ],
  "landscape": false,
  "sourceScript": "latin",
  "elements": [

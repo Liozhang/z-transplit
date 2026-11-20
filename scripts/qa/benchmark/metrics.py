@@ -85,6 +85,15 @@ class Box:
     def contains_pt(self, x: float, y: float) -> bool:
         return self.x0 <= x <= self.x1 and self.y0 <= y <= self.y1
 
+    def contains(self, other: "Box") -> bool:
+        """完整包含另一个框（边界相等也算）。"""
+        return (
+            self.x0 <= other.x0
+            and other.x1 <= self.x1
+            and self.y0 <= other.y0
+            and other.y1 <= self.y1
+        )
+
 
 def iou(a: Box, b: Box) -> float:
     """交并比。两个都是零面积框时返回 0，不除零。"""
@@ -463,35 +472,107 @@ def match_elements(key: dict, odl: OdlDoc, min_sim: float = 0.6) -> dict:
     return result
 
 
+def measured_column_width(boxes: list[Box], page_width: float = 0.0) -> float:
+    """用同页段落框宽度的众数估计真实栏宽。
+
+    不用"页宽 / 答案键栏数"：那个数把栏间隔也摊进了栏宽。三栏 A4 上
+    594.96/3 = 198.32，而真实栏宽是 158.906（左缘 42.75、栏宽 158.906、
+    栏间隔 16.016），高估四分之一——宽度阈值会漏判，275.66 的图内标签合并
+    段因此差 2 磅落选。
+
+    取众数而不是中位数：正常栏内段宽度完全一致，是分布的主峰；通栏标题与
+    图注是少数，碎片行宽度杂乱但个数少。中位数在块数少时会漂——一页只有
+    "一个宽块加一个窄块"时，偶数个元素的上中位数正好落在宽块上，阈值会被
+    抬到所有段落都不超，串位全部漏报。众数平票时取较小值，偏向栏内段。
+
+    众数必须占到块数的四分之一以上、且至少两个，才算"这一页有统一栏宽"。
+    横版幻灯片每页布局都不同，17 个块里最频的宽度只出现 3 次且是 8 磅——那是
+    坐标轴刻度标签，不是栏宽。没有主流宽度就退回页宽，等于这一页不判串位：
+    判断不了比误判好。
+    """
+    if not boxes:
+        return page_width
+    counts: dict[float, int] = {}
+    for b in boxes:
+        key = round(b.w, 1)
+        counts[key] = counts.get(key, 0) + 1
+    best_width = 0.0
+    best_count = 0
+    for width in sorted(counts):  # 升序，平票时先遇到小值
+        if counts[width] > best_count:
+            best_count = counts[width]
+            best_width = width
+    if best_count < max(2, math.ceil(len(boxes) / 4)):
+        return page_width
+    return best_width
+
+
+def merged_block_count(boxes: list[Box]) -> int:
+    """bbox 完整包含至少三个同页其它段落的块数。
+
+    这是"多栏文本被合并成一个块"的直接证据。解析器的阅读顺序算法把跨栏流式
+    排版并成一段，产出的框是多个矩形片的并集，几何上吞掉同页其它块。宽度判据
+    分不清"合法通栏元素"与"跨栏合并"——通栏标题虽宽，但不包住别人；这个判据
+    能，因为吞掉邻段正是合并的副产品。
+    """
+    count = 0
+    for i, a in enumerate(boxes):
+        contained = 0
+        for j, b in enumerate(boxes):
+            if i == j:
+                continue
+            if a.contains(b):
+                contained += 1
+        if contained >= 3:
+            count += 1
+    return count
+
+
 def column_bleed(key: dict, odl: OdlDoc, page_widths: dict[int, float]) -> dict:
     """栏串位：解析器产出横跨多栏的宽框的比例。
 
     阈值 0.6 是页宽的六成。一个正常的单栏段落（含通栏标题）可能到 0.9，
-    所以这一项报两个数：超过 0.6 的比例，以及超过答案键栏宽 1.4 倍的比例。
-    第二个数才是"跨栏"的直接证据。
+    所以这一项报两个数：超过 0.6 的比例，以及超过实测栏宽 1.4 倍的比例。
+    第二个数才是"跨栏"的直接证据，但它对合法通栏元素无解——图注与标题本来
+    就该超宽，所以它有一个下不去的最低值。
+
+    真正该门禁的是 mergedBlockRatio：跨栏合并块吞掉邻段，通栏元素不吞。
     """
     columns = key.get("columns", 1)
+    by_page: dict[int, list] = {}
+    for block in odl.blocks:
+        by_page.setdefault(block.page, []).append(block)
+
     wide_blocks = 0
     cross_blocks = 0
+    merged_blocks = 0
     total = 0
     worst: list[dict] = []
-    for block in odl.blocks:
-        width = page_widths.get(block.page)
+    for page, blocks in by_page.items():
+        width = page_widths.get(page)
         if not width:
             continue
-        total += 1
-        ratio = block.box.w / width
-        column_width = (width / columns) if columns > 0 else width
-        if ratio > 0.6:
-            wide_blocks += 1
-        if block.box.w > column_width * 1.4:
-            cross_blocks += 1
-            worst.append({"page": block.page, "ratio": round(ratio, 3), "text": block.text[:60]})
+        boxes = [b.box for b in blocks]
+        column_width = measured_column_width(boxes, width)
+        threshold = column_width * 1.4 if column_width > 0 else width
+        merged_blocks += merged_block_count(boxes)
+        for block in blocks:
+            total += 1
+            ratio = block.box.w / width
+            if ratio > 0.6:
+                wide_blocks += 1
+            if block.box.w > threshold:
+                cross_blocks += 1
+                worst.append(
+                    {"page": page, "ratio": round(ratio, 3), "text": block.text[:60]}
+                )
     worst.sort(key=lambda w: -w["ratio"])
     return {
         "blocks": total,
+        "columns": columns,
         "wideRatio": wide_blocks / total if total else 0.0,
         "crossColumnRatio": cross_blocks / total if total else 0.0,
+        "mergedBlockRatio": merged_blocks / total if total else 0.0,
         "worst": worst[:5],
     }
 
@@ -795,8 +876,15 @@ def _mask_ownership(
         for index, box in enumerate(boxes):
             if index == best_index:
                 continue
-            # 减掉所辖段落本来就和这个框重叠的部分，剩下的才算遮罩多盖的。
-            if mask.intersect(box) - owner.intersect(box) > 1.0:
+            # 遮罩压到别的段落框就算侵入，不再减掉"所辖段落本来就和这个框重叠"
+            # 的部分。
+            #
+            # 那道减法本意是容忍通栏段落遮罩横跨两栏，实际效果是把真实的侵入
+            # 也减掉了：跨栏合并块的遮罩是多个矩形片的并集，几何上完整包住同页
+            # 若干邻段，此时 owner.intersect(box) == mask.intersect(box)，差值
+            # 恒为 0——三栏夹具上 intrusionIntoParagraph 因此永远是 0，而那正是
+            # 缺陷最严重的一篇。段落框理论上互不重叠，压到别人就该报。
+            if mask.intersect(box) > 1.0:
                 hit_paragraph = True
         for region in regions:
             if mask.intersect(region) - owner.intersect(region) > 1.0:
@@ -1315,23 +1403,106 @@ def selftest() -> int:
     )
 
     three_col_key = {"columns": 3}
+    # 六个等宽栏内段加一个通栏段。等宽段是主流，众数栏宽因此落在 150 上。
+    narrow_blocks = [
+        OdlBlock(i, 1, "paragraph", f"narrow {i}", 10, Box(0, i * 10, 150, i * 10 + 10))
+        for i in range(6)
+    ]
     wide_odl = OdlDoc(
         blocks=[
-            OdlBlock(0, 1, "paragraph", "wide one", 10, Box(0, 0, 500, 10)),
-            OdlBlock(1, 1, "paragraph", "narrow one", 10, Box(0, 10, 150, 20)),
+            *narrow_blocks,
+            OdlBlock(6, 1, "paragraph", "wide one", 10, Box(0, 60, 500, 70)),
         ]
     )
     bleed = column_bleed(three_col_key, wide_odl, {1: 500})
     failures += not _check(
         "三栏页上宽框记串位、窄框不记",
-        abs(bleed["crossColumnRatio"] - 0.5) < 1e-9 and abs(bleed["wideRatio"] - 0.5) < 1e-9,
+        abs(bleed["crossColumnRatio"] - 1 / 7) < 1e-9
+        and abs(bleed["wideRatio"] - 1 / 7) < 1e-9,
         f"got {bleed}",
+    )
+
+    # 块数太少、宽度各异时建立不了主流栏宽，此时退回页宽——不判串位比误判好。
+    # 横版幻灯片每页布局不同，正是这个情形：17 个块里最频宽度只出现 3 次且是
+    # 8 磅的坐标轴刻度标签，若不设门槛，栏宽会被估成 8 磅，整页都算串位。
+    few_odl = OdlDoc(
+        blocks=[
+            OdlBlock(0, 1, "paragraph", "wide one", 10, Box(0, 0, 500, 10)),
+            OdlBlock(1, 1, "paragraph", "narrow one", 10, Box(0, 10, 150, 20)),
+        ]
+    )
+    bleed_few = column_bleed(three_col_key, few_odl, {1: 500})
+    failures += not _check(
+        "建立不了主流栏宽时不判串位",
+        bleed_few["crossColumnRatio"] == 0.0,
+        f"got {bleed_few}",
+    )
+
+    # 合并块：bbox 完整包住四个同页其它块。宽度判据分不清"合法通栏元素"与
+    # "跨栏合并"，这个判据能——通栏标题虽宽，但不包住别人。
+    merged_odl = OdlDoc(
+        blocks=[
+            OdlBlock(0, 1, "paragraph", "merged", 10, Box(0, 0, 300, 100)),
+            OdlBlock(1, 1, "paragraph", "a", 10, Box(0, 80, 100, 90)),
+            OdlBlock(2, 1, "paragraph", "b", 10, Box(0, 60, 100, 70)),
+            OdlBlock(3, 1, "paragraph", "c", 10, Box(0, 40, 100, 50)),
+            OdlBlock(4, 1, "paragraph", "d", 10, Box(0, 20, 100, 30)),
+        ]
+    )
+    bleed_merged = column_bleed({"columns": 3}, merged_odl, {1: 400})
+    failures += not _check(
+        "包住至少三个邻段的块计入合并块",
+        abs(bleed_merged["mergedBlockRatio"] - 1 / 5) < 1e-9,
+        f"got {bleed_merged}",
+    )
+
+    # 通栏元素虽宽但不包住别人，不能计入合并块。
+    full_width_odl = OdlDoc(
+        blocks=[
+            OdlBlock(0, 1, "paragraph", "figure caption", 10, Box(0, 90, 400, 100)),
+            OdlBlock(1, 1, "paragraph", "body one", 10, Box(0, 60, 150, 70)),
+            OdlBlock(2, 1, "paragraph", "body two", 10, Box(0, 30, 150, 40)),
+            OdlBlock(3, 1, "paragraph", "body three", 10, Box(0, 0, 150, 10)),
+        ]
+    )
+    bleed_full = column_bleed({"columns": 2}, full_width_odl, {1: 400})
+    failures += not _check(
+        "通栏图注不计入合并块",
+        bleed_full["mergedBlockRatio"] == 0.0,
+        f"got {bleed_full}",
     )
 
     tau = reading_order(key, odl, [(0, 0), (1, 1), (2, 2), (3, 3)])
     failures += not _check("阅读顺序同序 tau 为 1", abs(tau["tau"] - 1.0) < 1e-9)
     reversed_tau = reading_order(key, odl, [(0, 3), (1, 2), (2, 1), (3, 0)])
     failures += not _check("阅读顺序逆序 tau 为 -1", abs(reversed_tau["tau"] + 1.0) < 1e-9)
+
+    # ── 遮罩归属：所辖段完整包含邻段时，侵入仍必须被抓到 ──
+    # 这一条盯的是三栏夹具上 intrusionIntoParagraph 恒为 0 的缺陷。旧判据是
+    # 「遮罩∩邻段 − 所辖段∩邻段」，当跨栏合并块的遮罩（多个矩形片的并集）几何上
+    # 完整包住邻段时，两个交集相等，差值恒为 0——真实的侵入被那道减法减掉了。
+    owner_box = Box(0, 0, 400, 400)
+    nested_boxes = [Box(10, 10, 100, 50), Box(10, 60, 100, 100), Box(10, 110, 100, 150)]
+    nested_paras = [
+        {"x0": owner_box.x0, "y0": owner_box.y0, "x1": owner_box.x1, "y1": owner_box.y1}
+    ]
+    for b in nested_boxes:
+        nested_paras.append({"x0": b.x0, "y0": b.y0, "x1": b.x1, "y1": b.y1})
+
+    _, _, nested_intrusion, _ = _mask_ownership([Box(-1, -1, 401, 401)], nested_paras, [])
+    failures += not _check(
+        "遮罩的所辖段包住邻段时侵入仍被抓到",
+        nested_intrusion >= 1,
+        f"got intrusion_paragraph={nested_intrusion}",
+    )
+
+    # 反向：遮罩只压所辖段的空白一侧、不碰任何邻段时，不报侵入。
+    _, _, clean_intrusion, _ = _mask_ownership([Box(150, 150, 399, 399)], nested_paras, [])
+    failures += not _check(
+        "遮罩不碰邻段时不报侵入",
+        clean_intrusion == 0,
+        f"got intrusion_paragraph={clean_intrusion}",
+    )
 
     # ── 编号空间：真值下标与解析器块下标不是同一套，指标必须经配对换算 ──
     # 这一条盯的是一个真发生过缺陷：答案键 30 个元素、解析器 62 个块，直接拿
