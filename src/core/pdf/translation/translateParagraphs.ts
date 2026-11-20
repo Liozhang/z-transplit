@@ -43,6 +43,7 @@ import type {
   ParagraphTranslation,
 } from "../../translation/types";
 import { formulaPreservingPrompt } from "../../translation/prompts";
+import { restoreFormulas, shieldFormulas } from "./formulaShield";
 import {
   cacheAvailable,
   cacheKey,
@@ -60,6 +61,21 @@ export type {
   ParagraphTranslator,
 };
 export { formulaPreservingPrompt };
+
+/**
+ * A paragraph that is nothing but formulas (`$E = mc^2$`, `$a$$b$`). There is
+ * no prose to translate, so it must not reach the engine — and it must not be
+ * counted as a failure either.
+ *
+ * This replaces the old `/^\{v\d+\}$/` test. That pattern matched a `{vn}`
+ * placeholder token the pipeline stopped generating long ago, so the check
+ * never fired: every pure-formula paragraph was sent to the translator, which
+ * returned the token mangled, and the mangled token was drawn as body text.
+ */
+export function isPureFormulaParagraph(text: string): boolean {
+  if (!text) return false;
+  return text.replace(/\$\$[^$]*\$\$|\$[^$]*\$/g, "").trim() === "";
+}
 
 /**
  * Resolve cache keys + cached translations for a set of texts in one pass.
@@ -105,9 +121,14 @@ function storeCache(
 }
 
 /**
- * Translate a list of paragraph texts, preserving `{vn}` formula placeholders.
+ * Translate a list of paragraph texts, preserving `$...$` formula spans.
  *
- * @param texts Paragraph texts (possibly containing `{vn}`).
+ * Every formula span is swapped for an opaque placeholder BEFORE the request and
+ * put back afterwards (see formulaShield). The formula-preserving prompt only
+ * reaches model-backed engines; the shield reaches all of them, including the
+ * Google default that has no prompt at all.
+ *
+ * @param texts Paragraph texts (possibly containing `$...$`).
  * @param translate Injected translator.
  * @param targetLanguage e.g. "zh-CN".
  * @param sourceLanguage Optional source language hint.
@@ -129,13 +150,12 @@ export async function translateParagraphs(
   const status: ParagraphTranslation[] = new Array(texts.length);
 
   // Identify which paragraphs need translation (skip pure-formula + empty).
-  const pureFormulaRe = /^\{v\d+\}$/;
   const tasks: Array<{ index: number; text: string }> = [];
   for (let i = 0; i < texts.length; i++) {
     const t = texts[i];
-    if (!t || t.length === 0 || pureFormulaRe.test(t)) {
+    if (!t || t.length === 0 || isPureFormulaParagraph(t)) {
       results[i] = t; // passthrough
-      status[i] = { translated: t, skippedFormula: pureFormulaRe.test(t), failed: false };
+      status[i] = { translated: t, skippedFormula: isPureFormulaParagraph(t), failed: false };
     } else {
       tasks.push({ index: i, text: t });
     }
@@ -169,10 +189,17 @@ export async function translateParagraphs(
       // text. This absorbs transient network/rate-limit errors (the audit
       // showed a real "9/9 paragraphs failed" case caused by an API blip)
       // without the complexity of a full exponential-backoff retry policy.
+      //
+      // The shield sits here, around the engine call, and NOT around the cache:
+      // the cache key stays the unshielded text so a hit is a complete,
+      // ready-to-render translation. Shielding before the cache would store a
+      // paragraph with placeholders in it, and the slots needed to undo them
+      // would be gone by the next run.
+      const { shielded, slots } = shieldFormulas(text);
       let out: string | null = null;
       for (let attempt = 0; attempt < 2 && out === null; attempt++) {
         try {
-          out = await translate(text, targetLanguage, sourceLanguage);
+          out = await translate(shielded, targetLanguage, sourceLanguage);
         } catch (e) {
           safeDebug("[Z-Transplit] translateParagraphs: " + e);
           if (attempt === 0) {
@@ -181,11 +208,17 @@ export async function translateParagraphs(
         }
       }
       if (out !== null) {
-        results[index] = out;
-        status[index] = { translated: out, skippedFormula: false, failed: false };
-        storeCache(options?.cacheIdentity, sourceLanguage, targetLanguage, text, out);
+        // Put the formulas back. If the engine mangled or dropped a
+        // placeholder, restoreFormulas appends that formula to the end of the
+        // paragraph — wrong position, but the content survives.
+        const restored = restoreFormulas(out, slots);
+        results[index] = restored.text;
+        status[index] = { translated: restored.text, skippedFormula: false, failed: false };
+        storeCache(options?.cacheIdentity, sourceLanguage, targetLanguage, text, restored.text);
       } else {
         // Fallback: keep original on failure (better than dropping the paragraph).
+        // The original still carries its `$...$` markers, which the renderer
+        // reduces to readable math via latexToPlain.
         results[index] = text;
         status[index] = { translated: text, skippedFormula: false, failed: true };
       }
@@ -301,7 +334,10 @@ export function planTranslationChunks(
  * isolation that hurt cross-paragraph coherence), chunks by token budget, and
  * dispatches each chunk as a single model call via the injected `batchTranslate`.
  *
- * Empty and pure-formula (`{vn}`) paragraphs are passed through untranslated
+ * Formula spans are shielded per chunk before the call and restored after, so
+ * the batch path gets the same protection the per-paragraph path does.
+ *
+ * Empty and pure-formula (`$...$`) paragraphs are passed through untranslated
  * — they never enter a batch. Results are scattered back to per-page arrays
  * positionally, preserving the `translatedSets[i][j] ⟷ pageTexts[i][j]`
  * contract the renderer depends on.
@@ -315,12 +351,11 @@ export async function translateAllPagesBatched(
   const concurrency = options.concurrency ?? 4;
   const expansionFactor = expansionFactorForTarget(options.targetLanguage);
 
-  const pureFormulaRe = /^\{v\d+\}$/;
   const tasks: FlatTask[] = [];
   for (let p = 0; p < pageTexts.length; p++) {
     for (let j = 0; j < pageTexts[p].length; j++) {
       const trimmed = (pageTexts[p][j] || "").trim();
-      if (!trimmed || pureFormulaRe.test(trimmed)) continue;
+      if (!trimmed || isPureFormulaParagraph(trimmed)) continue;
       tasks.push({ pageIdx: p, paraIdx: j, text: pageTexts[p][j] });
     }
   }
@@ -397,11 +432,17 @@ export async function translateAllPagesBatched(
         return;
       }
       try {
-        const inputTexts = chunk.map((t) => t.text);
+        // Shield before the call, restore after. Same reasoning as the
+        // per-paragraph path: the engine never sees the formula, so it cannot
+        // rewrite it — which matters most for the machine-translation engines
+        // that have no prompt to ask politely.
+        const shields = chunk.map((t) => shieldFormulas(t.text));
+        const inputTexts = shields.map((s) => s.shielded);
         const result = await batchTranslate(inputTexts, signal);
         for (let i = 0; i < chunk.length; i++) {
           const key = `${chunk[i].pageIdx}:${chunk[i].paraIdx}`;
-          translated.set(key, result.translations[i]);
+          const restored = restoreFormulas(result.translations[i], shields[i].slots);
+          translated.set(key, restored.text);
           if (result.failedIndices.includes(i)) {
             failedKeys.add(key);
           } else if (chunk[i].cacheKey) {
@@ -411,7 +452,7 @@ export async function translateAllPagesBatched(
               options.sourceLanguage,
               options.targetLanguage,
               chunk[i].text,
-              result.translations[i],
+              restored.text,
             );
           }
         }

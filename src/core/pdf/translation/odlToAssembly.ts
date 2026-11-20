@@ -61,6 +61,13 @@ export interface PageSize {
  * model entirely and splices the text straight through — the screenshot path
  * still runs for visual preservation. Absent = heuristic flag (ODL path), where
  * the LaTeX has to be extracted from a crop.
+ *
+ * `latexStatus` records where the LaTeX came from, so the orchestrator can
+ * decide whether a screenshot is still needed:
+ *   native      — OCR sidecar, text is already LaTeX
+ *   extracted   — vision model returned usable LaTeX
+ *   failed      — vision model was tried and failed (crop exists, keep it)
+ *   unavailable — no vision model configured (crop may not exist)
  */
 export interface FormulaBlock {
   pageNumber: number;
@@ -68,6 +75,7 @@ export interface FormulaBlock {
   bbox: { x: number; y: number; width: number; height: number };
   originalText: string;
   latex?: string;
+  latexStatus?: "native" | "extracted" | "failed" | "unavailable";
 }
 
 export interface OdlAssemblyOutput {
@@ -154,6 +162,11 @@ export function pageAnalysisToAssembly(
       Math.abs(w - size) < 2 && height > size * 5 && text.length > 20;
     if (isRotated) continue;
 
+    // 公式子区间标记。送翻译的文本带 `$...$` 边界，公式判定与截图取图仍用
+    // 未标记的原始文本——判据里 `$` 不是公式符号，标记与否不影响判定结果，
+    // 但 originalText 保持原样能让基准与调试对上的都是肉眼看到的文字。
+    const marked = markFormulaSpans(text);
+
     // Formula detection. Two sources, priority order:
     //   1. 原生公式区域（OCR 侧车的 isFormula 块，文本即 LaTeX）：直接带出，
     //      不跑字符密度启发式——否则 LaTeX 里的 \frac 之类会二次命中，
@@ -167,6 +180,7 @@ export function pageAnalysisToAssembly(
         bbox: { x, y, width: w, height: Math.max(height, size) },
         originalText: text,
         latex: text,
+        latexStatus: "native",
       });
     } else if (isFormulaParagraph(text)) {
       formulaBlocks.push({
@@ -174,6 +188,7 @@ export function pageAnalysisToAssembly(
         paragraphIndex,
         bbox: { x, y, width: w, height: Math.max(height, size) },
         originalText: text,
+        latexStatus: "unavailable",
       });
     }
 
@@ -200,7 +215,7 @@ export function pageAnalysisToAssembly(
       ...(style.italic ? { italic: true } : {}),
       ...(color ? { color } : {}),
     });
-    texts.push(text);
+    texts.push(marked);
     paragraphIndex++;
   }
 
@@ -233,7 +248,6 @@ export function pageAnalysisToAssembly(
     assembly: {
       texts,
       paragraphs,
-      formulas: [],
       globalLines: [],
       // Empty by default — the orchestrator fills this with formula region
       // screenshots (rasterized from the reader) for the renderer to paste
@@ -255,25 +269,261 @@ export function pageAnalysisToAssembly(
 
 
 /**
- * Characters/sequences that strongly indicate a formula. ODL folds formulas into
- * ordinary text, so a paragraph dense with these is treated as formula-bearing
- * and sent to the vision model for LaTeX extraction rather than translation.
+ * 公式符号字符类。ODL 把公式折进正文，这些字符是"这段里可能有公式"的锚点。
+ *
+ * 字符类的缺口曾是漏报的根源：上标数字（²、³）、集合关系符（∈、⊂、∅）、
+ * 真减号（U+2212，不是连字符）都不在类里，于是 `a² + b² = c²` 整段判不上
+ * 公式，符号被传统机器翻译引擎直接改写成普通数字。补齐之后，判公式的
+ * 主力交给"拉丁实词数"这个条件（见 isFormulaParagraph）——字符类只负责
+ * 召回，不再负责精确。
  */
-const FORMULA_CHAR_RE =
-  /[∑∫√≈≤≥±×÷∂∇∞→←↔∀∃∝∝∠⊙⊕⊗≤≥≠αβγδεζηθικλμνξπρστυφχψωΓΔΘΛΞΠΣΦΨΩ]|[\\][a-zA-Z]{2,}/g;
+const FORMULA_SYMBOLS =
+  "αβγδεζηθικλµνξπρστυφχψωΓΔΘΛΞΠΣΦΨΩ" +
+  "²³ⁿ½⅓¼∈∉⊂⊃⊆⊇∅∪∩∼≃≈≠≡≤≥±∓∞∑∏∐∫∬∭∂∇√∛∜∠⊥∥∀∃∴∵µℓ∆⊗⊕⊙¬∧∨−";
+
+/** 数学函数名。这些名字本身就是公式信号，在自然语言里不作为独立单词出现。 */
+const FORMULA_FUNCTIONS = new Set([
+  "sin", "cos", "tan", "cot", "sec", "csc", "log", "ln", "exp",
+  "max", "min", "arg", "mod", "det", "dim", "gcd", "lcm", "sup", "inf",
+]);
+
+/** 长度不小于 4 的纯拉丁字母串。`hypothesis`、`estimator` 这类实词。 */
+const LATIN_WORD_RE = /[A-Za-z]{4,}/g;
+
+/** 中日韩表意文字。用于挡住"含希腊字母的中文统计正文"被误判成公式。 */
+const CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/g;
+
+/** 单个字符是否是公式符号。空串必须先挡掉——`includes("")` 恒为真。 */
+function isFormulaSymbol(ch: string): boolean {
+  return ch.length === 1 && FORMULA_SYMBOLS.includes(ch);
+}
+
+/** 一段文本里的公式锚点数：公式符号加数学函数名。 */
+function formulaAnchorCount(text: string): number {
+  let n = 0;
+  for (const ch of text) if (isFormulaSymbol(ch)) n++;
+  for (const word of text.match(/[A-Za-z]+/g) || []) {
+    if (FORMULA_FUNCTIONS.has(word.toLowerCase())) n++;
+  }
+  return n;
+}
+
+/** 长度不小于 4 的纯拉丁字母实词个数。 */
+function countLatinWords(text: string): number {
+  return (text.match(LATIN_WORD_RE) || []).length;
+}
 
 /**
- * Heuristic: treat a paragraph as formula-bearing when it has at least
- * `threshold` formula-character matches. Threshold of 2 balances recall (catch
- * short inline-math runs like "β = 0.05") against false positives (a stray
- * single Greek letter in running text doesn't trigger it). Verified against the
- * real b.json fixture: statistical prose mentioning β once per paragraph stays
- * below the threshold, while genuine inline math (α + β ≥ 2 chars) is caught.
+ * 启发式：一段文字是不是公式区。
+ *
+ * 两个条件必须同时成立：
+ *   1. 公式锚点数不小于 `threshold`（保召回）。短行内式如 `β = 0.05` 有两个
+ *      锚点（β 与 =），能过。
+ *   2. 这段不像自然语言正文（保精确）：长度不小于 4 的纯拉丁字母实词不超过
+ *      一个，且汉字不超过 8 个。公式里出现的是单个字母变量与短函数名，
+ *      不会形成实词；而统计正文哪怕只提一个希腊字母，也必然带着成句的
+ *      实词。
+ *
+ * 条件 2 是这一次修复的核心。旧判据只数公式字符的匹配次数，阈值 2，于是一段
+ * 普通统计文字只要成串出现希腊字母与不等号就越过阈值——formula-dense 夹具的
+ * 三个假阳性（答案键 order 14、18、22）全是这么来的，实测精确率 0.571。
+ *
  * Exported for unit testing.
  */
 export function isFormulaParagraph(text: string, threshold = 2): boolean {
-  const matches = text.match(FORMULA_CHAR_RE);
-  return !!matches && matches.length >= threshold;
+  if (formulaAnchorCount(text) < threshold) return false;
+  if (countLatinWords(text) > 1) return false;
+  if ((text.match(CJK_RE) || []).length > 8) return false;
+  return true;
+}
+
+/**
+ * 词元种类。`markFormulaSpans` 靠它决定哪些片段属于公式区间。
+ * - `var` 单个拉丁字母，是变量；两个及以上字母若不是函数名就是自然语言单词
+ * - `func` 已知数学函数名
+ * - `punct` 逗号、分号、句号。它们大多是句子标点，**不是**公式内容，因此
+ *   构成区间边界——否则 `limn→∞, sin θ` 会被连成一个公式
+ * - `word` 其他拉丁字母串，是公式区间的边界
+ * - `other` 汉字与非常规标点，同样是边界
+ */
+type TokenKind = "symbol" | "number" | "op" | "punct" | "var" | "func" | "word" | "space" | "other";
+
+interface Token {
+  start: number;
+  end: number;
+  kind: TokenKind;
+}
+
+/**
+ * 英语最高频的双字母虚词。它们是正文而不是变量——收进公式区间会让译文把
+ * 它们原样保留成英文（"权重 as αi"）。数学里常用的双字母转写（`pi`、`mu`、
+ * `xi`、`ti`）刻意不进这张表：它们是变量。
+ */
+const SHORT_FUNCTION_WORDS = new Set([
+  "as", "at", "be", "by", "do", "go", "he", "if", "in", "is", "it",
+  "me", "my", "no", "of", "on", "or", "so", "to", "up", "us", "we", "an",
+]);
+
+/** 可以被公式区间吸收的词元。空格单独处理（见 collectSpan）。 */
+const SPAN_HARD_KINDS = new Set<TokenKind>(["symbol", "number", "op", "var", "func"]);
+
+function tokenize(text: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    const start = i;
+    let kind: TokenKind;
+    if (isFormulaSymbol(ch)) {
+      i++;
+      kind = "symbol";
+    } else if (/[0-9]/.test(ch) || (ch === "." && /[0-9]/.test(text[i + 1] || ""))) {
+      while (i < text.length && /[0-9.]/.test(text[i])) i++;
+      kind = "number";
+    } else if (/[A-Za-z]/.test(ch)) {
+      while (i < text.length && /[A-Za-z]/.test(text[i])) i++;
+      const word = text.slice(start, i);
+      kind = word.length === 1 ? "var" : FORMULA_FUNCTIONS.has(word.toLowerCase()) ? "func" : "word";
+    } else if (ch === " " || ch === "\t") {
+      while (i < text.length && (text[i] === " " || text[i] === "\t")) i++;
+      kind = "space";
+    } else if (",;.".includes(ch)) {
+      while (i < text.length && ",;.".includes(text[i])) i++;
+      kind = "punct";
+    } else if ("+-*/=<>|^_()[]{}:".includes(ch)) {
+      i++;
+      kind = "op";
+    } else {
+      i++;
+      kind = "other";
+    }
+    tokens.push({ start, end: i, kind });
+  }
+  return tokens;
+}
+
+/**
+ * 从锚点词元向左右收集公式区间。
+ *
+ * 空格只有在两侧都属于公式时才收进来——`θ = 0` 的空格要保留，`we have θ` 的
+ * 空格必须成为区间边界，否则整句话会被圈进公式。
+ *
+ * 长度不超过 2 的字母串若不是虚词，就按双字母变量收进区间——`ti`、`si`、
+ * `di` 这类下标变量在 PDF 文本层里常写成两个相连字母。`p(ti | t<x)` 因此
+ * 能整块收进来。虚词（`as`、`of`、`to`）不收，否则译文会把它们原样保留成
+ * 英文："the latent weight as αi" 只能圈住 `αi`。
+ *
+ * 区间首尾的空格与句读最后修剪掉。`,` `;` `.` 是句子标点，已由 tokenize 归为
+ * `punct` 因而不是公式内容；`:` 仍算公式内容，因为 `A:B` 在数学里是比例。
+ */
+function collectSpan(
+  tokens: Token[],
+  anchorIdx: number,
+  text: string,
+): { from: number; to: number } {
+  /** 跳过空格之后，下一个词元是否属于公式内容。 */
+  function hardAfterSpace(idx: number): boolean {
+    let j = idx + 1;
+    while (j < tokens.length && tokens[j].kind === "space") j++;
+    return j < tokens.length && SPAN_HARD_KINDS.has(tokens[j].kind);
+  }
+  /** 公式内部的双字母变量（`ti`、`si`）。后面仍接公式内容才算。 */
+  function shortVar(idx: number): boolean {
+    const t = tokens[idx];
+    if (t.kind !== "word" || t.end - t.start > 2) return false;
+    if (SHORT_FUNCTION_WORDS.has(text.slice(t.start, t.end).toLowerCase())) return false;
+    return hardAfterSpace(idx);
+  }
+  function isSentencePunct(t: Token): boolean {
+    return t.kind === "punct";
+  }
+
+  let from = anchorIdx;
+  let to = anchorIdx + 1;
+  while (to < tokens.length) {
+    const t = tokens[to];
+    if (SPAN_HARD_KINDS.has(t.kind) || shortVar(to)) {
+      to++;
+      continue;
+    }
+    if (t.kind === "space" && to + 1 < tokens.length &&
+        (SPAN_HARD_KINDS.has(tokens[to + 1].kind) || shortVar(to + 1))) {
+      to++;
+      continue;
+    }
+    break;
+  }
+  while (from > 0) {
+    const t = tokens[from - 1];
+    if (SPAN_HARD_KINDS.has(t.kind) || shortVar(from - 1)) {
+      from--;
+      continue;
+    }
+    if (t.kind === "space" && from - 2 >= 0 &&
+        (SPAN_HARD_KINDS.has(tokens[from - 2].kind) || shortVar(from - 2))) {
+      from--;
+      continue;
+    }
+    break;
+  }
+  while (to > from && (tokens[to - 1].kind === "space" || isSentencePunct(tokens[to - 1]))) to--;
+  while (from < to && (tokens[from].kind === "space" || isSentencePunct(tokens[from]))) from++;
+  return { from, to };
+}
+
+/**
+ * 把一段文字里的公式子串用 `$` 包裹，产出带公式边界的文本。
+ *
+ * 为什么需要它：ODL 的 textBlock 粒度是整段，一条行内公式和它的引导语落在
+ * 同一个块里，旧链路只能整段替换或整段截图，引导语被丢弃。标出子区间之后，
+ * 保护层（formulaShield）可以只圈住公式本身，引导语照常翻译。
+ *
+ * 例：
+ *   `Under the null hypothesis we have θ = 0, and χ² ≥ 3.84`
+ *   → `Under the null hypothesis we have $θ = 0$, and $χ² ≥ 3.84$`
+ *
+ * 已经含 `$` 的文本原样返回：OCR 侧车与视觉模型给出的 LaTeX 本来就带
+ * `$...$` 边界，再包一层会让保护层的正则失配。
+ */
+export function markFormulaSpans(text: string): string {
+  if (!text || text.includes("$")) return text;
+  const tokens = tokenize(text);
+  // 先把所有区间按字符位置收齐，再一次拼接。不能边扫描边输出——向左扩展会
+  // 越过已经输出的词元（`a²` 的 `a` 在锚点 `²` 之前），那会把它输出两遍，
+  // 第一版就犯过这个错：`a² + b² = c²` 产出 `a$a² + b² = c²$`。
+  const spans: Array<{ start: number; end: number }> = [];
+  let i = 0;
+  while (i < tokens.length) {
+    if (tokens[i].kind !== "symbol") {
+      i++;
+      continue;
+    }
+    const { from, to } = collectSpan(tokens, i, text);
+    const start = tokens[from].start;
+    const end = tokens[to - 1].end;
+    const last = spans[spans.length - 1];
+    // 相邻或重叠的公式合成一个区间：`αi = exp(θ si)` 里两个锚点扫的是同一段。
+    if (last && start <= last.end) {
+      last.end = Math.max(last.end, end);
+    } else {
+      spans.push({ start, end });
+    }
+    i = to;
+  }
+  if (spans.length === 0) return text;
+  let out = "";
+  let pos = 0;
+  for (const span of spans) {
+    out += text.slice(pos, span.start) + "$" + text.slice(span.start, span.end) + "$";
+    pos = span.end;
+  }
+  return out + text.slice(pos);
+}
+
+/** 一段文本里被 markFormulaSpans 标出的公式子串个数，供基准统计用。 */
+export function countFormulaSpans(text: string): number {
+  const marked = markFormulaSpans(text);
+  return (marked.match(/\$/g) || []).length / 2;
 }
 
 /**
