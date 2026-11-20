@@ -599,17 +599,27 @@ export async function translateAndSplitWithOpenDataLoader(
     );
   }
 
-  // 4b. Capture formula screenshots for visual preservation. Independent of
-  //     the VLM LaTeX-extraction step above: even when VLM is unavailable or
-  //     fails, we rasterize each formula-bearing region so the renderer can
-  //     paste a clean image of the source math at the original bbox (instead
-  //     of dropping the {vn} token and leaving dangling text). Requires the
-  //     reader to be open — we open it transiently here.
-  if (selectedFormulaBlocks.length > 0) {
+  // 4b. Screenshot the formula regions that ended up WITHOUT usable LaTeX.
+  //     This is a fallback, not the default path. When the vision model
+  //     returned LaTeX — or the block is a native OCR formula — the formula
+  //     travels as text: searchable, copyable, and readable once latexToPlain
+  //     has run. Only a region whose LaTeX could not be obtained gets its
+  //     source image pasted back, because that is the last way left to keep
+  //     the math visually intact.
+  //
+  //     This filter is what stops a misdetected paragraph from burying its own
+  //     translation. The screenshot is drawn on top of everything else in the
+  //     region, so pasting it unconditionally (the old behaviour) meant a block
+  //     of ordinary statistical prose that tripped the formula heuristic had its
+  //     translated text completely covered by an image of the original.
+  const screenshotNeeded = selectedFormulaBlocks.filter(
+    (fb) => fb.latexStatus === "failed" || fb.latexStatus === "unavailable",
+  );
+  if (screenshotNeeded.length > 0) {
     await captureFormulaScreenshots(
       sourceItem.id,
       assemblies,
-      selectedFormulaBlocks,
+      screenshotNeeded,
       onProgress,
     );
   }
@@ -729,8 +739,10 @@ export async function translateAndSplitWithOpenDataLoader(
     if (isOriginalTextRemovalEnabled() && inputPath) {
       try {
         onProgress(getString("odl-progress-remove-original"));
+        // 页面尺寸一并传入：删除端要用它把 OpenDataLoader 的越界框裁回纸面，
+        // 否则一个 x=635 的框会被原样写进区域文件。
         const rectsContent = serializeRemovalRects(
-          buildRemovalRects(assemblies, translatedSets),
+          buildRemovalRects(assemblies, translatedSets, pageSizes),
         );
         cleanedBytes = await removeOriginalText(inputPath, rectsContent, opts.signal);
       } catch (e) {
@@ -975,16 +987,16 @@ async function extractFormulasForTranslation(
 
   let processed = 0;
   let failed = 0;
-  let imageFallback = 0;
   try {
     for (const fb of formulaBlocks) {
       const assembly = assemblies[fb.pageNumber - 1];
       if (!assembly) continue;
       // 原生公式（OCR 侧车）：段落文本本身就是 LaTeX，无需裁剪、无需视觉
-      // 模型。截图回贴路径照旧跑（captureFormulaScreenshots 不管来源），
-      // 公式的视觉保全不变。
+      // 模型。LaTeX 可用，截图兜底不会触发（见下方 captureFormulaScreenshots
+      // 的过滤条件）。
       if (fb.latex) {
         assembly.texts[fb.paragraphIndex] = fb.latex;
+        fb.latexStatus = "native";
         processed++;
         continue;
       }
@@ -999,33 +1011,27 @@ async function extractFormulasForTranslation(
         });
         const latex = await extractFormulaLatex(dataUrl);
         if (latex && latex.toUpperCase() !== "NONE") {
-          // Splice the LaTeX in, replacing the formula-laden original so the
-          // translator doesn't corrupt the math symbols. $...$ is preserved.
+          // LaTeX 拿到了，公式以文本形式进译文：可搜索、可复制，渲染前再经
+          // latexToPlain 转成读者看得懂的数学符号。截图兜底因此不再需要。
           assembly.texts[fb.paragraphIndex] = latex;
+          fb.latexStatus = "extracted";
+        } else {
+          // "NONE" = 模型说这图里没有公式，这段大概是误报。保留原文——其中的
+          // 公式子串已由 markFormulaSpans 标出、由 formulaShield 保护，跟着
+          // 正文翻译即可。标记为无 LaTeX，截图兜底据此决定要不要贴图。
+          fb.latexStatus = "failed";
         }
-        // "NONE" = model saw no formula — keep original text, no fallback.
         processed++;
       } catch (e) {
         safeDebug("[Z-Transplit] opendataloaderSplitAdapter: " + e);
-        // VLM extraction failed. If we have a crop, paste it back as an image
-        // at the formula's bbox (better than corrupted symbols getting
-        // translated). Store in placedFormulas (NOT assembly.images) so BOTH
-        // overlay and white-page render modes composite it — overlay mode does
-        // not render `assembly.images` (it skips them to avoid double-drawing
-        // the source's own images), which previously caused the formula region
-        // to appear as a blank white hole in the default overlay path.
-        if (dataUrl) {
-          const placed = {
-            bbox: { x: fb.bbox.x, y: fb.bbox.y, width: fb.bbox.width, height: fb.bbox.height },
-            dataUri: dataUrl,
-          };
-          if (!assembly.placedFormulas) assembly.placedFormulas = [];
-          assembly.placedFormulas.push(placed);
-          // Clear the text so the corrupted symbols aren't also drawn under the
-          // image (the renderer skips empty translated text).
-          assembly.texts[fb.paragraphIndex] = "";
-          imageFallback++;
-        }
+        // 提取失败（超时、接口错误、空响应）。截图由 captureFormulaScreenshots
+        // 统一负责——早先这里也推一次 placedFormulas，于是同一个区域被贴两张
+        // 完全相同的图，stats.imagesRendered 虚高。
+        fb.latexStatus = "failed";
+        // 清空文本：被毁掉的符号不该画在截图下面（渲染器跳过空译文）。这段
+        // 若是"引导语加公式"的混合块，引导语会一起丢失——判据修好之后误报段
+        // 不会进 formulaBlocks，剩下的块都是真公式区，本就没有可译正文。
+        assembly.texts[fb.paragraphIndex] = "";
         failed++;
       }
       // Every 10 items (not 5): each report appends a ProgressWindow row, and
@@ -1051,25 +1057,19 @@ async function extractFormulasForTranslation(
   }
   onProgress(
     getString("odl-progress-crop-done", { ok: processed }) +
-      (imageFallback > 0
-        ? getString("odl-progress-crop-fallback", { count: imageFallback })
-        : "") +
-      (failed - imageFallback > 0
-        ? getString("odl-progress-crop-failed", { count: failed - imageFallback })
-        : ""),
+      (failed > 0 ? getString("odl-progress-crop-failed", { count: failed }) : ""),
   );
 }
 
 /**
- * Rasterize each formula-bearing paragraph's bbox and store the screenshot in
- * `assembly.placedFormulas`. This is the visual-preservation path: the renderer
- * pastes these images back at the original coordinates so formulas survive
- * translation as clean images instead of being dropped or rendered as raw LaTeX.
+ * Rasterize the bbox of each formula-bearing paragraph that has no usable LaTeX
+ * and store the screenshot in `assembly.placedFormulas`. This is the
+ * visual-preservation fallback: the renderer pastes these images back at the
+ * original coordinates so formulas survive as clean images.
  *
- * Independent of `extractFormulasForTranslation` (VLM LaTeX): we capture
- * screenshots regardless of whether a vision model is configured, so formulas
- * are always preserved visually. When VLM is also available, both run — the
- * LaTeX splice gives selectable text and the screenshot is a fallback.
+ * The caller filters by `latexStatus` — blocks that DID get LaTeX never reach
+ * this function, so their text (not an image) is what the reader sees. See the
+ * call site for why the filter matters.
  *
  * Opens the source PDF in a reader transiently (the rasterizer needs a live
  * pdf.js instance), then closes it. Failures are soft: a single bad crop is

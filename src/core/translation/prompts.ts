@@ -17,15 +17,25 @@ import { renderPrompt } from "./promptTemplate";
  * placeholders verbatim. converter.py's default translator doesn't add this
  * (it just says "preserve formulas"), but the placeholder syntax is more fragile
  * than prose formulas — models sometimes expand/rewrite `{v3}` as `{v 3}` or
- * translate the "v". The C stage tolerates spaces but NOT a translated "v",
- * so we make the constraint explicit.
+/**
+ * System prompt for single-paragraph translation.
  *
- * Verbatim port of leadero/src/core/pdf/translation/translateParagraphs.ts:130,
- * plus one clause added for the OCR path: OCR formulas arrive as `$...$` /
- * `$$...$$` LaTeX (the {vn} contract never fired for them), and a translator
- * that rewrites math inside dollar signs corrupts the one thing the pipeline
- * promised to preserve. The batch prompt already carried this rule
- * (batchJsonPrompt rule 3); the single-paragraph prompt did not.
+ * The formula rule here is a SECOND line of defence, not the primary one. The
+ * pipeline strips `$...$` spans out of the request before it reaches any engine
+ * (see formulaShield) and puts them back afterwards, so by the time this prompt
+ * is in play there is normally no formula left in the text. It stays because it
+ * costs nothing and covers the paths that bypass the shield.
+ *
+ * An earlier version of this prompt promised to preserve `{v0}`-style tokens.
+ * Nothing in the pipeline has generated those for a long time — the assembly
+ * layer's formula list was hardwired empty — so the promise was unkeepable and
+ * the tokens, when they did appear in a test, came back mangled. The clause is
+ * gone rather than reworded.
+ *
+ * Ported from leadero/src/core/translation/translationEngines.ts:906, plus one
+ * clause added for the OCR path: OCR formulas arrive as `$...$` / `$$...$$`
+ * LaTeX, and a translator that rewrites math inside dollar signs corrupts the
+ * one thing the pipeline promised to preserve.
  */
 export function formulaPreservingPrompt(
   targetLangDesc: string,
@@ -34,21 +44,17 @@ export function formulaPreservingPrompt(
   return (
     `You are a professional translator. Translate the following text from ${sourceLangDesc} to ${targetLangDesc}.\n` +
     `Output ONLY the translated text, no explanations.\n` +
-    `CRITICAL: The text contains tokens like {v0}, {v1}, {v2} that mark the position of mathematical formulas. ` +
-    `You MUST preserve every such token EXACTLY as-is — same braces, same letter 'v', same number, in the correct ` +
-    `position relative to the surrounding translated text. Do not translate, rename, expand, or renumber these tokens. ` +
-    `For example, input "The result is {v0} where {v1} denotes..." must keep {v0} and {v1} intact.\n` +
-    `ALSO CRITICAL: the text may contain LaTeX math wrapped in $...$ or $$...$$ (for example $E=mc^2$). ` +
-    `Preserve every such expression EXACTLY as-is — never translate or modify anything inside the dollar signs.`
+    `CRITICAL: the text may contain LaTeX math wrapped in $...$ or $$...$$ (for example $E=mc^2$). ` +
+    `Preserve every such expression EXACTLY as-is — never translate, reorder or modify anything ` +
+    `inside the dollar signs, and keep the dollar signs themselves in place.`
   );
 }
 
 /**
  * System prompt for batch JSON translation. Instructs the model to output a
- * JSON object with a "translations" string array, preserving formulas and
- * {vn} tokens.
+ * JSON object with a "translations" string array, preserving formulas.
  *
- * Verbatim port of leadero/src/core/translation/translationEngines.ts:906.
+ * Ported from leadero/src/core/translation/translationEngines.ts:906.
  */
 export function batchJsonPrompt(
   targetDesc: string,
@@ -62,8 +68,7 @@ export function batchJsonPrompt(
     `1. The output array MUST contain EXACTLY the same number of elements as the input, in the same order.\n` +
     `2. Do NOT merge, split, add, skip, or reorder segments.\n` +
     `3. Preserve EVERY formula in $...$ or $$...$$ EXACTLY as-is. Never translate or modify content inside dollar signs.\n` +
-    `4. Preserve tokens like {v0}, {v1} verbatim.\n` +
-    `5. Output ONLY valid JSON, no markdown, no explanations.`
+    `4. Output ONLY valid JSON, no markdown, no explanations.`
   );
 }
 

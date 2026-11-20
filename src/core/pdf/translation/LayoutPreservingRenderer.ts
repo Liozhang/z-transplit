@@ -54,6 +54,7 @@ function fontkitCompat(): any {
 import type { AssemblyResult, Paragraph } from "./translationIR";
 import { embedDataUri, compositeFormulas } from "./ImageCompositor";
 import { wrapTextMixed, isCJK } from "./TextWrapper";
+import { latexToPlain } from "./latexToPlain";
 import { getString } from "../../../utils/locale";
 import { safeDebug } from "../../../utils/logger";
 
@@ -217,7 +218,7 @@ export interface RenderResult {
   /** Diagnostics: how many paragraphs rendered, how many formulas dropped. */
   stats: {
     paragraphsRendered: number;
-    formulasDropped: number;
+    formulasRendered: number;
     overflowed: number;
     /** Raster images composited back onto the page (ODL path only). */
     imagesRendered: number;
@@ -279,7 +280,7 @@ export async function renderLayoutPreserving(
   }
   const stats = {
     paragraphsRendered: 0,
-    formulasDropped: 0,
+    formulasRendered: 0,
     overflowed: 0,
     imagesRendered: 0,
     imagesDropped: 0,
@@ -297,12 +298,13 @@ export async function renderLayoutPreserving(
     let text = translated[i];
     if (!text) continue;
 
-    // Strip {vn} formula placeholders. When a placedFormula image is available
-    // for this paragraph (see compositeFormulas below), the formula is rendered
-    // visually; the text token is dropped either way so it doesn't draw raw.
-    const stripped = stripFormulaPlaceholders(text);
-    if (stripped.dropped > 0) stats.formulasDropped += stripped.dropped;
-    text = stripped.text;
+    // Reduce LaTeX formula spans to readable math. The text still carries
+    // `$...$` from the extractor or the shield's restore step; drawing that
+    // verbatim would show the reader `rac{lpha}{eta}`, and after
+    // sanitizeForFont a row of question marks.
+    const hadFormula = text.includes("$");
+    text = latexToPlain(text);
+    if (hadFormula) stats.formulasRendered++;
     if (!text.trim()) continue;
 
     // In overlay mode, cover the original text so it doesn't bleed through.
@@ -444,7 +446,7 @@ export async function renderOverlayTranslated(
   const pages = pdfDoc.getPages();
   const stats = {
     paragraphsRendered: 0,
-    formulasDropped: 0,
+    formulasRendered: 0,
     overflowed: 0,
     imagesRendered: 0,
     imagesDropped: 0,
@@ -480,9 +482,10 @@ export async function renderOverlayTranslated(
       const p = applyRotation(rawP, rotation, pageW, pageH);
       let text = translated[j];
       if (!text) continue;
-      const stripped = stripFormulaPlaceholders(text);
-      if (stripped.dropped > 0) stats.formulasDropped += stripped.dropped;
-      text = stripped.text;
+      // Same reduction as the white-page path — see the note there.
+      const hadFormula = text.includes("$");
+      text = latexToPlain(text);
+      if (hadFormula) stats.formulasRendered++;
       if (!text.trim()) continue;
 
       // Clamp the paragraph bbox to the page MediaBox. ODL occasionally reports
@@ -832,20 +835,3 @@ function sanitizeForFont(text: string, font: PDFFont): string {
   return out.replace(/\?{2,}/g, "…").trim();
 }
 
-/**
- * Tolerant formula-placeholder stripper. converter.py uses the same regex on the
- * consume side — `\{\s*v[\d\s]+\}`, case-insensitive — so
- * even if the translator mangled spacing, we still recognize and drop the token.
- * Phase 1 drops formulas entirely (no vector re-render); Phase 2 will emit them.
- */
-export function stripFormulaPlaceholders(text: string): {
-  text: string;
-  dropped: number;
-} {
-  const re = /\{\s*v[\d\s]+\}/gi;
-  const matches = text.match(re);
-  return {
-    text: text.replace(re, "").trim(),
-    dropped: matches ? matches.length : 0,
-  };
-}

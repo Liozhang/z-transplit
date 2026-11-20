@@ -37,10 +37,14 @@
  * All engines return the same signature:
  *   { success: true, translatedText: string } or { success: false, error: string }
  *
- * Formula placeholder preservation ({v0}, {v1}, …) is guaranteed only for the
- * model-backed engines ("ai" and "custom"), because they receive an explicit
- * prompt. Traditional MT APIs have no prompt mechanism, so callers that need
- * formula safety must stay on one of those two.
+ * Formula safety: no engine guarantees it on its own. The model-backed engines
+ * ("ai" and "custom") get a prompt that asks for `$...$` spans to be kept, but
+ * the traditional MT APIs (Google, Bing, DeepL, youdao, the Zotero bridge) have
+ * no prompt mechanism at all — and Google is the factory default. Callers that
+ * need formula safety must wrap the engine with the shield in
+ * src/core/pdf/translation/formulaShield.ts, which takes the formulas out
+ * before the request and puts them back after. That works for every engine
+ * because it never asks the engine to cooperate.
  *
  * Ported from leadero's src/core/translation/translationEngines.ts: leadero's
  * ModelRouter/AIProviderRegistry coupling is replaced by the local

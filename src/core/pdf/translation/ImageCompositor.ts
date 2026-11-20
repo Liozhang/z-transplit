@@ -41,10 +41,9 @@ export async function embedDataUri(
  * with the page background (white by default) to cover any leftover source
  * text, then the cropped formula image is pasted on top.
  *
- * This is the visual-preserving fix for formulas: instead of dropping `{vn}`
- * tokens (Phase 1) and leaving dangling text like "由公式  可知", the renderer
- * pastes a clean image of the source math at the right coordinates. Works in
- * both overlay and white-page render modes.
+ * These images are the FALLBACK for regions whose LaTeX could not be obtained.
+ * A region that DID get LaTeX never reaches this function — its formula travels
+ * as text instead, which is searchable and copyable.
  *
  * Stats: counts images rendered vs dropped (bad data URI / unsupported format).
  */

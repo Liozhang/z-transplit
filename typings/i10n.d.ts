@@ -107,7 +107,6 @@ export type FluentMessageId =
   | 'odl-progress-cancelled'
   | 'odl-progress-crop-done'
   | 'odl-progress-crop-failed'
-  | 'odl-progress-crop-fallback'
   | 'odl-progress-crop-progress'
   | 'odl-progress-crop-reader-missing-skip'
   | 'odl-progress-crop-reader-missing-text'

@@ -197,7 +197,6 @@ odl-progress-crop-reader-missing-skip = 无法打开 reader 进行公式截图�
 odl-progress-crop-reader-missing-text = 无法打开 reader 进行公式截图，公式将以文本形式处理。
 odl-progress-crop-progress = 公式提取进度：{ $current }/{ $total }
 odl-progress-crop-done = 公式提取完成：{ $ok } 段成功
-odl-progress-crop-fallback = ，{ $count } 段回退为截图
 odl-progress-crop-failed = ，{ $count } 段失败已保留原文
 odl-progress-shot-progress = 公式截图进度：{ $current }/{ $total }
 odl-progress-shot-done = 公式截图完成：{ $ok } 段成功

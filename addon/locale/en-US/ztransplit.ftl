@@ -203,7 +203,6 @@ odl-progress-crop-reader-missing-skip = Could not open a reader for formula scre
 odl-progress-crop-reader-missing-text = Could not open a reader for formula screenshots; formulas will be handled as text.
 odl-progress-crop-progress = Formula extraction progress: { $current }/{ $total }
 odl-progress-crop-done = Formula extraction finished: { $ok } succeeded
-odl-progress-crop-fallback = , { $count } fell back to screenshots
 odl-progress-crop-failed = , { $count } failed and keep the original text
 odl-progress-shot-progress = Formula screenshot progress: { $current }/{ $total }
 odl-progress-shot-done = Formula screenshots finished: { $ok } succeeded

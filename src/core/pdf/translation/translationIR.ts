@@ -99,22 +99,6 @@ export interface LtLineLike {
 
 
 /**
- * One formula group, referenced from paragraph text via the `{vn}` placeholder.
- * Index `n` in `{vn}` is the position in AssemblyResult.formulas.
- */
-export interface FormulaGroup {
-  /** Characters composing the formula (for re-rendering at original positions). */
-  chars: LtCharLike[];
-  /** Vector lines belonging to the formula. */
-  lines: LtLineLike[];
-  /** Vertical offset correction (baseline alignment with adjacent text). */
-  fix: number;
-  /** Precomputed formula width (converter.py). */
-  width: number;
-}
-
-
-/**
  * One raster image to be placed back onto the rendered page, at its original
  * coordinates. Source: OpenDataLoader JSON `image`/`chart` elements whose
  * `data` field carries a base64 data URI (only present when the jar is run
@@ -134,32 +118,31 @@ export interface PlacedImage {
 }
 
 /**
- * Output of paragraph assembly (converter.py A stage). The six parallel
- * structures mirror converter.py's sstk/pstk/var/varl/varf/vlen/lstk.
+ * Output of paragraph assembly (converter.py A stage). The parallel structures
+ * mirror converter.py's sstk/pstk/var/varl/varf/vlen/lstk.
  *
  * Contract: `paragraphs[i]` and `texts[i]` describe the same paragraph.
- * `texts[i]` may contain `{vn}` placeholders indexing into `formulas`.
+ * `texts[i]` may contain `$...$` formula spans, which the renderer reduces to
+ * readable math via `latexToPlain`.
  *
  * `images` is an optional addition (used by the OpenDataLoader adapter path):
  * the original converter.py pipeline never populates it. When present,
  * the C-stage renderer composites each image onto the page at `bbox`.
  */
 export interface AssemblyResult {
-  /** Paragraph texts, possibly containing `{vn}` formula placeholders. */
+  /** Paragraph texts, possibly containing `$...$` formula spans. */
   texts: string[];
   /** Paragraph geometries, aligned with `texts` by index. */
   paragraphs: Paragraph[];
-  /** Formula groups, indexed by the `n` in `{vn}`. */
-  formulas: FormulaGroup[];
   /** Global (non-formula) lines for re-rendering. */
   globalLines: LtLineLike[];
   /** Optional raster images to composite onto the page (ODL path only). */
   images?: PlacedImage[];
   /**
    * Formula region screenshots to composite back at their original bboxes
-   * (ODL path only). When present, the renderer covers the original (corrupted)
-   * formula text with a mask and pastes the cropped image on top — preserving
-   * the formula visually instead of dropping it or rendering raw LaTeX.
+   * (ODL path only). A fallback for regions whose LaTeX could not be obtained:
+   * the renderer covers the original formula text with a mask and pastes the
+   * cropped image on top, preserving the math visually.
    */
   placedFormulas?: PlacedImage[];
 }

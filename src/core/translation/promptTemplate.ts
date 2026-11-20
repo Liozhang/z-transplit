@@ -62,7 +62,6 @@ Text to translate:
 {{text}}
 Output ONLY the translated text — no explanations, no notes.
 CRITICAL — preserve EXACTLY as-is, never translate, rewrite or renumber:
-- Formula placeholder tokens like {v0}, {v1}, {v2}: same braces, same letter "v", same number, in the same position relative to the surrounding translated text.
 - Formulas between dollar signs ($...$): keep the signs and their content unchanged.
 - Citation markers like [12] / [13, 15]: keep the brackets and numbers exactly.
 - Measurements with units (3.3 V, 2 ms, 1.5 GB/s), standards identifiers (ISO 11898-2), gene/protein symbols (p53, TP53) and code identifiers: keep them as written.`;
