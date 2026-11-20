@@ -200,7 +200,7 @@ describe("resolvePromptTemplate / promptFingerprint", () => {
       "the same term always gets the same translation",
     );
     // Preserve-as-is list: formula tokens, $...$ formulas, citations, units.
-    expect(DEFAULT_AI_PROMPT).toContain("{v0}");
+    expect(DEFAULT_AI_PROMPT).toContain("$...$");
     expect(DEFAULT_AI_PROMPT).toContain("dollar signs ($...$)");
     expect(DEFAULT_AI_PROMPT).toContain("[13, 15]");
     expect(DEFAULT_AI_PROMPT).toContain("ISO 11898-2");

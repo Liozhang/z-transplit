@@ -111,7 +111,7 @@ describe("createTranslator / custom 引擎", () => {
     expect(body.messages[1].role).toBe("user");
     // getLanguageName("en") 现映射为 English（此前未映射时透传 "en"）
     expect(body.messages[0].content).toContain("from English to Simplified Chinese");
-    expect(body.messages[0].content).toContain("{v0}");
+    expect(body.messages[0].content).toContain("$...$");
   });
 
   it("URL 已以 /chat/completions 结尾时不重复拼接", async () => {

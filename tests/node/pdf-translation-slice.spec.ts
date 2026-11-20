@@ -53,12 +53,10 @@ const ZH_MAP: Record<string, string> = {
 const stubTranslator: ParagraphTranslator = async (
   text: string,
 ): Promise<string> => {
-  // 保留 {vn} 占位符原样（formulaPreservingPrompt 已强调，这里 stub 也遵守）
-  const placeholders: string[] = [];
-  const protected_ = text.replace(/\{\s*v[\d\s]+\}/gi, (m) => {
-    placeholders.push(m);
-    return `\x00${placeholders.length - 1}\x00`;
-  });
+  // 不再需要手工保护占位符：生产链路上 formulaShield 会在请求前把公式摘成
+  // 占位符、译后放回。这个 stub 模拟"引擎老实原样返回了公式"这一最好情况，
+  // 用来验证渲染前的化简与提示词契约。
+  const protected_ = text;
   // 逐词映射，未命中的词用「词」包裹表示是中文段
   const zh = protected_
     .split(/(\s+)/)
@@ -68,33 +66,35 @@ const stubTranslator: ParagraphTranslator = async (
       return ZH_MAP[lower] ?? `「${tok}」`;
     })
     .join("");
-  // eslint-disable-next-line no-control-regex -- \x00 delimiters are intentional placeholder markers
-  return zh.replace(/\x00(\d+)\x00/g, (_, i) => placeholders[Number(i)]);
+  return zh;
 };
 
 describe("PDF 布局保留翻译 — 端到端切片", () => {
-  it("formulaPreservingPrompt 应包含明确的 {vn} 保留指令", () => {
+  it("formulaPreservingPrompt 应包含明确的 $...$ 保留指令", () => {
     const prompt = formulaPreservingPrompt("Simplified Chinese", "English");
-    expect(prompt).toMatch(/\{v0\}/);
+    expect(prompt).toContain("$...$");
     expect(prompt.toLowerCase()).toContain("preserve");
     expect(prompt.toLowerCase()).toContain("only the translated text");
+    // 早先这里断言提示词承诺保留 {v0} 占位符。管线已经很久不生成那种占位符，
+    // 承诺无法兑现，该条款已删——这里反过来断言它不再出现。
+    expect(prompt).not.toMatch(/\{v0\}/);
   });
 
-  it("stub 翻译器应保留 {vn} 占位符并产出中文", async () => {
-    const out = await stubTranslator("The value {v0} is given by {v1}", "zh-CN");
-    expect(out).toContain("{v0}");
-    expect(out).toContain("{v1}");
+  it("stub 翻译器应原样保留 $...$ 公式并产出中文", async () => {
+    const out = await stubTranslator("The value $x^2$ is given by $y$", "zh-CN");
+    expect(out).toContain("$x^2$");
+    expect(out).toContain("$y$");
     expect(out).toContain("该"); // "the" → "该"
     expect(out).toContain("「value」"); // 未命中词被中文括号包裹
   });
 });
 
 // 单独测 stub 翻译器逻辑（不依赖模型，始终运行）
-describe("stub translator 占位符保留", () => {
-  it("保留多个 {vn} 且产出中文", async () => {
-    const out = await stubTranslator("a {v0} b {v1} c", "zh-CN");
-    expect(out).toContain("{v0}");
-    expect(out).toContain("{v1}");
+describe("stub translator 公式保留", () => {
+  it("保留多个 $...$ 公式且产出中文", async () => {
+    const out = await stubTranslator("a $p$ b $q$ c", "zh-CN");
+    expect(out).toContain("$p$");
+    expect(out).toContain("$q$");
     // "a" → "一个"，未命中的 b/c 被中文括号包裹
     expect(out).toContain("一个");
     expect(out).toContain("「b」");

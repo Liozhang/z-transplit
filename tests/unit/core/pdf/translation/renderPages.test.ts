@@ -30,7 +30,6 @@ function assembly(text: string): AssemblyResult {
   return {
     texts: text ? [text] : [],
     paragraphs: text ? [paragraph()] : [],
-    formulas: [],
     globalLines: [],
   };
 }
@@ -88,7 +87,7 @@ describe("renderOverlayTranslated — renderPages（页码范围）", () => {
     );
     // stats 全零 = 没有遮罩、没有译文、没有公式贴图；页数不变（原文保留）。
     expect(result.stats.paragraphsRendered).toBe(0);
-    expect(result.stats.formulasDropped).toBe(0);
+    expect(result.stats.formulasRendered).toBe(0);
     expect(result.stats.overflowed).toBe(0);
     const out = await PDFDocument.load(result.bytes);
     expect(out.getPageCount()).toBe(1);

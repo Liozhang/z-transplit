@@ -114,7 +114,9 @@ describe("translationCache storage", () => {
 
 describe("translateParagraphs cache integration", () => {
   it("second run with the same identity does not call the translator again", async () => {
-    const texts = ["First paragraph.", "Second paragraph.", "{v3}"];
+    // 纯公式直通用 $...$ 判定。此前这里写 {v3}——那套占位符管线早已不再
+    // 生成，它现在是普通文本，会被送进引擎。
+    const texts = ["First paragraph.", "Second paragraph.", "$E = mc^2$"];
     const calls: string[] = [];
     const translate = vi.fn(async (text: string) => {
       calls.push(text);
@@ -124,9 +126,9 @@ describe("translateParagraphs cache integration", () => {
     const first = await translateParagraphs(texts, translate, "zh-CN", undefined, 4, {
       cacheIdentity: ID,
     });
-    // {v3} is a pure-formula passthrough → only two real calls.
+    // The formula paragraph is a passthrough → only two real calls.
     expect(calls).toHaveLength(2);
-    expect(first.results).toEqual(["译(First paragraph.)", "译(Second paragraph.)", "{v3}"]);
+    expect(first.results).toEqual(["译(First paragraph.)", "译(Second paragraph.)", "$E = mc^2$"]);
 
     const second = await translateParagraphs(texts, translate, "zh-CN", undefined, 4, {
       cacheIdentity: ID,

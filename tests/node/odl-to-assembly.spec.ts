@@ -26,6 +26,7 @@ import {
   odlAnalysisToAssembly,
 } from "../../src/core/pdf/translation/odlToAssembly";
 import type { PdfDocumentAnalysis } from "../../src/core/pdf/PdfIR";
+import { sourcePdfBytes, cjkFontBytes } from "./helpers/sourceFixture";
 import {
   renderLayoutPreserving,
   renderOverlayTranslated,
@@ -280,13 +281,12 @@ describe("odlAnalysisToAssembly", () => {
     expect(assemblies[0].texts).toEqual([]);
   });
 
-  it("fills formulas and globalLines with empty arrays (renderer ignores them)", () => {
+  it("fills globalLines with an empty array (renderer ignores it)", () => {
     const analysis = buildAnalysis([
       { blocks: [{ text: "x", x: 1, y: 1, width: 1, height: 1, fontSize: 10 }] },
     ]);
 
     const { assemblies } = odlAnalysisToAssembly(analysis);
-    expect(assemblies[0].formulas).toEqual([]);
     expect(assemblies[0].globalLines).toEqual([]);
   });
 
@@ -374,8 +374,9 @@ describe("odlAnalysisToAssembly", () => {
       {
         blocks: [
           { text: "$\\frac{\\alpha}{\\beta} \\geq \\sum_i x_i$", x: 50, y: 700, width: 200, height: 16, isFormula: true },
-          // 同一页再来一个普通段落，里面也有两个公式字符——启发式照旧命中它。
-          { text: "其中 β 与 α 为系数，见上文。", x: 50, y: 650, width: 200, height: 15 },
+          // 同一页再来一个公式段，让启发式命中它。刻意不用带汉字的统计正文：
+          // 那种文本汉字数超过上限，判据正确地把它排除在公式之外。
+          { text: "α + β = γ", x: 50, y: 650, width: 200, height: 15 },
         ],
       },
     ]);
@@ -513,21 +514,13 @@ describe("renderLayoutPreserving with images", () => {
 // ─── Overlay mode test (preserve original vector content) ────────────
 
 describe("renderOverlayTranslated (overlay mode)", () => {
-  const SOURCE_PDF = path.join(__dirname, "..", "zotero", "fixtures", "a.pdf");
-  const CJK_FONT = path.join(
-    __dirname,
-    "..",
-    "zotero",
-    "fixtures",
-    "NotoSansSC.ttf",
-  );
+  // 夹具与字体解析见 helpers/sourceFixture。此前这里指向 tests/zotero/fixtures/
+  // 下两个仓库里不存在的文件，并用 `if (!existsSync) return` 静默跳过——每次
+  // 运行都绿，但一条断言都没执行。
+  const sourceBytes = sourcePdfBytes();
+  const cjkBytes = cjkFontBytes();
 
   it("loads the source PDF, overlays translated text, preserves original content", async () => {
-    if (!fs.existsSync(SOURCE_PDF)) return; // skip if fixture missing
-    const sourceBytes = fs.readFileSync(SOURCE_PDF);
-    const cjkBytes = fs.existsSync(CJK_FONT)
-      ? fs.readFileSync(CJK_FONT)
-      : undefined;
 
     // Build a 1-page assembly matching a.pdf's page size (612x792).
     const analysis: PdfDocumentAnalysis = {

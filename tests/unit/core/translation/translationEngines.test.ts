@@ -274,7 +274,7 @@ describe("engine wire contracts", () => {
     expect(body.messages[0].role).toBe("system");
     // formula-preserving prompt (the ex-"ai" engine's contract, now on custom)
     expect(body.messages[0].content).toContain("from auto-detect to French");
-    expect(body.messages[0].content).toContain("{v0}");
+    expect(body.messages[0].content).toContain("$...$");
     expect(body.messages[1]).toEqual({ role: "user", content: "hello" });
     // 与 AI 引擎同一档超时：自定义端点面向本地网关，无 signal 会挂到操作系统超时。
     expect(call.signal).toBeDefined();
@@ -739,7 +739,7 @@ describe("ai engine (OpenAI-compatible + prompt template)", () => {
     expect(prompt).toContain("from English to Simplified Chinese");
     expect(prompt).toContain("hello");
     // The built-in template keeps the {vn} formula contract.
-    expect(prompt).toContain("{v0}");
+    expect(prompt).toContain("$...$");
     // And the raw placeholders never reach the model.
     expect(prompt).not.toContain("{{text}}");
     expect(prompt).not.toContain("{{sourceLang}}");
