@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-20 19:31:55",
+ "generatedAt": "2026-11-21 00:55:03",
  "results": [
   {
    "fixture": "reading-brain",
@@ -53,7 +53,7 @@
      }
     ]
    },
-   "elapsedMs": 3647,
+   "elapsedMs": 3627,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -218,8 +218,10 @@
     },
     "column": {
      "blocks": 18,
+     "columns": 1,
      "wideRatio": 0.5555555555555556,
      "crossColumnRatio": 0.0,
+     "mergedBlockRatio": 0.0,
      "worst": []
     },
     "heading": {
@@ -274,17 +276,17 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-pmj63fpw\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-pmj63fpw\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mxqbwfml\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mxqbwfml\\assembly.json"
    }
   },
   {
    "fixture": "attention-reading",
    "layout": {
-    "biou": 0.7526319208666985,
-    "biouSamples": 37,
-    "boxRecall": 0.7975141854098992,
-    "boxPrecision": 0.9376989241793144,
+    "biou": 0.7725932010123899,
+    "biouSamples": 38,
+    "boxRecall": 0.8167296975529695,
+    "boxPrecision": 0.939004456522736,
     "utb": 0,
     "utbReasons": {
      "noText": 0,
@@ -306,7 +308,7 @@
      "below06Ratio": 0.0
     },
     "mask": {
-     "total": 40,
+     "total": 41,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0
     },
@@ -322,15 +324,15 @@
      },
      {
       "page": 2,
-      "paragraphs": 11,
-      "translated": 11,
+      "paragraphs": 12,
+      "translated": 12,
       "untranslated": 0,
-      "meanIou": 0.7443631437412311,
-      "masks": 12
+      "meanIou": 0.8082629289630431,
+      "masks": 13
      }
     ]
    },
-   "elapsedMs": 5049,
+   "elapsedMs": 4805,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -594,18 +596,15 @@
     },
     "column": {
      "blocks": 62,
+     "columns": 2,
      "wideRatio": 0.03225806451612903,
-     "crossColumnRatio": 0.03225806451612903,
+     "crossColumnRatio": 0.016129032258064516,
+     "mergedBlockRatio": 0.016129032258064516,
      "worst": [
       {
        "page": 2,
        "ratio": 0.848,
        "text": "The results suggest that the brain regions supporting readin"
-      },
-      {
-       "page": 1,
-       "ratio": 0.758,
-       "text": "Attention and the Reading Brain: Twelve Weeks of Structured "
       }
      ]
     },
@@ -651,8 +650,8 @@
    "pixel": {
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
-    "outsideTotal": 1651315,
-    "insideChangedRatio": 0.3565987774535257,
+    "outsideTotal": 1748321,
+    "insideChangedRatio": 0.4198823867859641,
     "outsideSamples": []
    },
    "residue": {
@@ -662,15 +661,15 @@
     "sourceScript": "latin"
    },
    "stats": {
-    "paragraphsRendered": 37,
+    "paragraphsRendered": 38,
     "formulasRendered": 1,
     "overflowed": 0,
     "imagesRendered": 1,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b4_5k1si\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b4_5k1si\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mupkcl9a\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mupkcl9a\\assembly.json"
    }
   },
   {
@@ -717,7 +716,7 @@
      }
     ]
    },
-   "elapsedMs": 4678,
+   "elapsedMs": 4497,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -948,8 +947,10 @@
     },
     "column": {
      "blocks": 26,
+     "columns": 2,
      "wideRatio": 0.038461538461538464,
      "crossColumnRatio": 0.038461538461538464,
+     "mergedBlockRatio": 0.0,
      "worst": [
       {
        "page": 1,
@@ -1010,17 +1011,17 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-cowkqjtb\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-cowkqjtb\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-3atdn0fh\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-3atdn0fh\\assembly.json"
    }
   },
   {
    "fixture": "three-column",
    "layout": {
-    "biou": 0.7289010569537483,
-    "biouSamples": 26,
-    "boxRecall": 0.7848432832825678,
-    "boxPrecision": 0.9239385438629414,
+    "biou": 0.7590797654502588,
+    "biouSamples": 27,
+    "boxRecall": 0.8137356847401407,
+    "boxPrecision": 0.9260539689426849,
     "utb": 0,
     "utbReasons": {
      "noText": 0,
@@ -1037,12 +1038,12 @@
      "top": 0.0
     },
     "fontSize": {
-     "median": 0.7646228336398428,
+     "median": 0.7812089604676243,
      "p10": 0.7057785356523177,
      "below06Ratio": 0.0
     },
     "mask": {
-     "total": 27,
+     "total": 28,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0
     },
@@ -1050,15 +1051,15 @@
     "perPage": [
      {
       "page": 1,
-      "paragraphs": 26,
-      "translated": 26,
+      "paragraphs": 27,
+      "translated": 27,
       "untranslated": 0,
-      "meanIou": 0.7289010569537483,
-      "masks": 27
+      "meanIou": 0.7590797654502588,
+      "masks": 28
      }
     ]
    },
-   "elapsedMs": 3888,
+   "elapsedMs": 3695,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1249,8 +1250,10 @@
     },
     "column": {
      "blocks": 26,
+     "columns": 3,
      "wideRatio": 0.038461538461538464,
-     "crossColumnRatio": 0.11538461538461539,
+     "crossColumnRatio": 0.15384615384615385,
+     "mergedBlockRatio": 0.038461538461538464,
      "worst": [
       {
        "page": 1,
@@ -1266,6 +1269,11 @@
        "page": 1,
        "ratio": 0.475,
        "text": "Field Notes from a Three Column Layout"
+      },
+      {
+       "page": 1,
+       "ratio": 0.463,
+       "text": "Wk 1 Wk 3 Wk 5 Wk 6"
       }
      ]
     },
@@ -1303,8 +1311,8 @@
    "pixel": {
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
-    "outsideTotal": 839583,
-    "insideChangedRatio": 0.3727533144429047,
+    "outsideTotal": 861791,
+    "insideChangedRatio": 0.4389960050236597,
     "outsideSamples": []
    },
    "residue": {
@@ -1314,15 +1322,15 @@
     "sourceScript": "latin"
    },
    "stats": {
-    "paragraphsRendered": 26,
+    "paragraphsRendered": 27,
     "formulasRendered": 0,
     "overflowed": 0,
     "imagesRendered": 0,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-0ckcc183\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-0ckcc183\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-42okh4gj\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-42okh4gj\\assembly.json"
    }
   },
   {
@@ -1377,7 +1385,7 @@
      }
     ]
    },
-   "elapsedMs": 3859,
+   "elapsedMs": 3455,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1517,8 +1525,10 @@
     },
     "column": {
      "blocks": 19,
+     "columns": 1,
      "wideRatio": 0.2631578947368421,
      "crossColumnRatio": 0.0,
+     "mergedBlockRatio": 0.0,
      "worst": []
     },
     "heading": {
@@ -1573,8 +1583,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-uxzr2lam\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-uxzr2lam\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-of68i7oe\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-of68i7oe\\assembly.json"
    }
   }
  ]
