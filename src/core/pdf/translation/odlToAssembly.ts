@@ -42,6 +42,12 @@ import type {
   PlacedImage,
 } from "./translationIR";
 import { parseFontStyle, parseTextColor } from "./fontStyleParser";
+import {
+  allocateText,
+  detectColumnEdges,
+  isColumnSpanningBlock,
+  splitBlockByColumns,
+} from "./columnLayout";
 
 /** Per-page page geometry, returned alongside the per-page assemblies. */
 export interface PageSize {
@@ -130,7 +136,42 @@ export function pageAnalysisToAssembly(
   const texts: string[] = [];
   const formulaBlocks: FormulaBlock[] = [];
 
-  let paragraphIndex = 0;
+  // ── 第一遍：把块展开成条目 ──
+  // 多栏文档里解析器会把跨栏流式排版并成一个块，它的边界框是多个矩形片的并集。
+  // 这样的块必须先按栏带切开，否则遮罩会涂白邻栏、折行宽度是真实栏宽的两倍、
+  // 删除清单吞掉邻段。切开之后每个片段成为一个独立条目，后续一律按条目处理。
+  const pageWidth = page.width > 0 ? page.width : 612;
+  const allBoxes = page.textBlocks
+    .filter((b) => (b.text || "").trim())
+    .map((b) => ({
+      x0: b.bbox.x,
+      y0: b.bbox.y,
+      x1: b.bbox.x + (b.bbox.width > 0 ? b.bbox.width : 1),
+      y1: b.bbox.y + Math.max(b.bbox.height, b.fontSize > 4 ? b.fontSize : 10),
+    }));
+  const edges = detectColumnEdges(allBoxes, pageWidth);
+
+  interface Entry {
+    /** 该条目的文本（跨栏块是切片，其余是整段）。 */
+    text: string;
+    /** 标记公式子区间之后的文本，送翻译用这个。 */
+    marked: string;
+    box: { x: number; y: number; width: number; height: number };
+    size: number;
+    /**
+     * 解析器报的原始字号，未经回退。`size` 是渲染用的（0 或异常小的值被回退成
+     * 10），这个留着供需要真值的调用方参考——装配层自己的遮罩收缩与折行估算
+     * 一律用 `size`。
+     */
+    sourceFontSize: number;
+    isFormula: boolean;
+    /** ODL 折进字体名与文字颜色里的样式，原样带到段落上。 */
+    bold?: boolean;
+    italic?: boolean;
+    color?: { r: number; g: number; b: number };
+  }
+  const entries: Entry[] = [];
+
   for (const block of page.textBlocks) {
     const text = (block.text || "").trim();
     // Skip spacing-only / empty runs — they would render nothing and waste a
@@ -162,36 +203,7 @@ export function pageAnalysisToAssembly(
       Math.abs(w - size) < 2 && height > size * 5 && text.length > 20;
     if (isRotated) continue;
 
-    // 公式子区间标记。送翻译的文本带 `$...$` 边界，公式判定与截图取图仍用
-    // 未标记的原始文本——判据里 `$` 不是公式符号，标记与否不影响判定结果，
-    // 但 originalText 保持原样能让基准与调试对上的都是肉眼看到的文字。
-    const marked = markFormulaSpans(text);
-
-    // Formula detection. Two sources, priority order:
-    //   1. 原生公式区域（OCR 侧车的 isFormula 块，文本即 LaTeX）：直接带出，
-    //      不跑字符密度启发式——否则 LaTeX 里的 \frac 之类会二次命中，
-    //      同一区域被重复标记、重复贴截图。
-    //   2. ODL 路径：引擎不产公式，符号（Σ∫√ α β）被折进正文，按字符密度
-    //      启发式标记，交给视觉模型裁剪提取。
-    if (block.isFormula) {
-      formulaBlocks.push({
-        pageNumber,
-        paragraphIndex,
-        bbox: { x, y, width: w, height: Math.max(height, size) },
-        originalText: text,
-        latex: text,
-        latexStatus: "native",
-      });
-    } else if (isFormulaParagraph(text)) {
-      formulaBlocks.push({
-        pageNumber,
-        paragraphIndex,
-        bbox: { x, y, width: w, height: Math.max(height, size) },
-        originalText: text,
-        latexStatus: "unavailable",
-      });
-    }
-
+    const box = { x0: x, y0: y, x1: x + w, y1: y + Math.max(height, size) };
     // Recover source styling that ODL folds into the font name + textColor.
     // Both are optional; when absent the renderer keeps legacy behaviour.
     // `block.bold` is the explicit style channel for backends that know the
@@ -200,22 +212,96 @@ export function pageAnalysisToAssembly(
     const style = parseFontStyle(block.fontName);
     const bold = style.bold || block.bold === true;
     const color = parseTextColor(block.textColor);
+    const styling = {
+      ...(bold ? { bold: true as const } : {}),
+      ...(style.italic ? { italic: true as const } : {}),
+      ...(color ? { color } : {}),
+    };
+
+    if (isColumnSpanningBlock(box, allBoxes, edges, block.fontSize)) {
+      // 跨栏合并块：按栏带切开，文本按各片段的面积容量分配。词切片按空白边界
+      // 切，不切断单词；最后一个片段吃掉剩余部分，一个字都不丢。
+      // 字号用来把片段两端从邻段边界收回一个栏内留白，见 columnLayout 的
+      // INNER_MARGIN_RATIO。传已回退的 size，不用原始 block.fontSize——后者
+      // 对 ODL 的间距跑次可能是 0，会让收缩量变成 0，等于没修。
+      const fragments = splitBlockByColumns(box, allBoxes, edges, size);
+      const slices = allocateText(text, fragments);
+      fragments.forEach((fragment, i) => {
+        entries.push({
+          text: slices[i] ?? "",
+          marked: markFormulaSpans(slices[i] ?? ""),
+          box: {
+            x: fragment.x0,
+            y: fragment.y0,
+            width: fragment.x1 - fragment.x0,
+            height: fragment.y1 - fragment.y0,
+          },
+          size,
+          sourceFontSize: block.fontSize,
+          isFormula: block.isFormula === true,
+          ...styling,
+        });
+      });
+      continue;
+    }
+
+    entries.push({
+      text,
+      marked: markFormulaSpans(text),
+      box: { x, y, width: w, height: Math.max(height, size) },
+      size,
+      sourceFontSize: block.fontSize,
+      isFormula: block.isFormula === true,
+      ...styling,
+    });
+  }
+
+  // ── 第二遍：条目转成装配结构 ──
+  let paragraphIndex = 0;
+  for (const entry of entries) {
+    if (!entry.text) continue;
+    const { x, y, width: w, height } = entry.box;
+
+    // Formula detection. Two sources, priority order:
+    //   1. 原生公式区域（OCR 侧车的 isFormula 块，文本即 LaTeX）：直接带出，
+    //      不跑字符密度启发式——否则 LaTeX 里的 \frac 之类会二次命中，
+    //      同一区域被重复标记、重复贴截图。
+    //   2. ODL 路径：引擎不产公式，符号（Σ∫√ α β）被折进正文，按字符密度
+    //      启发式标记，交给视觉模型裁剪提取。
+    if (entry.isFormula) {
+      formulaBlocks.push({
+        pageNumber,
+        paragraphIndex,
+        bbox: { x, y, width: w, height },
+        originalText: entry.text,
+        latex: entry.text,
+        latexStatus: "native",
+      });
+    } else if (isFormulaParagraph(entry.text)) {
+      formulaBlocks.push({
+        pageNumber,
+        paragraphIndex,
+        bbox: { x, y, width: w, height },
+        originalText: entry.text,
+        latexStatus: "unavailable",
+      });
+    }
 
     paragraphs.push({
       x0: x,
       x1: x + w,
       y0: y,
-      y1: y + Math.max(height, size),
-      y: y,
-      size,
-      x: x,
+      y1: y + height,
+      y,
+      size: entry.size,
+      x,
       brk: false,
-      sourceFontSize: block.fontSize,
-      ...(bold ? { bold: true } : {}),
-      ...(style.italic ? { italic: true } : {}),
-      ...(color ? { color } : {}),
+      sourceFontSize: entry.sourceFontSize,
+      ...(entry.bold ? { bold: true } : {}),
+      ...(entry.italic ? { italic: true } : {}),
+      ...(entry.color ? { color: entry.color } : {}),
     });
-    texts.push(marked);
+    texts.push(entry.marked);
     paragraphIndex++;
   }
 
