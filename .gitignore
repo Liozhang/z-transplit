@@ -40,6 +40,9 @@ prototype/region-text-remover/build/
 prototype/region-text-remover/src-tmp/
 prototype/region-text-remover/lib/
 
+# 评测基准的中间产物（译文 PDF、解析 JSON、渲染统计、报告）
+scripts/qa/benchmark/out/
+
 # Python bytecode (tools/scan-sidecar is run in place during development)
 __pycache__/
 *.pyc

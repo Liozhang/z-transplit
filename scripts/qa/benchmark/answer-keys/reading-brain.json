@@ -1,0 +1,130 @@
+{
+ "fixture": "reading-brain",
+ "columns": 1,
+ "landscape": false,
+ "sourceScript": "latin",
+ "elements": [
+  {
+   "order": 0,
+   "type": "heading",
+   "text": "Reading and the Brain",
+   "formula": false,
+   "level": 1
+  },
+  {
+   "order": 1,
+   "type": "body",
+   "text": "Jane M. Doe and John Q. Smith",
+   "formula": false,
+   "cls": "authors"
+  },
+  {
+   "order": 2,
+   "type": "heading",
+   "text": "Abstract",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 3,
+   "type": "body",
+   "text": "Reading is a complex cognitive activity that involves multiple brain regions. In this paper, we review recent evidence from longitudinal studies of children and discuss how structured reading practice shapes neural circuits over time.",
+   "formula": false
+  },
+  {
+   "order": 4,
+   "type": "body",
+   "text": "We argue that comprehension improves when instruction follows the natural rhythm of attention, and we outline a set of classroom experiments that test the claim directly.",
+   "formula": false
+  },
+  {
+   "order": 5,
+   "type": "heading",
+   "text": "1. Introduction",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 6,
+   "type": "body",
+   "text": "Previous work by Dr. Smith et al. showed measurable gains after twelve weeks of daily practice. However, the underlying mechanisms remain poorly understood. Section 2 describes the methods that were used to collect and analyze the data.",
+   "formula": false
+  },
+  {
+   "order": 7,
+   "type": "body",
+   "text": "The remainder of the paper is organized as follows. Section 3 reports results, Section 4 discusses them, and Section 5 states our conclusions.",
+   "formula": false
+  },
+  {
+   "order": 8,
+   "type": "heading",
+   "text": "2. Methods",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 9,
+   "type": "body",
+   "text": "We followed 240 participants aged eight to twelve for two academic years. Each session lasted forty minutes and was recorded with the consent of the parents. Eye movements were tracked at 500 Hz. Language assessments were administered three times per year and scored by two independent raters who were blind to the experimental condition.",
+   "formula": false
+  },
+  {
+   "order": 10,
+   "type": "heading",
+   "text": "3. Results",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 11,
+   "type": "body",
+   "text": "Comprehension scores rose by 23 percent on average. The effect was strongest for participants who began with the lowest baseline scores. Gains persisted at the twelve month follow up.",
+   "formula": false
+  },
+  {
+   "order": 12,
+   "type": "body",
+   "text": "Latency measures indicated a 40 ms advantage in the trained group when the sentence contained a rare word or an ambiguous referent.",
+   "formula": false
+  },
+  {
+   "order": 13,
+   "type": "heading",
+   "text": "4. Discussion",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 14,
+   "type": "body",
+   "text": "The results suggest that the brain regions supporting reading adapt to regular practice much like muscles respond to training. Future work should examine whether the benefits generalize to second language learners.",
+   "formula": false
+  },
+  {
+   "order": 15,
+   "type": "heading",
+   "text": "5. Conclusions",
+   "formula": false,
+   "level": 2,
+   "cls": "pagebreak"
+  },
+  {
+   "order": 16,
+   "type": "body",
+   "text": "We conclude that structured reading practice improves comprehension scores and that the improvement is durable.",
+   "formula": false
+  },
+  {
+   "order": 17,
+   "type": "body",
+   "text": "The classroom experiments outlined here give teachers a concrete schedule to work with, and they give researchers a reproducible setting in which the neural claims of this paper can be tested again.",
+   "formula": false
+  }
+ ],
+ "figures": [],
+ "tables": [],
+ "knownGaps": [
+  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+ ]
+}

@@ -1,0 +1,101 @@
+{
+ "fixture": "landscape-slides",
+ "columns": 1,
+ "landscape": true,
+ "sourceScript": "latin",
+ "elements": [
+  {
+   "order": 0,
+   "type": "heading",
+   "text": "Reading Practice Changes What Children Look At",
+   "formula": false,
+   "level": 1
+  },
+  {
+   "order": 1,
+   "type": "body",
+   "text": "Twelve weeks of structured practice, 240 children, three classrooms per condition",
+   "formula": false,
+   "cls": "sub"
+  },
+  {
+   "order": 2,
+   "type": "heading",
+   "text": "The claim",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 3,
+   "type": "body",
+   "text": "Structured reading practice does not merely make children faster. It changes where they look, and the change survives twelve weeks after training stops.",
+   "formula": false
+  },
+  {
+   "order": 4,
+   "type": "heading",
+   "text": "What we did",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 5,
+   "type": "listItem",
+   "text": "240 children aged eight to twelve, matched in pairs by baseline literacy.",
+   "formula": false
+  },
+  {
+   "order": 6,
+   "type": "listItem",
+   "text": "Twelve weeks of daily forty minute sessions, three activity blocks each.",
+   "formula": false
+  },
+  {
+   "order": 7,
+   "type": "listItem",
+   "text": "Eye movements tracked at 500 Hz; comprehension scored by two blind raters.",
+   "formula": false
+  },
+  {
+   "order": 8,
+   "type": "heading",
+   "text": "What we found",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 9,
+   "type": "body",
+   "text": "Comprehension scores rose 23 percent on average, and the rise was largest for the children who started lowest. Latency measures showed a 40 millisecond advantage in the trained group on sentences with a rare word or an ambiguous referent, and the advantage grew over the course of training.",
+   "formula": false
+  },
+  {
+   "order": 10,
+   "type": "caption",
+   "text": "Figure 1: Mean comprehension gain by measurement point. The trained group separates from controls after week three and holds the gap at the twelve week follow up.",
+   "formula": false
+  },
+  {
+   "order": 11,
+   "type": "heading",
+   "text": "Why it matters",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 12,
+   "type": "body",
+   "text": "If practice changes where children look rather than only how fast they read, then practice design is a lever on attention, not just on fluency. That is a cheaper lever than curriculum reform and a more durable one than a single intervention week.",
+   "formula": false
+  }
+ ],
+ "figures": [
+  {
+   "index": 0
+  }
+ ],
+ "tables": [],
+ "knownGaps": [
+  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+ ]
+}

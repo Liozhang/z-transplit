@@ -24,6 +24,7 @@
     "check:structure": "node scripts/structure-check.mjs",
     "check:jar": "node scripts/check-jar-provenance.cjs",
     "test:qa": "node --experimental-strip-types tests/qa/harness-smoke.mjs && node tests/qa/structure-check-selftest.mjs",
+    "test:benchmark": "python scripts/qa/benchmark/metrics.py --selftest && python scripts/qa/benchmark/run.py --gate",
     "check:python-runtime": "node scripts/check-python-runtime-manifest.cjs"
   },
   "dependencies": {

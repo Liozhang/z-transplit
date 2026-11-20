@@ -44,24 +44,38 @@
  *                                行文本）。用于验证「事情做完后弹窗自己
  *                                消失」这类回归：跑完流水线/双语会话后轮
  *                                询它，窗口数应为 0
+ *   openShot {id, path}            打开指定附件（译文 PDF）并截取主窗口：
+ *                                选中 → viewAttachment → 等阅读器就绪 →
+ *                                窗口提前台并加宽 → drawWindow 落盘。
+ *                                回报的 items 里每个附件都带 filePath——评测
+ *                                基准的真机抽查要拿这条路径取出译文 PDF
+ *   pyStatus / envStatus           识别解释器与识别环境的安装状态查询
+ *   sidecarInstall / sidecarRepair 识别环境的一键安装与重装。几百兆、会阻塞到
+ *                                装完；这是整条扫描件链路里唯一没有自动化覆盖
+ *                                的一步（pip 装 paddlepaddle、下模型权重、
+ *                                跑 --selftest）
  */
-(function () {
-  /**
-   * 参数归一：启动器把 argv[4] 当原始字符串传进来（real-machine.mjs 的 send
-   * 直接 JSON.stringify 整个 arg），处理函数收到的是字符串而非对象——必须
-   * 在这里解析，与 probe.js 的 parseArg 同一惯例。
-   */
-  function parseOpts(arg) {
-    if (arg && typeof arg === "object") return arg;
-    if (typeof arg !== "string" || !arg.trim()) return {};
-    try {
-      const v = JSON.parse(arg);
-      return v && typeof v === "object" ? v : {};
-    } catch (e) {
-      return {};
-    }
-  }
 
+/**
+ * 参数归一：启动器把 argv[4] 当原始字符串传进来（real-machine.mjs 的 send
+ * 直接 JSON.stringify 整个 arg），处理函数收到的是字符串而非对象——必须在
+ * 这里解析，与 probe.js 的 parseArg 同一惯例。
+ *
+ * 放在文件作用域而不是某个立即执行函数里：本文件按组分成多个立即执行函数
+ * （早先的 openShot 就因此取不到它，报 parseOpts is not defined），共用的
+ * 归一函数必须让所有组都看得见。
+ */
+function parseOpts(arg) {
+  if (arg && typeof arg === "object") return arg;
+  if (typeof arg !== "string" || !arg.trim()) return {};
+  try {
+    const v = JSON.parse(arg);
+    return v && typeof v === "object" ? v : {};
+  } catch (e) {
+    return {};
+  }
+}
+(function () {
   /**
    * SDT 阅读模式 iframe 的文档与窗口。访问路径与 sdtBridge.ts 一致：
    * reader → _internalReader（运行时 expando，走 wrappedJSObject）→
@@ -394,6 +408,10 @@
   /**
    * 是否已经出现译文附件（标题匹配译文命名）。与 pipelineStart 配套使用：
    * 点火后轮询它判断流水线是否真的跑完，而不是只看弹窗消失。
+   *
+   * 附带回报每个附件的磁盘路径：评测基准要把真机产出的译文 PDF 取出来做版
+   * 面度量，没有路径就只能去数据目录里翻。路径是 Zotero 自己解析出来的，
+   * 比在存储目录里按文件名猜可靠。
    */
   PROBE_CMDS.translated = async function () {
     const s = new Zotero.Search();
@@ -407,7 +425,18 @@
         x.attachmentContentType === "application/pdf" &&
         /^(译文|Translated)\s*\(/i.test(x.getField("title"))
       ) {
-        out.push({ id, title: x.getField("title"), parent: x.parentItemID });
+        let filePath = null;
+        try {
+          filePath = x.getFilePath() || null;
+        } catch (e) {
+          filePath = null;
+        }
+        out.push({
+          id,
+          title: x.getField("title"),
+          parent: x.parentItemID,
+          ...(filePath ? { filePath } : {}),
+        });
       }
     }
     return { count: out.length, items: out };
@@ -1065,6 +1094,134 @@
       return { error: String((e && e.stack) || e), ms: Date.now() - t0 };
     }
   };
+
+  // sidecarInstall / sidecarRepair — 识别环境的一键安装与重装（真机）。
+  //
+  // 为什么必须有这两个包装：整条扫描件链路里，唯一没有任何自动化或真机覆盖
+  // 的就是"装"这一步——pip 装 paddlepaddle、下模型权重、跑 --selftest。前面
+  // 的状态查询只能告诉你"没装"，装不上这件事永远发现不了。入口在
+  // src/addon.ts 已经暴露（sidecarEnv.install / .repair），缺的只是探针这一层。
+  //
+  // 两个实现细节：
+  //   - 安装会开进度窗（installSidecarEnvWithProgress），QA 环境有主窗口，
+  //     可以直接跑；窗口是模态的，安装期间轮询分发器会被占住，所以这条命令
+  //     本身就会阻塞到装完——这正是我们想要的，调用方拿到的就是最终状态。
+  //   - 失败时 install 会抛，进度窗已经呈现过；这里把错误原文带回，调用方
+  //     （启动器侧）靠它判断卡在哪一步。
+  PROBE_CMDS.sidecarInstall = async function () {
+    const t0 = Date.now();
+    try {
+      await Zotero.ZTransplit.sidecarEnv.install();
+      const status = await Zotero.ZTransplit.sidecarEnv.getStatus();
+      return { installed: true, status, ms: Date.now() - t0 };
+    } catch (e) {
+      let status = null;
+      try {
+        status = await Zotero.ZTransplit.sidecarEnv.getStatus();
+      } catch {
+        /* 状态查询也失败就只回错误本身 */
+      }
+      return {
+        installed: false,
+        status,
+        error: String((e && e.stack) || e),
+        ms: Date.now() - t0,
+      };
+    }
+  };
+
+  PROBE_CMDS.sidecarRepair = async function () {
+    const t0 = Date.now();
+    try {
+      await Zotero.ZTransplit.sidecarEnv.repair();
+      const status = await Zotero.ZTransplit.sidecarEnv.getStatus();
+      return { repaired: true, status, ms: Date.now() - t0 };
+    } catch (e) {
+      return {
+        repaired: false,
+        error: String((e && e.stack) || e),
+        ms: Date.now() - t0,
+      };
+    }
+  };
 })();
 
+/**
+ * openShot {id, path} — 打开指定附件（译文 PDF）并截取主窗口。
+ *
+ * 为"复杂 PDF 翻译截图"这类验证准备：选中附件 → 在阅读器里打开 → 等阅读器
+ * 就绪 → 窗口提到前台并加宽（条目面板默认会被挤出可见区）→ drawWindow 落盘。
+ * drawWindow 画的是屏幕真实合成结果（PrintWindow 对部分 Gecko 合成层不可靠）。
+ */
+(function () {
+  PROBE_CMDS.openShot = async function (arg) {
+    const opts = parseOpts(arg);
+    const attID = Number(opts.id);
+    if (!attID) return { error: "pass id=<attachment id>" };
+    const win = Zotero.getMainWindow();
+    const doc = win && win.document;
+    if (!doc) return { error: "no main window" };
+    const ZoteroPane = win.ZoteroPane;
+    const Zotero_Tabs = win.Zotero_Tabs;
 
+    ZoteroPane.selectItem(attID);
+    await Zotero.Promise.delay(400);
+    await ZoteroPane.viewAttachment(attID);
+    let reader = null;
+    for (let i = 0; i < 60; i++) {
+      await Zotero.Promise.delay(250);
+      reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+      if (reader && reader.itemID === attID) break;
+    }
+    await Zotero.Promise.delay(2500);
+    // 指定页先导航：Zotero 10 的 reader.navigate 只认顶层 pageIndex，position
+    // .pageIndex 那种形状不生效（见 probe.js 的 navtest 实测）。
+    const pageIndex = Number(opts.page);
+    if (reader && Number.isFinite(pageIndex) && pageIndex >= 0) {
+      try {
+        await reader.navigate({ pageIndex });
+      } catch (e) {
+        probeLog("openShot navigate: " + e);
+      }
+      await Zotero.Promise.delay(2500);
+    }
+    try {
+      win.focus();
+      win.resizeTo(1440, 900);
+    } catch {
+      /* 窗口管理器拒绝 */
+    }
+    await Zotero.Promise.delay(800);
+
+    // 默认路径必须是 Windows 反斜杠形式：IOUtils.write 对 "D:/..." 直接报
+    // NS_ERROR_FILE_UNRECOGNIZED_PATH（真机实测 2026-11-19）。字面量里的
+    // 反斜杠要写成 "\\"——"D:\zt-qa" 会被 JS 当成 "D:zt-qa"。
+    const out =
+      opts.path || PathUtils.join("D:\\zt-qa", "openshot.png");
+    const w = win.innerWidth || 1440;
+    const h = win.innerHeight || 900;
+    const canvas = doc.createElementNS(
+      "http://www.w3.org/1999/xhtml",
+      "canvas",
+    );
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawWindow(win, 0, 0, w, h, "white");
+    const dataURL = canvas.toDataURL("image/png");
+    const binary = atob(dataURL.slice(dataURL.indexOf(",") + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    await IOUtils.write(out, bytes);
+    const st = await IOUtils.stat(out);
+    return {
+      out,
+      size: st.size,
+      w,
+      h,
+      readerOpen: !!reader,
+      readerItemID: reader ? reader.itemID : null,
+      tabID: Zotero_Tabs.selectedID,
+    };
+  };
+})();

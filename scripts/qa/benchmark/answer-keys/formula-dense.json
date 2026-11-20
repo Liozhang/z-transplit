@@ -1,0 +1,214 @@
+{
+ "fixture": "formula-dense",
+ "columns": 2,
+ "landscape": false,
+ "sourceScript": "latin",
+ "elements": [
+  {
+   "order": 0,
+   "type": "heading",
+   "text": "Estimating Attentional Allocation from Eye Movements: A Formula Dense Sample",
+   "formula": false,
+   "level": 1
+  },
+  {
+   "order": 1,
+   "type": "body",
+   "text": "R. Nakamura, K. Osei, and L. Bergström",
+   "formula": false,
+   "cls": "authors"
+  },
+  {
+   "order": 2,
+   "type": "body",
+   "text": "Department of Cognitive Science, Riverside Institute",
+   "formula": false,
+   "cls": "affil"
+  },
+  {
+   "order": 3,
+   "type": "body",
+   "text": "Abstract — We derive a family of estimators for the attentional weight a reader assigns to each token of a sentence, and we show how the estimators behave when the underlying fixation durations are correlated. Three closed form results are stated as numbered equations, and every claim in the paper is tied back to one of them.",
+   "formula": false,
+   "cls": "abstract"
+  },
+  {
+   "order": 4,
+   "type": "heading",
+   "text": "1. Setup",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 5,
+   "type": "body",
+   "text": "Let a sentence consist of n tokens. For token i the observed fixation duration is di and the surprisal under the reader's language model is si = −log p(ti | t<i). We write the latent attentional weight as αi, constrained so that the weights sum to one.",
+   "formula": false,
+   "hardCase": "false-negative-bait",
+   "inlineMath": [
+    "−"
+   ]
+  },
+  {
+   "order": 6,
+   "type": "formula",
+   "text": "αi = exp(θ si) / Σj=1n exp(θ sj)(1)",
+   "formula": true,
+   "cls": "eq"
+  },
+  {
+   "order": 7,
+   "type": "body",
+   "text": "Equation (1) is the softmax form. It is convenient because the normalising constant cancels in ratios, so the relative weight of two tokens depends only on the difference of their surprisals, as the identity below records.",
+   "formula": false
+  },
+  {
+   "order": 8,
+   "type": "formula",
+   "text": "αi / αk = exp(θ (si − sk))(2)",
+   "formula": true,
+   "inlineMath": [
+    "−"
+   ],
+   "cls": "eq"
+  },
+  {
+   "order": 9,
+   "type": "heading",
+   "text": "2. Model",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 10,
+   "type": "body",
+   "text": "The generative model treats the durations as conditionally independent given the weights. Under that assumption the log likelihood separates into a sum over tokens, and the score with respect to θ has a particularly compact form.",
+   "formula": false
+  },
+  {
+   "order": 11,
+   "type": "formula",
+   "text": "ℓ(θ) = Σi=1n di log αi − λ Σi=1n αi(3)",
+   "formula": true,
+   "inlineMath": [
+    "−"
+   ],
+   "cls": "eq"
+  },
+  {
+   "order": 12,
+   "type": "body",
+   "text": "Differentiating (3) and setting the result to zero gives the fixed point iteration used throughout the paper. The iteration converges whenever θ is bounded and the durations are strictly positive, which holds for every corpus we examined.",
+   "formula": false
+  },
+  {
+   "order": 13,
+   "type": "heading",
+   "text": "2.1 Statistics of the estimator",
+   "formula": false,
+   "level": 3
+  },
+  {
+   "order": 14,
+   "type": "body",
+   "text": "Under the null hypothesis of no attentional modulation we have θ = 0, and the weights collapse to the uniform distribution. The estimator is asymptotically normal: writing β and α for the regression coefficients, the standard error satisfies s ≈ 1.96 / √n whenever p ≈ 0.05 and the residuals are homoscedastic. In practice the inequality χ² ≥ 3.84 is the operative test, and we reject the null whenever the observed statistic exceeds that threshold with r ≠ 0 and the effect size is at least δ ≥ 0.2.",
+   "formula": false,
+   "hardCase": "false-positive-bait",
+   "inlineMath": [
+    "²"
+   ]
+  },
+  {
+   "order": 15,
+   "type": "body",
+   "text": "This paragraph is deliberately dense in Greek letters and inequality signs. The formula heuristic in the translation pipeline counts matching characters rather than distinct ones, so a paragraph of ordinary statistical prose can cross the threshold and be treated as a single formula region. When that happens the whole paragraph is cropped, sent to the vision model, and the returned image covers the translated text.",
+   "formula": false
+  },
+  {
+   "order": 16,
+   "type": "heading",
+   "text": "2.2 A formula the heuristic cannot see",
+   "formula": false,
+   "level": 3
+  },
+  {
+   "order": 17,
+   "type": "body",
+   "text": "Some formulae contain no character from the heuristic's symbol class at all. The most familiar example is the Pythagorean identity a² + b² = c², whose only non-ASCII character is the superscript two. A page of plane geometry, of elementary algebra, or of arithmetic exercises therefore passes through the pipeline unflagged, and a statistical machine translation engine rewrites the superscripts into ordinary digits.",
+   "formula": false,
+   "hardCase": "false-negative-bait",
+   "inlineMath": [
+    "²",
+    "²",
+    "²"
+   ]
+  },
+  {
+   "order": 18,
+   "type": "body",
+   "text": "Other unseen cases include the limit notation limn→∞, the trigonometric pair sin θ + cos θ, the set relations x ∈ A and A ⊂ B, the membership of the empty set ∅, and the subtraction written with the true minus sign a − b rather than a hyphen. None of these characters appears in the symbol class, so none of them triggers the formula path.",
+   "formula": false,
+   "hardCase": "false-positive-bait",
+   "inlineMath": [
+    "∈",
+    "⊂",
+    "∅",
+    "−"
+   ]
+  },
+  {
+   "order": 19,
+   "type": "heading",
+   "text": "3. Relation to reading time",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 20,
+   "type": "body",
+   "text": "Total reading time for the sentence is the duration-weighted sum of the weights. Substituting (1) and collecting terms yields the closed form used in Section 4, and the same substitution explains why the estimator is insensitive to sentence length once n is large.",
+   "formula": false
+  },
+  {
+   "order": 21,
+   "type": "formula",
+   "text": "T = (1/n) Σi=1n di / (1 + exp(−θ si))(4)",
+   "formula": true,
+   "inlineMath": [
+    "−"
+   ],
+   "cls": "eq"
+  },
+  {
+   "order": 22,
+   "type": "body",
+   "text": "Equation (4) reduces to the mean duration when θ = 0 and to a max-like statistic when θ is large. Both limits are recovered correctly by the iteration, which is the main practical argument for the softmax parameterisation.",
+   "formula": false,
+   "hardCase": "false-positive-bait"
+  },
+  {
+   "order": 23,
+   "type": "heading",
+   "text": "References",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 24,
+   "type": "reference",
+   "text": "Nakamura, R. (2020). Attention as a softmax over surprisal. Journal of Mathematical Psychology, 94, 101–318.",
+   "formula": false
+  },
+  {
+   "order": 25,
+   "type": "reference",
+   "text": "Osei, K. (2021). Correlation robust variance estimates for fixation durations. Behavior Research Methods, 53(2), 712–729.",
+   "formula": false
+  }
+ ],
+ "figures": [],
+ "tables": [],
+ "knownGaps": [
+  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+ ]
+}

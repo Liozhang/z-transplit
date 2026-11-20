@@ -11,7 +11,8 @@
     "tests",
     "typings",
     "vitest.config.ts",
-    "zotero-plugin.config.ts"
+    "zotero-plugin.config.ts",
+    "scripts/qa/benchmark"
   ],
   "exclude": [
     "node_modules",

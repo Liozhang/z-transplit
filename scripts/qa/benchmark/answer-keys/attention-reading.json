@@ -1,0 +1,219 @@
+{
+ "fixture": "attention-reading",
+ "columns": 2,
+ "landscape": false,
+ "sourceScript": "latin",
+ "elements": [
+  {
+   "order": 0,
+   "type": "heading",
+   "text": "Attention and the Reading Brain: Twelve Weeks of Structured Practice in Schoolchildren",
+   "formula": false,
+   "level": 1
+  },
+  {
+   "order": 1,
+   "type": "body",
+   "text": "Jane M. Doe, John Q. Smith, and Maria Alvarez",
+   "formula": false,
+   "cls": "authors"
+  },
+  {
+   "order": 2,
+   "type": "body",
+   "text": "Center for Child Cognition, Northfield Institute for Learning Sciences",
+   "formula": false,
+   "cls": "affil"
+  },
+  {
+   "order": 3,
+   "type": "body",
+   "text": "Abstract — Reading is a complex cognitive activity that involves multiple brain regions. In this paper, we review recent evidence from longitudinal studies of children and discuss how structured reading practice shapes neural circuits over time. We argue that comprehension improves when instruction follows the natural rhythm of attention, and we outline a set of classroom experiments that test the claim directly.",
+   "formula": false,
+   "cls": "abstract"
+  },
+  {
+   "order": 4,
+   "type": "body",
+   "text": "Keywords: reading acquisition; attention; neuroplasticity; classroom intervention; eye movements",
+   "formula": false,
+   "cls": "keywords"
+  },
+  {
+   "order": 5,
+   "type": "heading",
+   "text": "1. Introduction",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 6,
+   "type": "body",
+   "text": "Previous work by Dr. Smith et al. showed measurable gains after twelve weeks of daily practice. However, the underlying mechanisms remain poorly understood. Two accounts compete: one attributes the gains to automaticity of low-level decoding, the other to a reorganization of attentional resources that governs how sentences are parsed in the first place.",
+   "formula": false
+  },
+  {
+   "order": 7,
+   "type": "body",
+   "text": "The remainder of the paper is organized as follows. Section 2 describes the methods that were used to collect and analyze the data. Section 3 reports results for comprehension and eye-movement measures, Section 4 discusses them, and Section 5 states our conclusions.",
+   "formula": false
+  },
+  {
+   "order": 8,
+   "type": "heading",
+   "text": "2. Methods",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 9,
+   "type": "heading",
+   "text": "2.1 Participants",
+   "formula": false,
+   "level": 3
+  },
+  {
+   "order": 10,
+   "type": "body",
+   "text": "We followed 240 participants aged eight to twelve for two academic years. Each session lasted forty minutes and was recorded with the consent of the parents. Classrooms were matched on baseline literacy and assigned in pairs to the trained and control conditions.",
+   "formula": false
+  },
+  {
+   "order": 11,
+   "type": "heading",
+   "text": "2.2 Apparatus and Measures",
+   "formula": false,
+   "level": 3
+  },
+  {
+   "order": 12,
+   "type": "body",
+   "text": "Eye movements were tracked at 500 Hz with a remote infrared tracker while children read age-appropriate sentences aloud. Language assessments were administered three times per year and scored by two independent raters who were blind to the experimental condition. Training followed the daily schedule shown in Table 1.",
+   "formula": false
+  },
+  {
+   "order": 13,
+   "type": "caption",
+   "text": "Table 1: Daily training schedule and dose by condition.",
+   "formula": false
+  },
+  {
+   "order": 14,
+   "type": "body",
+   "text": "Adherence was high: classrooms completed 87 percent of scheduled sessions, and the missed sessions were concentrated in the final three weeks of the spring term. Fidelity checks verified that the attention-cue blocks were delivered as scripted in 94 percent of observed lessons.",
+   "formula": false
+  },
+  {
+   "order": 15,
+   "type": "heading",
+   "text": "3. Results",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 16,
+   "type": "body",
+   "text": "Comprehension scores rose by 23 percent on average. The effect was strongest for participants who began with the lowest baseline scores. Gains persisted at the twelve month follow up. Latency measures indicated a 40 ms advantage in the trained group when the sentence contained a rare word or an ambiguous referent, and the advantage grew over the course of training, as Figure 1 illustrates.",
+   "formula": false
+  },
+  {
+   "order": 17,
+   "type": "caption",
+   "text": "Figure 1: Mean comprehension gain (points) by training week. The trained group diverges from controls after week four and reaches a 23-point advantage by week twelve.",
+   "formula": false
+  },
+  {
+   "order": 18,
+   "type": "body",
+   "text": "A mediation analysis supported the attention account: when cue-parsing scores were entered first, the direct path from decoding automaticity to comprehension fell to insignificance, while the path through attentional parsing remained robust. The fitted growth model has the form",
+   "formula": false
+  },
+  {
+   "order": 19,
+   "type": "formula",
+   "text": "git = β1xi + β2(xi × t) + ui + εit,",
+   "formula": true,
+   "cls": "eq"
+  },
+  {
+   "order": 20,
+   "type": "body",
+   "text": "where git is the comprehension score of child i at week t. Figure 2 shows the distribution of individual slopes for the two groups.",
+   "formula": false
+  },
+  {
+   "order": 21,
+   "type": "caption",
+   "text": "Figure 2: Distribution of individual growth slopes in three trained (T) and three control (C) classrooms. Variance shrinks in the trained classrooms, consistent with a common dose-response curve.",
+   "formula": false
+  },
+  {
+   "order": 22,
+   "type": "heading",
+   "text": "4. Discussion",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 23,
+   "type": "body",
+   "text": "The results suggest that the brain regions supporting reading adapt to regular practice much like muscles respond to training. The pattern of eye-movement findings — shorter regressions before shorter fixations — locates the change in planning rather than in recognition itself. Future work should examine whether the benefits generalize to second language learners and to digital reading formats where the attentional cues differ.",
+   "formula": false
+  },
+  {
+   "order": 24,
+   "type": "heading",
+   "text": "5. Conclusions",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 25,
+   "type": "body",
+   "text": "We conclude that structured reading practice improves comprehension scores and that the improvement is durable. The classroom experiments outlined here give teachers a concrete schedule to work with, and they give researchers a reproducible setting in which the neural claims of this paper can be tested again.",
+   "formula": false
+  },
+  {
+   "order": 26,
+   "type": "heading",
+   "text": "References",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 27,
+   "type": "reference",
+   "text": "Doe, J. M. (2021). Attentional parsing in beginning readers. Journal of Child Cognition, 14(2), 101–118.",
+   "formula": false
+  },
+  {
+   "order": 28,
+   "type": "reference",
+   "text": "Smith, J. Q. (2019). Practice schedules and reading growth. Reviews of Educational Research, 8(4), 55–72.",
+   "formula": false
+  },
+  {
+   "order": 29,
+   "type": "reference",
+   "text": "Alvarez, M. (2023). Eye movements and sentence planning. Studies in Literacy, 6(1), 33–49.",
+   "formula": false
+  }
+ ],
+ "figures": [
+  {
+   "index": 0
+  },
+  {
+   "index": 1
+  }
+ ],
+ "tables": [
+  {
+   "rows": 5,
+   "cols": 5
+  }
+ ],
+ "knownGaps": [
+  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+ ]
+}

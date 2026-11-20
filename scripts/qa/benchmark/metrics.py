@@ -1,0 +1,1617 @@
+#!/usr/bin/env python3
+"""
+benchmark metrics — z-transplit 版面保留翻译的评测度量库。
+
+这个文件只放"怎么算数"，不放"怎么跑"。编排在 run.py，无头渲染驱动在
+render-entry.ts，三份东西经文件交换数据，互不 import。
+
+三组指标，对应三条可以单独成立的真值链：
+
+  A 组 解析层    原文 PDF → OpenDataLoader JSON → 与答案键比对
+  B 组 端到端层  原文 PDF + ODL JSON → 真实装配与渲染 → 译文 PDF → 度量
+  C 组 扫描件层  侧车 result.json → 与 reading-brain 的已知原文比对
+
+坐标系全文只有一套：PDF 用户空间，原点在页面左下角，y 向上，单位点。
+OpenDataLoader 的 "bounding box" 就是 [左, 下, 右, 上]，直接可用；
+pymupdf 的 span bbox 与 drawings rect 是左上原点 y 向下，必须先翻——
+忘这一步会让所有 IoU 整体镜像，而数字看起来仍然"合理"，是最难发现的
+一类错。因此翻转函数只有一个入口 flip_y，并且自检里有一条专门断言它。
+
+自检：python scripts/qa/benchmark/metrics.py --selftest
+用合成小样本断言每个指标都能抓住已知扰动。指标抓不住扰动比没有指标更糟：
+它会给出一个好看的绿脸。
+"""
+
+from __future__ import annotations
+
+import argparse
+import difflib
+import math
+import sys
+from dataclasses import dataclass, field
+
+# ---------------------------------------------------------------------------
+# 几何
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Box:
+    """PDF 用户空间矩形：原点左下，y 向上。"""
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+    @property
+    def w(self) -> float:
+        return self.x1 - self.x0
+
+    @property
+    def h(self) -> float:
+        return self.y1 - self.y0
+
+    def area(self) -> float:
+        return max(0.0, self.w) * max(0.0, self.h)
+
+    def union_with(self, other: "Box") -> "Box":
+        return Box(
+            min(self.x0, other.x0),
+            min(self.y0, other.y0),
+            max(self.x1, other.x1),
+            max(self.y1, other.y1),
+        )
+
+    def center(self) -> tuple[float, float]:
+        return ((self.x0 + self.x1) / 2.0, (self.y0 + self.y1) / 2.0)
+
+    def diagonal(self) -> float:
+        return math.hypot(self.w, self.h)
+
+    def intersect(self, other: "Box") -> float:
+        """交集面积。"""
+        return (
+            max(0.0, min(self.x1, other.x1) - max(self.x0, other.x0))
+            * max(0.0, min(self.y1, other.y1) - max(self.y0, other.y0))
+        )
+
+    def shrink(self, pt: float) -> "Box":
+        """四边各向内收 pt 磅。收穿了就返回零面积框。"""
+        if self.w <= 2 * pt or self.h <= 2 * pt:
+            return Box(self.x0, self.y0, self.x0, self.y0)
+        return Box(self.x0 + pt, self.y0 + pt, self.x1 - pt, self.y1 - pt)
+
+    def contains_pt(self, x: float, y: float) -> bool:
+        return self.x0 <= x <= self.x1 and self.y0 <= y <= self.y1
+
+
+def iou(a: Box, b: Box) -> float:
+    """交并比。两个都是零面积框时返回 0，不除零。"""
+    inter = a.intersect(b)
+    union = a.area() + b.area() - inter
+    if union <= 0:
+        return 0.0
+    return inter / union
+
+
+def flip_y(raw: list[float], page_height: float) -> Box:
+    """pymupdf 的 [x0, y0, x1, y1]（左上原点 y 向下）翻成 PDF 用户空间。"""
+    x0, y0, x1, y1 = raw[0], raw[1], raw[2], raw[3]
+    return Box(min(x0, x1), page_height - max(y0, y1), max(x0, x1), page_height - min(y0, y1))
+
+
+def odl_box(raw) -> Box | None:
+    """OpenDataLoader 的 [左, 下, 右, 上] → Box。顺序颠倒的输入自动交换。"""
+    if not isinstance(raw, (list, tuple)) or len(raw) < 4:
+        return None
+    try:
+        vals = [float(v) for v in raw[:4]]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in vals):
+        return None
+    left, bottom, right, top = vals
+    return Box(min(left, right), min(bottom, top), max(left, right), max(bottom, top))
+
+
+# ---------------------------------------------------------------------------
+# 文本相似度
+# ---------------------------------------------------------------------------
+
+
+def norm_text(text: str) -> str:
+    """归一化：压掉所有连续空白，去掉首尾。
+
+    解析器把一段里的换行并成一个空格，HTML 源码里同一个换行是换行符。
+    两边先过同一个归一化才谈得上比对。
+    """
+    return " ".join((text or "").split())
+
+
+def text_sim(a: str, b: str) -> float:
+    """0 到 1 的相似度。用标准库的序列匹配比，够用且不引第三方依赖。"""
+    a = norm_text(a)
+    b = norm_text(b)
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def kendall_tau(order_a: list[int], order_b: list[int]) -> float:
+    """两组同一批元素的名次之间的 Kendall tau。
+
+    元素用同一个标识集合。返回 -1（完全相反）到 1（完全一致）。任一组为空
+    或元素集不同时返回 0.0 并让调用方知道"算不了"，不返回一个看起来像
+    结论的数字。
+    """
+    if len(order_a) != len(order_b) or not order_a:
+        return 0.0
+    if set(order_a) != set(order_b):
+        return 0.0
+    rank_b = {key: i for i, key in enumerate(order_b)}
+    seq = [rank_b[key] for key in order_a]
+    concordant = 0
+    discordant = 0
+    for i in range(len(seq)):
+        for j in range(i + 1, len(seq)):
+            if seq[i] < seq[j]:
+                concordant += 1
+            elif seq[i] > seq[j]:
+                discordant += 1
+    total = concordant + discordant
+    if total == 0:
+        return 0.0
+    return (concordant - discordant) / total
+
+
+# ---------------------------------------------------------------------------
+# OpenDataLoader JSON 摊平
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OdlBlock:
+    """一个带文字的版面元素。order 是整篇文档里的出现次序，即阅读顺序。"""
+
+    order: int
+    page: int
+    type: str
+    text: str
+    size: float
+    box: Box
+    level: int | None = None
+
+
+@dataclass
+class OdlTable:
+    page: int
+    box: Box
+    rows: int
+    cols: int
+
+
+@dataclass
+class OdlImage:
+    page: int
+    box: Box
+
+
+@dataclass
+class OdlDoc:
+    blocks: list[OdlBlock] = field(default_factory=list)
+    tables: list[OdlTable] = field(default_factory=list)
+    images: list[OdlImage] = field(default_factory=list)
+
+    def blocks_on(self, page: int) -> list[OdlBlock]:
+        return [b for b in self.blocks if b.page == page]
+
+
+# 带文字的元素类型。表格单元格里的段落也是其中之一。
+_TEXT_TYPES = {"paragraph", "heading", "caption", "citation", "list item"}
+# 容器类型：本身不带文字，但要继续往下走。
+_KIDS_KEYS = ("kids", "listItems", "list items")
+
+
+def flatten_odl(doc: dict) -> OdlDoc:
+    """把 OpenDataLoader 的嵌套 JSON 摊平成一个带文档次序的扁平列表。
+
+    为什么要自己走一遍：装配层只读 page.textBlocks，把表格、列表、页眉页脚
+    全丢在一边；度量要看全貌，就得按文档顺序把每一种容器都走到底。次序计数器
+    只对带文字的元素递增，这样它才等于阅读顺序。
+    """
+    out = OdlDoc()
+    if not isinstance(doc, dict):
+        return out
+    counter = [0]
+
+    def page_of(node: dict) -> int:
+        value = node.get("page number")
+        return int(value) if isinstance(value, (int, float)) else 0
+
+    def visit(node, inherited_page: int) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item, inherited_page)
+            return
+        if not isinstance(node, dict):
+            return
+        page = page_of(node) or inherited_page
+        kind = node.get("type")
+
+        if kind in _TEXT_TYPES:
+            text = norm_text(str(node.get("content", "")))
+            box = odl_box(node.get("bounding box"))
+            if text and box is not None:
+                size = node.get("font size")
+                level = node.get("heading level")
+                out.blocks.append(
+                    OdlBlock(
+                        order=counter[0],
+                        page=page,
+                        type=str(kind),
+                        text=text,
+                        size=float(size) if isinstance(size, (int, float)) else 0.0,
+                        box=box,
+                        level=int(level) if isinstance(level, (int, float)) else None,
+                    )
+                )
+                counter[0] += 1
+            # 列表项可能还嵌着段落，继续往下。
+            for key in _KIDS_KEYS:
+                if key in node:
+                    visit(node[key], page)
+            return
+
+        if kind == "table":
+            box = odl_box(node.get("bounding box"))
+            if box is not None:
+                out.tables.append(
+                    OdlTable(
+                        page=page,
+                        box=box,
+                        rows=int(node.get("number of rows") or 0),
+                        cols=int(node.get("number of columns") or 0),
+                    )
+                )
+            for row in node.get("rows") or []:
+                if isinstance(row, dict):
+                    for cell in row.get("cells") or []:
+                        visit(cell, page)
+            return
+
+        if kind in ("image", "chart"):
+            box = odl_box(node.get("bounding box"))
+            if box is not None:
+                out.images.append(OdlImage(page=page, box=box))
+            return
+
+        # header / footer / textBlock / formula / 未知容器：只往下走。
+        for key in _KIDS_KEYS:
+            if key in node:
+                visit(node[key], page)
+
+    visit(doc.get("kids"), 1)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A 组：解析层
+# ---------------------------------------------------------------------------
+
+
+def _prf(tp: int, fp: int, fn: int) -> dict:
+    """精确率/召回率/F1。一样本都没有时三项报 None——那叫"不适用"，不是 0。
+
+    报 0 的后果很具体：reading-brain 一篇公式都没有，报出来是"公式判域全错"，
+    门禁还会拿这个假 0 当回归基线，将来任何人改公式判域都会触发误报。
+    """
+    if tp + fp + fn == 0:
+        return {
+            "tp": 0,
+            "fp": 0,
+            "fn": 0,
+            "precision": None,
+            "recall": None,
+            "f1": None,
+            "applicable": False,
+        }
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "applicable": True,
+    }
+
+
+def formula_detection(
+    key: dict,
+    odl: OdlDoc,
+    flagged_texts: set[tuple[int, str]],
+    pairs: list[tuple[int, int]],
+) -> dict:
+    """公式判域的精确率与召回率。
+
+    flagged_texts 是装配层真正标出来的公式集合，键为 (页码, 归一化文本)。
+    真值来自答案键里标了 formula 的元素。
+
+    预测必须先经配对映回真值元素才能比。答案键的 order 与解析器产出的 order
+    是两个编号空间：答案键只有 30 个元素，解析器有 62 个块（表格单元格、图内
+    标注都算块）。直接拿两个 order 集合求交，只在两边条数恰好相等时才碰巧
+    正确——formula-dense 是 26 对 26 所以数字对，attention-reading 是 30 对 62
+    于是恒为 0。这种"有时对"比恒错更难发现。
+
+    另外单独列出已知的边界样本。聚合数字会把它们平均掉，而修批次 1 要看的
+    正是这几个具体段落各自的去向。
+    """
+    element_by_order = {e["order"]: e for e in key.get("elements", [])}
+    block_by_order = {b.order: b for b in odl.blocks}
+    block_to_element = {block_order: element_order for element_order, block_order in pairs}
+
+    flagged_blocks = [b for b in odl.blocks if (b.page, b.text) in flagged_texts]
+    truth_elements = {o for o, e in element_by_order.items() if e.get("formula")}
+
+    predicted_elements: set[int] = set()
+    tp = 0
+    fp = 0
+    for block in flagged_blocks:
+        element_order = block_to_element.get(block.order)
+        element = element_by_order.get(element_order) if element_order is not None else None
+        # 凡是真被标成公式的块，都算"预测为公式"——不管真值是不是公式。只把配到
+        # 公式真值的记进 predicted_elements 的话，逐案表的预测列会把假阳性显示成
+        # "预测正文"，正好把最该看的三个失败样本藏起来。
+        if element_order is not None:
+            predicted_elements.add(element_order)
+        if element is not None and element.get("formula"):
+            tp += 1
+        else:
+            # 标了公式但没有配到公式段：要么是多标了一个正文段，要么标的是答案键
+            # 里没有的东西（图内标注之类）。两种都算假阳性。
+            fp += 1
+    fn = len(truth_elements - predicted_elements)
+    result = _prf(tp, fp, fn)
+
+    cases = []
+    for element in key.get("elements", []):
+        order = element["order"]
+        block_order = next((b for e, b in pairs if e == order), None)
+        block = block_by_order.get(block_order) if block_order is not None else None
+        cases.append(
+            {
+                "order": order,
+                "truth": bool(element.get("formula")),
+                "predicted": order in predicted_elements,
+                "hardCase": element.get("hardCase"),
+                "text": (block.text if block else element.get("text", ""))[:70],
+            }
+        )
+    result["cases"] = cases
+    result["hardCaseFailures"] = [
+        c for c in cases if c["hardCase"] and c["truth"] != c["predicted"]
+    ]
+    return result
+
+
+def match_elements(key: dict, odl: OdlDoc, min_sim: float = 0.6) -> dict:
+    """答案键元素与解析器产出的文本块做贪心一对一匹配。
+
+    答案键不带页码（HTML 没有页的概念），所以匹配只用文本相似度，全局进行。
+    位置对不对由阅读顺序那一项间接约束：匹配对的名次若不单调，Kendall tau
+    会掉下来。把两件事混在一个指标里，出了偏差说不清是分割错了还是顺序错了。
+    """
+    elements = key.get("elements", [])
+    used: set[int] = set()
+    pairs: list[tuple[dict, OdlBlock, float]] = []
+
+    # 候选对按相似度从高到低消化，先配强的，避免一个泛泛匹配抢走唯一的块。
+    candidates: list[tuple[float, int, int]] = []
+    for ei, element in enumerate(elements):
+        text = element.get("text", "")
+        if not norm_text(text):
+            continue
+        for block in odl.blocks:
+            if block.order in used:
+                continue
+            sim = text_sim(text, block.text)
+            if sim >= min_sim:
+                candidates.append((sim, ei, block.order))
+    candidates.sort(key=lambda c: (-c[0], c[1], c[2]))
+    taken_elements: set[int] = set()
+    for sim, ei, order in candidates:
+        if ei in taken_elements or order in used:
+            continue
+        taken_elements.add(ei)
+        used.add(order)
+        block = next(b for b in odl.blocks if b.order == order)
+        pairs.append((elements[ei], block, sim))
+
+    matched_elements = {e["order"] for e, _, _ in pairs}
+    truth_orders = {e["order"] for e in elements if norm_text(e.get("text", ""))}
+    tp = len(matched_elements)
+    fn = len(truth_orders - matched_elements)
+    # 假阳性是"解析器多产出的块"：总块数减去被真值认领的块数。早先一版写成
+    # 已用块减已配元素，两边是不同的编号空间（一个在下标解析块、一个在下标
+    # 真值元素），数字会随两边下标巧合而跳动，且恒接近 0，等于没有这一项。
+    fp = len(odl.blocks) - len(pairs)
+    result = _prf(tp, fp, fn)
+
+    by_type: dict[str, dict] = {}
+    for element in elements:
+        if not norm_text(element.get("text", "")):
+            continue
+        kind = element.get("type", "body")
+        slot = by_type.setdefault(kind, {"total": 0, "matched": 0})
+        slot["total"] += 1
+        if element["order"] in matched_elements:
+            slot["matched"] += 1
+    result["byType"] = {
+        kind: {**slot, "recall": slot["matched"] / slot["total"] if slot["total"] else 0.0}
+        for kind, slot in sorted(by_type.items())
+    }
+    result["meanSim"] = sum(s for _, _, s in pairs) / len(pairs) if pairs else 0.0
+    # 配对关系交给阅读顺序那一项用：顺序错乱等于译文错位，但它与"分割对不对"
+    # 是两个问题，必须分开算，否则出了偏差说不清是哪一个。
+    result["pairs"] = [(e["order"], b.order) for e, b, _ in pairs]
+    return result
+
+
+def column_bleed(key: dict, odl: OdlDoc, page_widths: dict[int, float]) -> dict:
+    """栏串位：解析器产出横跨多栏的宽框的比例。
+
+    阈值 0.6 是页宽的六成。一个正常的单栏段落（含通栏标题）可能到 0.9，
+    所以这一项报两个数：超过 0.6 的比例，以及超过答案键栏宽 1.4 倍的比例。
+    第二个数才是"跨栏"的直接证据。
+    """
+    columns = key.get("columns", 1)
+    wide_blocks = 0
+    cross_blocks = 0
+    total = 0
+    worst: list[dict] = []
+    for block in odl.blocks:
+        width = page_widths.get(block.page)
+        if not width:
+            continue
+        total += 1
+        ratio = block.box.w / width
+        column_width = (width / columns) if columns > 0 else width
+        if ratio > 0.6:
+            wide_blocks += 1
+        if block.box.w > column_width * 1.4:
+            cross_blocks += 1
+            worst.append({"page": block.page, "ratio": round(ratio, 3), "text": block.text[:60]})
+    worst.sort(key=lambda w: -w["ratio"])
+    return {
+        "blocks": total,
+        "wideRatio": wide_blocks / total if total else 0.0,
+        "crossColumnRatio": cross_blocks / total if total else 0.0,
+        "worst": worst[:5],
+    }
+
+
+def heading_levels(key: dict, odl: OdlDoc, pairs: list[tuple[int, int]]) -> dict:
+    """标题层级一致率。
+
+    解析器的 heading level 是 1 到 21 的嵌套深度，不是 HTML 的 h1 到 h3。
+    所以不比绝对数值，只比深浅次序：对每一对同为标题的真值与预测，看它们的
+    相对高低是否一致。比较对象必须经配对取到，不能按 order 直接对上——同
+    公式那一项，两个 order 是不同编号空间。
+    """
+    element_by_order = {e["order"]: e for e in key.get("elements", [])}
+    block_by_order = {b.order: b for b in odl.blocks}
+    shared: list[tuple[int, int]] = []
+    for element_order, block_order in pairs:
+        element = element_by_order.get(element_order)
+        block = block_by_order.get(block_order)
+        if not element or not block:
+            continue
+        if element.get("type") != "heading" or block.type != "heading":
+            continue
+        if not element.get("level") or not block.level:
+            continue
+        shared.append((element["level"], block.level))
+    agree = 0
+    total = 0
+    for i in range(len(shared)):
+        for j in range(i + 1, len(shared)):
+            total += 1
+            if (shared[i][0] - shared[j][0] > 0) == (shared[i][1] - shared[j][1] > 0):
+                agree += 1
+    truth_headings = sum(1 for e in key.get("elements", []) if e.get("type") == "heading")
+    predicted_headings = sum(1 for b in odl.blocks if b.type == "heading")
+    return {
+        "pairs": total,
+        "agreement": agree / total if total else 0.0,
+        "sharedHeadings": len(shared),
+        "truthHeadings": truth_headings,
+        "predictedHeadings": predicted_headings,
+    }
+
+
+def table_structure(key: dict, odl: OdlDoc) -> dict:
+    """表格结构误差：行数列数的绝对差，以及跨格跨度的一致情况。"""
+    key_tables = key.get("tables", [])
+    odl_tables = odl.tables
+    rows = sorted(t.get("rows", 0) for t in key_tables)
+    cols = sorted(t.get("cols", 0) for t in key_tables)
+    got_rows = sorted(t.rows for t in odl_tables)
+    got_cols = sorted(t.cols for t in odl_tables)
+    return {
+        "truthCount": len(key_tables),
+        "predictedCount": len(odl_tables),
+        "rows": {"truth": rows, "predicted": got_rows},
+        "cols": {"truth": cols, "predicted": got_cols},
+        "rowError": sum(abs(a - b) for a, b in zip(rows, got_rows)) if rows and got_rows else None,
+        "colError": sum(abs(a - b) for a, b in zip(cols, got_cols)) if cols and got_cols else None,
+    }
+
+
+def reading_order(key: dict, odl: OdlDoc, matched_pairs: list[tuple[int, int]]) -> dict:
+    """阅读顺序：答案键文档序对解析器产出序的 Kendall tau。
+
+    直接在配对对上数一致对与不一致对，不调 kendall_tau：那个函数要求两组元素
+    属于同一个集合，而这里一组是真值下标、一组是解析器块下标，集合本来就不同。
+    照它写的第一个版本在两边的块数不相等时恒返回 0，看起来像"阅读顺序完全
+    乱"，其实只是集合不同。
+    """
+    if len(matched_pairs) < 2:
+        return {"tau": 0.0, "pairs": len(matched_pairs)}
+    ordered = sorted(matched_pairs)
+    concordant = 0
+    discordant = 0
+    for i in range(len(ordered)):
+        for j in range(i + 1, len(ordered)):
+            if ordered[i][1] < ordered[j][1]:
+                concordant += 1
+            elif ordered[i][1] > ordered[j][1]:
+                discordant += 1
+    total = concordant + discordant
+    return {
+        "tau": (concordant - discordant) / total if total else 0.0,
+        "pairs": len(matched_pairs),
+    }
+
+
+def figure_detection(key: dict, odl: OdlDoc) -> dict:
+    """图区检出。
+
+    已知差异：SVG 进 PDF 之后是矢量图形，解析器提不到图元素，只能看到一堆
+    文字。所以这一项只记录，不进门禁——拿一个必然检不出的东西当门禁，只会
+    训练人忽略门禁。
+    """
+    truth = len(key.get("figures", []))
+    predicted = len(odl.images)
+    return {
+        "truth": truth,
+        "predicted": predicted,
+        "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值",
+    }
+
+
+# ---------------------------------------------------------------------------
+# B 组：端到端版面
+# ---------------------------------------------------------------------------
+
+
+def _fitz():
+    """延迟导入 pymupdf。A 组与 C 组不需要它，自检的核心断言也不应该被一个
+    可选的第三方库挡住。"""
+    try:
+        import fitz  # type: ignore
+
+        return fitz
+    except Exception as exc:  # pragma: no cover - 环境相关
+        raise RuntimeError(
+            "pymupdf 不可用（pip install pymupdf）。B 组指标需要它渲染位图并"
+            "提取译文 PDF 的文本与坐标。"
+        ) from exc
+
+
+def fitz_module():
+    """公开的 pymupdf 入口。延迟导入，让 A 组、C 组与自检在没装 pymupdf 的
+    环境里也能跑。"""
+    return _fitz()
+
+
+@dataclass
+class TranslatedSpan:
+    box: Box
+    size: float
+    text: str
+    color: int
+    font: str
+
+
+def _has_cjk(text: str) -> bool:
+    """这一行里有没有中日韩文字。
+
+    叠加模式下原文内容流原样留在页里，遮罩只是拿白矩形盖住它，文本层仍能
+    提取出原文。所以"译文 PDF 的文本"是原文加译文的混合，不分开就没法算
+    译文落在了哪里。基准的目标语言恒为中文，用有没有中文字符区分两侧，比
+    靠字体名可靠——子体内嵌前缀在原文里也可能本来就有。
+    """
+    return any(
+        "\u3400" <= c <= "\u4dbf"
+        or "\u4e00" <= c <= "\u9fff"
+        or "\u3040" <= c <= "\u30ff"
+        or "\uac00" <= c <= "\ud7af"
+        for c in text
+    )
+
+
+def extract_translated_spans(pdf_path: str) -> tuple[list[list[TranslatedSpan]], list[Box], list[int]]:
+    """从译文 PDF 提取每页的译文片段、白色矩形与页旋转角。
+
+    只收译文的行：一整行里只要有中文字符就算译文行，行内混排的数字与英文
+    词跟着一起收——它们是同一次绘制出来的，位置属于同一个块。
+
+    返回 (每页译文 span 列表, 每页白色矩形列表, 每页旋转角)。所有框都翻成
+    PDF 用户空间。旋转页直接报错：叠加渲染器对旋转页本就拒绝，安静地算出一
+    堆错数字比报错难查得多。
+    """
+    fitz = _fitz()
+    doc = fitz.open(pdf_path)
+    pages_spans: list[list[TranslatedSpan]] = []
+    pages_masks: list[list[Box]] = []
+    rotations: list[int] = []
+    try:
+        for page in doc:
+            rotation = int(page.rotation or 0)
+            rotations.append(rotation)
+            if rotation != 0:
+                raise RuntimeError(
+                    f"译文 PDF 第 {page.number + 1} 页旋转 {rotation} 度。度量假定"
+                    "未旋转页面；叠加渲染路径对旋转页本就拒绝，出现这个值说明"
+                    "有夹具带着 /Rotate 进来了，先补旋转页的处理再谈度量。"
+                )
+            height = page.rect.height
+            spans: list[TranslatedSpan] = []
+            data = page.get_text("dict")
+            for block in data.get("blocks", []):
+                for line in block.get("lines", []):
+                    line_spans = line.get("spans", [])
+                    if not any(_has_cjk(s.get("text", "")) for s in line_spans):
+                        continue  # 原文行，遮罩盖住了但文本层还在
+                    for span in line_spans:
+                        text = span.get("text", "")
+                        if not text.strip():
+                            continue
+                        spans.append(
+                            TranslatedSpan(
+                                box=flip_y(span["bbox"], height),
+                                size=float(span.get("size", 0.0)),
+                                text=text,
+                                color=int(span.get("color", 0)),
+                                font=str(span.get("font", "")),
+                            )
+                        )
+            pages_spans.append(spans)
+
+            masks: list[Box] = []
+            for drawing in page.get_drawings():
+                fill = drawing.get("fill")
+                if not fill:
+                    continue
+                if not all(isinstance(c, (int, float)) and c > 0.98 for c in fill[:3]):
+                    continue
+                masks.append(flip_y(list(drawing["rect"]), height))
+            pages_masks.append(masks)
+    finally:
+        doc.close()
+    return pages_spans, pages_masks, rotations
+
+
+def _assign_spans(
+    spans: list[TranslatedSpan], paragraphs: list[dict]
+) -> tuple[dict[int, list[TranslatedSpan]], int]:
+    """把每个译文片段归到中心距最近的段落框。
+
+    按段落框分组而不是按绘制调用分组：pymupdf 不知道哪几行是同一次 drawText
+    画出来的，但它知道每个片段落在哪。用"落进哪个框"分组，天然处理一段对
+    多行，也不需要猜渲染器的调用边界。
+
+    归属半径取所辖框对角线的四分之一：译文整体偏移十几磅时仍然归得进原段，
+    只是交并比掉下来——这正是想看到的"偏了但没跑丢"。半径定死成几磅会把
+    偏移的译文整段判成未翻译，两个不同的病看起来一模一样。
+    """
+    boxes = []
+    for index, paragraph in enumerate(paragraphs):
+        box = Box(paragraph["x0"], paragraph["y0"], paragraph["x1"], paragraph["y1"])
+        boxes.append((index, box))
+
+    assigned: dict[int, list[TranslatedSpan]] = {i: [] for i, _ in boxes}
+    unassigned = 0
+    for span in spans:
+        cx, cy = span.box.center()
+        best_key = None
+        best_index = None
+        for index, box in boxes:
+            # 片段中心到框的距离：在框内算 0，在外算到框的欧氏距离。
+            dx = max(box.x0 - cx, 0.0, cx - box.x1)
+            dy = max(box.y0 - cy, 0.0, cy - box.y1)
+            distance = math.hypot(dx, dy)
+            # 排序键：先在框内的优先，再距离近的优先，最后框小的优先。第三位是
+            # 关键——解析器把多栏并成一个大块时，大块框盖住了各段自己的框，
+            # 距离同样为 0，不按面积分辨就会把译文全记到大块名下。
+            key = (0 if distance == 0 else 1, distance, box.area())
+            if best_key is None or key < best_key:
+                best_key = key
+                best_index = index
+        if best_index is None:
+            unassigned += 1
+            continue
+        radius = max(2.0, 0.25 * boxes[best_index][1].diagonal())
+        if best_key is not None and best_key[1] <= radius:
+            assigned[best_index].append(span)
+        else:
+            unassigned += 1
+    return assigned, unassigned
+
+
+def _mask_ownership(
+    masks: list[Box], paragraphs: list[dict], regions: list[Box]
+) -> tuple[list[tuple[Box, Box]], int, int, int]:
+    """判定每个白色矩形是不是渲染器画的遮罩，以及它越界到了哪里。
+
+    认遮罩不能靠"白填充"：原文自己的白填充矩形（图框底色、表头底色）也是白
+    的，一起算进来就会天天报假警。判据是"这个矩形有三成以上面积压在某个段落
+    框上"——渲染器的遮罩本就是段落框外扩一磅，必然满足；原文里那些白矩形在
+    图区表格区，压不到段落框上。
+
+    归属取压得最多的那个段落，不取交并比最大的：通栏段落的遮罩横跨两栏，对
+    自己那一栏的交并比只有五成，按交并比匹配会认错主人甚至认不出来。
+
+    返回 (认出的遮罩与所辖段落, 遮罩总数, 压到别段的数量, 压到图区表格区的
+    数量)。
+    """
+    boxes = [Box(p["x0"], p["y0"], p["x1"], p["y1"]) for p in paragraphs]
+    owned: list[tuple[Box, Box]] = []
+    intrusion_paragraph = 0
+    intrusion_region = 0
+    for mask in masks:
+        mask_area = mask.area()
+        if mask_area <= 0:
+            continue
+        best_index = None
+        best_overlap = 0.0
+        for index, box in enumerate(boxes):
+            overlap = mask.intersect(box)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_index = index
+        if best_index is None or best_overlap / mask_area < 0.3:
+            continue  # 不是遮罩，是原文自带的白色填充
+        owner = boxes[best_index]
+        owned.append((mask, owner))
+        hit_paragraph = False
+        hit_region = False
+        for index, box in enumerate(boxes):
+            if index == best_index:
+                continue
+            # 减掉所辖段落本来就和这个框重叠的部分，剩下的才算遮罩多盖的。
+            if mask.intersect(box) - owner.intersect(box) > 1.0:
+                hit_paragraph = True
+        for region in regions:
+            if mask.intersect(region) - owner.intersect(region) > 1.0:
+                hit_region = True
+        if hit_paragraph:
+            intrusion_paragraph += 1
+        if hit_region:
+            intrusion_region += 1
+    return owned, len(masks), intrusion_paragraph, intrusion_region
+
+
+def layout_metrics(source_pdf: str, translated_pdf: str, assembly: dict) -> dict:
+    """B 组：版面保留的全部指标。
+
+    assembly 是 render-entry.ts 产出的装配视图（段落框、字号、图区、表格区、
+    公式块）。它是渲染器真正的输入，所以度量以它为准，而不是以原始解析产出
+    为准——用渲染器没看到的框去要求译文落位，会系统性冤枉它。
+    """
+    fitz = _fitz()
+    spans_by_page, masks_by_page, _ = extract_translated_spans(translated_pdf)
+
+    per_page = []
+    biou_samples: list[float] = []
+    recall_samples: list[float] = []
+    precision_samples: list[float] = []
+    ratio_samples: list[float] = []
+    small_font_count = 0
+    font_sample_count = 0
+    overflow_counts = {"right": 0, "bottom": 0, "top": 0}
+    max_overflow = {"right": 0.0, "bottom": 0.0, "top": 0.0}
+    untranslated_total = 0
+    untranslated_reasons = {"noText": 0, "empty": 0}
+    mask_total = 0
+    intrusion_into_paragraph = 0
+    intrusion_into_region = 0
+    unassigned_spans = 0
+
+    for page in assembly.get("pages", []):
+        number = page["pageNumber"]
+        index = number - 1
+        spans = spans_by_page[index] if index < len(spans_by_page) else []
+        masks = masks_by_page[index] if index < len(masks_by_page) else []
+        paragraphs = page.get("paragraphs", [])
+
+        assigned, unassigned = _assign_spans(spans, paragraphs)
+        unassigned_spans += unassigned
+        page_iou: list[float] = []
+        page_untranslated = 0
+        for position, paragraph in enumerate(paragraphs):
+            own = assigned.get(position, [])
+            source_text = paragraph.get("text", "")
+            if not source_text.strip():
+                untranslated_reasons["empty"] += 1
+                continue
+            if not own:
+                page_untranslated += 1
+                untranslated_reasons["noText"] += 1
+                continue
+            target = Box(paragraph["x0"], paragraph["y0"], paragraph["x1"], paragraph["y1"])
+            union_box = own[0].box
+            for span in own[1:]:
+                union_box = union_box.union_with(span.box)
+            page_iou.append(iou(union_box, target))
+            # 覆盖率与滞留率分开报。译文比原文短是常态，只报交并比会把"短但
+            # 位置对"和"位置错"混成一个偏低的数；拆开之后，覆盖率答"盖住了该
+            # 盖的地方吗"，滞留率答"有跑出该待的地方吗"，两个问题各自看得见。
+            recall_samples.append(union_box.intersect(target) / target.area() if target.area() else 0.0)
+            precision_samples.append(
+                union_box.intersect(target) / union_box.area() if union_box.area() else 0.0
+            )
+            for span in own:
+                font_sample_count += 1
+                ratio = span.size / paragraph["size"] if paragraph["size"] > 0 else 0.0
+                ratio_samples.append(ratio)
+                if ratio < 0.6:
+                    small_font_count += 1
+                right = span.box.x1 - target.x1
+                bottom = target.y0 - span.box.y0
+                top = span.box.y1 - target.y1
+                if right > 1.0:
+                    overflow_counts["right"] += 1
+                    max_overflow["right"] = max(max_overflow["right"], right)
+                if bottom > 1.0:
+                    overflow_counts["bottom"] += 1
+                    max_overflow["bottom"] = max(max_overflow["bottom"], bottom)
+                if top > 1.0:
+                    overflow_counts["top"] += 1
+                    max_overflow["top"] = max(max_overflow["top"], top)
+        biou_samples.extend(page_iou)
+        untranslated_total += page_untranslated
+
+        # 遮罩越界。
+        regions = [Box(r["x0"], r["y0"], r["x1"], r["y1"]) for r in page.get("images", [])]
+        regions += [Box(t["x0"], t["y0"], t["x1"], t["y1"]) for t in page.get("tables", [])]
+        _, page_mask_total, page_para_intrusion, page_region_intrusion = _mask_ownership(
+            masks, paragraphs, regions
+        )
+        mask_total += page_mask_total
+        intrusion_into_paragraph += page_para_intrusion
+        intrusion_into_region += page_region_intrusion
+
+        per_page.append(
+            {
+                "page": number,
+                "paragraphs": len(paragraphs),
+                "translated": len(paragraphs) - page_untranslated,
+                "untranslated": page_untranslated,
+                "meanIou": sum(page_iou) / len(page_iou) if page_iou else 0.0,
+                "masks": len(masks),
+            }
+        )
+
+    sorted_ratios = sorted(ratio_samples)
+    percentile_10 = (
+        sorted_ratios[max(0, math.floor(0.1 * len(sorted_ratios)) - 1)] if sorted_ratios else 0.0
+    )
+    result = {
+        "biou": sum(biou_samples) / len(biou_samples) if biou_samples else 0.0,
+        "biouSamples": len(biou_samples),
+        "boxRecall": sum(recall_samples) / len(recall_samples) if recall_samples else 0.0,
+        "boxPrecision": sum(precision_samples) / len(precision_samples) if precision_samples else 0.0,
+        "utb": untranslated_total,
+        "utbReasons": untranslated_reasons,
+        "overflow": overflow_counts,
+        "maxOverflow": max_overflow,
+        "fontSize": {
+            "median": sorted_ratios[len(sorted_ratios) // 2] if sorted_ratios else 0.0,
+            "p10": percentile_10,
+            "below06Ratio": small_font_count / font_sample_count if font_sample_count else 0.0,
+        },
+        "mask": {
+            "total": mask_total,
+            "intrusionIntoParagraph": intrusion_into_paragraph,
+            "intrusionIntoRegion": intrusion_into_region,
+        },
+        "unassignedSpans": unassigned_spans,
+        "perPage": per_page,
+    }
+    return result
+
+
+def outside_pixel_diff(
+    source_pdf: str,
+    translated_pdf: str,
+    assembly: dict,
+    dpi: int = 120,
+    erode_px: int = 3,
+    band_px: int = 12,
+    threshold: int = 32,
+) -> dict:
+    """框外像素差异：渲染原文与译文，只比较所有段落框之外的像素。
+
+    这是最强的一条单指标：任何画到不该画的地方——遮罩越界、公式截图贴错
+    位置、图像合成偏移——都会在框外留下像素。设计照搬 prototype 下那个跑过
+    14 个文档的探针：框内侵蚀几像素算"框内"，外扩一圈算"环带跳过"，其余算
+    "框外"参与比较。环带是必需的，字形删掉后边缘像素会溅出小框几像素，不跳
+    过就连正确的输出也会报差异。
+    """
+    fitz = _fitz()
+    scale = dpi / 72.0
+    source_doc = fitz.open(source_pdf)
+    translated_doc = fitz.open(translated_pdf)
+    try:
+        if source_doc.page_count != translated_doc.page_count:
+            raise RuntimeError(
+                f"页数不一致：原文 {source_doc.page_count}，译文 {translated_doc.page_count}"
+            )
+        pages = {p["pageNumber"]: p for p in assembly.get("pages", [])}
+        # 页高取原文 PDF 自己的。解析器 JSON 不带 MediaBox，装配视图里的尺寸
+        # 虽然已经改成从原文补，但度量库既然已经打开了原文，就以原文为准——
+        # y 向上换算位图行号只差一页的高度，整页遮罩就会算偏。
+        page_heights = {p.number: p.rect.height for p in source_doc}
+        outside_total = 0
+        outside_diff = 0
+        inside_total = 0
+        inside_diff = 0
+        samples: list[str] = []
+        for index in range(source_doc.page_count):
+            page_assembly = pages.get(index + 1)
+            if page_assembly is None:
+                continue
+            before = source_doc[index].get_pixmap(dpi=dpi)
+            after = translated_doc[index].get_pixmap(dpi=dpi)
+            if before.width != after.width or before.height != after.height:
+                raise RuntimeError(
+                    f"第 {index + 1} 页渲染尺寸不一致：原文 "
+                    f"{before.width}x{after.height}，译文 {after.width}x{after.height}"
+                )
+            width, height = before.width, before.height
+            # 0 框外（参与比较）、1 环带（跳过）、2 框内（参与比较）
+            mask = bytearray(width * height)
+            for paragraph in page_assembly.get("paragraphs", []):
+                page_height = page_heights.get(index + 1) or page_assembly["height"]
+                x0 = int(round(paragraph["x0"] * scale))
+                x1 = int(round(paragraph["x1"] * scale))
+                y0 = int(round((1 - paragraph["y1"] / page_height) * height))
+                y1 = int(round((1 - paragraph["y0"] / page_height) * height))
+                x0 = max(0, min(width - 1, x0))
+                x1 = max(0, min(width - 1, x1))
+                y0 = max(0, min(height - 1, y0))
+                y1 = max(0, min(height - 1, y1))
+                for y in range(max(0, y0 - band_px), min(height - 1, y1 + band_px) + 1):
+                    row = y * width
+                    for x in range(max(0, x0 - band_px), min(width - 1, x1 + band_px) + 1):
+                        strict_inside = (
+                            x >= x0 + erode_px
+                            and x <= x1 - erode_px
+                            and y >= y0 + erode_px
+                            and y <= y1 - erode_px
+                        )
+                        if strict_inside:
+                            mask[row + x] = 2
+                        elif mask[row + x] == 0:
+                            mask[row + x] = 1
+            before_samples = before.samples
+            after_samples = after.samples
+            channels = before.n
+            stride = width * channels
+            for y in range(height):
+                mask_row = mask[y * width : (y + 1) * width]
+                # 计数走 bytes.count：一行上千个像素，逐个 Python 循环会让一篇
+                # 十页的夹具跑上几十秒。整行字节相同就整行跳过差异比较，只有真
+                # 变了的行才逐像素看——页面上变的就是几段文字，其余行原样跳过。
+                outside_total += width - mask_row.count(1) - mask_row.count(2)
+                inside_total += mask_row.count(2)
+                row_offset = y * stride
+                if before_samples[row_offset : row_offset + stride] == after_samples[
+                    row_offset : row_offset + stride
+                ]:
+                    continue
+                for x in range(width):
+                    kind = mask_row[x]
+                    if kind == 1:
+                        continue
+                    offset = row_offset + x * channels
+                    changed = (
+                        abs(before_samples[offset] - after_samples[offset]) > threshold
+                        or abs(before_samples[offset + 1] - after_samples[offset + 1]) > threshold
+                        or abs(before_samples[offset + 2] - after_samples[offset + 2]) > threshold
+                    )
+                    if kind == 2:
+                        if changed:
+                            inside_diff += 1
+                    else:
+                        if changed:
+                            outside_diff += 1
+                            if len(samples) < 20:
+                                samples.append(f"p{index + 1}:{x},{y}")
+    finally:
+        source_doc.close()
+        translated_doc.close()
+    return {
+        "outsideDiffRatio": outside_diff / outside_total if outside_total else 0.0,
+        "outsideDiff": outside_diff,
+        "outsideTotal": outside_total,
+        "insideChangedRatio": inside_diff / inside_total if inside_total else 0.0,
+        "outsideSamples": samples,
+    }
+
+
+def source_residue(source_pdf: str, translated_pdf: str, source_script: str = "latin") -> dict:
+    """原文残留率：译文 PDF 里还能提取到多少源语言文本。
+
+    叠加模式下原文内容流原样保留在页里，遮罩只是拿白矩形盖住它。盖不住或
+    漏盖，提取层就仍然命中原文——读者复制全文时会复制到原文，搜索原文也能
+    搜到。这个比例就是"盖住了多少"的直接度量。
+
+    只数字源文字的字母：译文是另一种文字（中文），混进来会把残留率稀释成
+    一个好看但假的数。Python 的 isalpha 把汉字也算字母，所以必须按文字系
+    统分别数，不能用 isalpha 一把抓。
+    """
+    fitz = _fitz()
+
+    def letters(text: str) -> int:
+        if source_script == "latin":
+            return sum(1 for c in text if ("a" <= c <= "z") or ("A" <= c <= "Z"))
+        return sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+
+    source_doc = fitz.open(source_pdf)
+    source_text = "".join(page.get_text() for page in source_doc)
+    source_doc.close()
+    translated_doc = fitz.open(translated_pdf)
+    translated_text = "".join(page.get_text() for page in translated_doc)
+    translated_doc.close()
+
+    total = letters(source_text)
+    residual = letters(translated_text)
+    return {
+        "sourceLetters": total,
+        "residualLetters": residual,
+        "residueRatio": residual / total if total else 0.0,
+        "sourceScript": source_script,
+    }
+
+
+# ---------------------------------------------------------------------------
+# C 组：扫描件层
+# ---------------------------------------------------------------------------
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """标准编辑距离。CER 与 WER 共用，不引第三方库。"""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(
+                min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + (0 if ca == cb else 1),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _cer(reference: str, hypothesis: str) -> float:
+    reference = reference.replace(" ", "")
+    hypothesis = hypothesis.replace(" ", "")
+    if not reference:
+        return 0.0 if not hypothesis else 1.0
+    return _edit_distance(reference, hypothesis) / len(reference)
+
+
+def _wer(reference: str, hypothesis: str) -> float:
+    ref_words = reference.split()
+    hyp_words = hypothesis.split()
+    if not ref_words:
+        return 0.0 if not hyp_words else 1.0
+    return _edit_distance(ref_words, hyp_words) / len(ref_words)
+
+
+def ocr_metrics(sidecar_pages: list[dict], ground_truth_lines: list[dict]) -> dict:
+    """OCR 产出对已知原文的度量。
+
+    sidecar_pages 是侧车 result.json 的 pages 数组；ground_truth_lines 是
+    [{"page", "bbox"(y 向上), "text"}]，bbox 已是 PDF 用户空间。
+
+    注意侧车的 bbox 是位图像素框（左上原点 y 向下），换算成 PDF 用户空间要
+    走 pixelBoxToPdfBox 那条公式：缩放以位图实际尺寸为基准，不信 dpi 乘法。
+    这里假定调用方已经换算好，换算本身由单测覆盖。
+    """
+    hyp_lines: list[dict] = []
+    for page in sidecar_pages:
+        size = page.get("pageSizePt") or {}
+        render = page.get("renderSizePx") or {}
+        width = float(size.get("width") or 0)
+        height = float(size.get("height") or 0)
+        render_width = float(render.get("width") or 0)
+        render_height = float(render.get("height") or 0)
+        sx = width / render_width if render_width else 0.0
+        sy = height / render_height if render_height else 0.0
+        for line in page.get("lines") or []:
+            box = line.get("bbox") or {}
+            x0 = min(float(box.get("x0", 0)), float(box.get("x1", 0))) * sx
+            x1 = max(float(box.get("x0", 0)), float(box.get("x1", 0))) * sx
+            top = min(float(box.get("y0", 0)), float(box.get("y1", 0))) * sy
+            bottom = max(float(box.get("y0", 0)), float(box.get("y1", 0))) * sy
+            hyp_lines.append(
+                {
+                    "page": int(page.get("pageNumber") or 0),
+                    "box": Box(x0, height - bottom, x1, height - top),
+                    "text": norm_text(line.get("text", "")),
+                    "blockId": int(line.get("blockId") or 0),
+                }
+            )
+
+    # 行级配对：同页内按文本相似度贪心一对一。
+    pairs: list[tuple[dict, dict, float]] = []
+    used_hyp: set[int] = set()
+    for gt in ground_truth_lines:
+        best_index = None
+        best_sim = 0.0
+        for index, hyp in enumerate(hyp_lines):
+            if index in used_hyp or hyp["page"] != gt["page"]:
+                continue
+            sim = text_sim(gt["text"], hyp["text"])
+            if sim > best_sim:
+                best_sim = sim
+                best_index = index
+        if best_index is not None and best_sim >= 0.5:
+            used_hyp.add(best_index)
+            pairs.append((gt, hyp_lines[best_index], best_sim))
+
+    cer_samples = [_cer(gt["text"], hyp["text"]) for gt, hyp, _ in pairs]
+    wer_samples = [_wer(gt["text"], hyp["text"]) for gt, hyp, _ in pairs]
+    iou_samples = [
+        iou(Box(*gt["bbox"]) if not isinstance(gt["bbox"], Box) else gt["bbox"], hyp["box"])
+        for gt, hyp, _ in pairs
+    ]
+
+    # 段落召回：按 blockId 聚成块，与真值行做覆盖比对。
+    blocks: dict[int, list[str]] = {}
+    block_order: list[int] = []
+    for line in hyp_lines:
+        key = line["blockId"]
+        if key not in blocks:
+            block_order.append(key)
+        blocks.setdefault(key, []).append(line["text"])
+    matched_text = {hyp["text"] for _, hyp, _ in pairs}
+    matched_blocks = sum(1 for key in block_order if any(t in matched_text for t in blocks[key]))
+    gt_pages = len({gt["page"] for gt in ground_truth_lines})
+
+    return {
+        "linePairs": len(pairs),
+        "groundTruthLines": len(ground_truth_lines),
+        "lineRecall": len(pairs) / len(ground_truth_lines) if ground_truth_lines else 0.0,
+        "cer": sum(cer_samples) / len(cer_samples) if cer_samples else 0.0,
+        "wer": sum(wer_samples) / len(wer_samples) if wer_samples else 0.0,
+        "boxIou": sum(iou_samples) / len(iou_samples) if iou_samples else 0.0,
+        "blockRecall": matched_blocks / len(block_order) if block_order else 0.0,
+        "blocks": len(block_order),
+        "groundTruthPages": gt_pages,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 自检
+# ---------------------------------------------------------------------------
+
+
+def _check(name: str, condition: bool, detail: str = "") -> bool:
+    if condition:
+        print(f"PASS  {name}")
+        return True
+    print(f"FAIL  {name}" + (f"\n      {detail}" if detail else ""))
+    return False
+
+
+def selftest() -> int:
+    failures = 0
+
+    # ── 几何 ──
+    a = Box(0, 0, 10, 10)
+    failures += not _check("iou 相同框为 1", abs(iou(a, Box(0, 0, 10, 10)) - 1.0) < 1e-9)
+    failures += not _check("iou 不相交为 0", iou(a, Box(20, 20, 30, 30)) == 0.0)
+    half = Box(5, 0, 15, 10)
+    failures += not _check(
+        "iou 半重合为 1/3", abs(iou(a, half) - (50 / 150)) < 1e-9, f"got {iou(a, half)}"
+    )
+    failures += not _check(
+        "iou 零面积框不除零", iou(Box(0, 0, 0, 0), Box(0, 0, 0, 0)) == 0.0
+    )
+
+    # ── y 翻转 ──
+    # 这是唯一一条专门盯坐标约定的断言。翻转写反，所有 IoU 仍然落在 0 到 1
+    # 之间，报告看起来一切正常，只有逐页核对才发现整体镜像。
+    flipped = flip_y([10, 20, 110, 70], 800)
+    failures += not _check(
+        "flip_y 把左上原点翻成左下原点",
+        abs(flipped.x0 - 10) < 1e-9 and abs(flipped.x1 - 110) < 1e-9
+        and abs(flipped.y0 - (800 - 70)) < 1e-9 and abs(flipped.y1 - (800 - 20)) < 1e-9,
+        f"got {flipped}",
+    )
+    failures += not _check(
+        "odl_box 顺序颠倒自动交换",
+        odl_box([100, 200, 50, 100]) == Box(50, 100, 100, 200),
+    )
+
+    # ── 文本相似度 ──
+    failures += not _check(
+        "norm_text 压掉换行与缩进",
+        norm_text("宇宙\n  和地球") == "宇宙 和地球",
+    )
+    failures += not _check(
+        "text_sim 跨换行仍能配上", text_sim("a b c", "a\nb  c") > 0.99, f"{text_sim('a b c', 'a\nb  c')}"
+    )
+
+    # ── Kendall tau ──
+    failures += not _check("tau 同序为 1", abs(kendall_tau([1, 2, 3], [1, 2, 3]) - 1.0) < 1e-9)
+    failures += not _check("tau 逆序为 -1", abs(kendall_tau([1, 2, 3], [3, 2, 1]) + 1.0) < 1e-9)
+    failures += not _check(
+        "tau 元素集不同返回 0", kendall_tau([1, 2], [1, 3]) == 0.0
+    )
+
+    # ── A 组 ──
+    key = {
+        "elements": [
+            {"order": 0, "type": "body", "text": "plain prose one", "formula": False},
+            {"order": 1, "type": "body", "text": "plain prose two", "formula": False},
+            {"order": 2, "type": "body", "text": "plain prose three", "formula": False},
+            {"order": 3, "type": "body", "text": "an equation alpha beta", "formula": True},
+            {"order": 4, "type": "body", "text": "an equation gamma delta", "formula": True},
+        ]
+    }
+    blocks = [
+        OdlBlock(0, 1, "paragraph", "plain prose one", 10, Box(0, 0, 10, 10)),
+        OdlBlock(1, 1, "paragraph", "plain prose two", 10, Box(0, 10, 10, 20)),
+        OdlBlock(2, 1, "paragraph", "plain prose three", 10, Box(0, 20, 10, 30)),
+        OdlBlock(3, 1, "paragraph", "an equation alpha beta", 10, Box(0, 30, 10, 40)),
+    ]
+    odl = OdlDoc(blocks=blocks)
+    flagged = {(1, "an equation alpha beta"), (1, "plain prose two")}
+    matched = match_elements(key, odl)
+    formula = formula_detection(key, odl, flagged, list(matched["pairs"]))
+    failures += not _check(
+        "公式精确率 1/2、召回率 1/2",
+        abs(formula["precision"] - 0.5) < 1e-9 and abs(formula["recall"] - 0.5) < 1e-9,
+        f"got P={formula['precision']} R={formula['recall']}",
+    )
+    failures += not _check(
+        "漏报的那条进 cases", any(c["truth"] and not c["predicted"] for c in formula["cases"])
+    )
+
+    failures += not _check(
+        "四条真值配上、一条漏配、解析没有多产",
+        matched["tp"] == 4 and matched["fn"] == 1 and matched["fp"] == 0,
+        f"got tp={matched['tp']} fn={matched['fn']} fp={matched['fp']}",
+    )
+
+    three_col_key = {"columns": 3}
+    wide_odl = OdlDoc(
+        blocks=[
+            OdlBlock(0, 1, "paragraph", "wide one", 10, Box(0, 0, 500, 10)),
+            OdlBlock(1, 1, "paragraph", "narrow one", 10, Box(0, 10, 150, 20)),
+        ]
+    )
+    bleed = column_bleed(three_col_key, wide_odl, {1: 500})
+    failures += not _check(
+        "三栏页上宽框记串位、窄框不记",
+        abs(bleed["crossColumnRatio"] - 0.5) < 1e-9 and abs(bleed["wideRatio"] - 0.5) < 1e-9,
+        f"got {bleed}",
+    )
+
+    tau = reading_order(key, odl, [(0, 0), (1, 1), (2, 2), (3, 3)])
+    failures += not _check("阅读顺序同序 tau 为 1", abs(tau["tau"] - 1.0) < 1e-9)
+    reversed_tau = reading_order(key, odl, [(0, 3), (1, 2), (2, 1), (3, 0)])
+    failures += not _check("阅读顺序逆序 tau 为 -1", abs(reversed_tau["tau"] + 1.0) < 1e-9)
+
+    # ── 编号空间：真值下标与解析器块下标不是同一套，指标必须经配对换算 ──
+    # 这一条盯的是一个真发生过缺陷：答案键 30 个元素、解析器 62 个块，直接拿
+    # 两边的 order 集合求交，公式三项恒为 0，而 formula-dense 恰好 26 对 26 所以
+    # 数字是对的——同一个 bug 在一篇夹具上隐身、在另一篇上现形。
+    sparse_key = {
+        "elements": [
+            {"order": 0, "type": "heading", "level": 1, "text": "a heading here", "formula": False},
+            {"order": 1, "type": "body", "text": "plain prose one", "formula": False},
+            {"order": 2, "type": "body", "text": "an equation alpha beta", "formula": True},
+        ]
+    }
+    sparse_odl = OdlDoc(
+        blocks=[
+            # 解析器多产出了表格单元格与图内标注，块下标与真值下标错开。
+            OdlBlock(0, 1, "heading", "a heading here", 12, Box(0, 0, 10, 10), 1),
+            OdlBlock(1, 1, "paragraph", "plain prose one", 10, Box(0, 10, 10, 20)),
+            OdlBlock(2, 1, "paragraph", "a table cell fragment", 8, Box(0, 20, 10, 30)),
+            OdlBlock(3, 1, "paragraph", "an axis label", 6, Box(0, 30, 10, 40)),
+            OdlBlock(4, 1, "paragraph", "an equation alpha beta", 10, Box(0, 40, 10, 50)),
+        ]
+    )
+    sparse_matched = match_elements(sparse_key, sparse_odl)
+    sparse_pairs = list(sparse_matched["pairs"])
+    sparse_formula = formula_detection(
+        sparse_key, sparse_odl, {(1, "an equation alpha beta")}, sparse_pairs
+    )
+    failures += not _check(
+        "块下标错开时公式判域仍然算得对",
+        sparse_formula["tp"] == 1 and sparse_formula["fp"] == 0 and sparse_formula["fn"] == 0,
+        f"got {sparse_formula}",
+    )
+    sparse_heading = heading_levels(sparse_key, sparse_odl, sparse_pairs)
+    failures += not _check(
+        "块下标错开时标题层级仍能配上",
+        sparse_heading["sharedHeadings"] == 1,
+        f"got {sparse_heading}",
+    )
+
+    # ── C 组 ──
+    failures += not _check(
+        "CER 一处替换为 1/长度",
+        abs(_cer("abcd", "abxd") - 0.25) < 1e-9,
+        f"got {_cer('abcd', 'abxd')}",
+    )
+    failures += not _check("CER 完全相同为 0", _cer("abc", "abc") == 0.0)
+    failures += not _check(
+        "WER 一个词错为 1/词数",
+        abs(_wer("a b c", "a x c") - 1 / 3) < 1e-9,
+        f"got {_wer('a b c', 'a x c')}",
+    )
+
+    sidecar_pages = [
+        {
+            "pageNumber": 1,
+            "pageSizePt": {"width": 600, "height": 800},
+            "renderSizePx": {"width": 1200, "height": 1600},
+            "lines": [
+                {"bbox": {"x0": 100, "y0": 100, "x1": 300, "y1": 120}, "text": "the quick brown fox", "blockId": 0},
+                {"bbox": {"x0": 100, "y0": 140, "x1": 300, "y1": 160}, "text": "jumps over the lazy dog", "blockId": 0},
+                {"bbox": {"x0": 100, "y0": 900, "x1": 300, "y1": 920}, "text": "a drifted line far away", "blockId": 1},
+            ],
+        }
+    ]
+    gt_lines = [
+        {"page": 1, "bbox": Box(50, 740, 150, 750), "text": "the quick brown fox"},
+        {"page": 1, "bbox": Box(50, 720, 150, 730), "text": "jumps over the lazy dog"},
+        {"page": 1, "bbox": Box(50, 700, 150, 720), "text": "a line that was never seen"},
+    ]
+    ocr = ocr_metrics(sidecar_pages, gt_lines)
+    failures += not _check(
+        "OCR 行召回 2/3",
+        abs(ocr["lineRecall"] - 2 / 3) < 1e-9,
+        f"got {ocr['lineRecall']}",
+    )
+    failures += not _check(
+        "OCR 坐标翻转后 IoU 大于 0.9",
+        ocr["boxIou"] > 0.9,
+        f"got {ocr['boxIou']}",
+    )
+
+    # ── B 组（需要 pymupdf）──
+    try:
+        _fitz()
+    except RuntimeError as exc:
+        print(f"SKIP  B 组自检：{exc}")
+        print(f"\n{'FAILED' if failures else 'OK'}  {failures} 项失败")
+        return 1 if failures else 0
+
+    import os
+    import tempfile
+
+    fitz = _fitz()
+    with tempfile.TemporaryDirectory() as tmp:
+        # 一页 600×800。两个并排段落框（y 向上 300 到 400），下方一个图区，
+        # 再加上一块落在所有框之外的黑色色块——它专门用来验证"画到框外会被
+        # 像素差异抓到"。
+        # pymupdf 的 insert_text 用左上原点，所以 y 向上 390 的基线要写成 410。
+        source_path = os.path.join(tmp, "src.pdf")
+        translated_path = os.path.join(tmp, "out.pdf")
+        assembly = {
+            "pages": [
+                {
+                    "pageNumber": 1,
+                    "width": 600,
+                    "height": 800,
+                    "paragraphs": [
+                        {
+                            "text": "left paragraph",
+                            "x0": 50,
+                            "y0": 300,
+                            "x1": 280,
+                            "y1": 400,
+                            "size": 10,
+                        },
+                        {
+                            "text": "right paragraph",
+                            "x0": 320,
+                            "y0": 300,
+                            "x1": 550,
+                            "y1": 400,
+                            "size": 10,
+                        },
+                    ],
+                    "images": [{"x0": 50, "y0": 100, "x1": 280, "y1": 250}],
+                    "tables": [],
+                }
+            ]
+        }
+        # 六行铺满左框：行距 15 磅，从基线 390 排到 315。左侧英文是原文，
+        # 右侧中文是译文——度量靠"有没有中文字符"把两侧分开。
+        line_rows = (410, 425, 440, 455, 470, 485)
+        english = "left paragraph source line that is long enough to fill"
+        chinese = "这一段是用于自检的合成译文内容需要足够长一些"
+
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=800)
+        page.draw_rect(fitz.Rect(100, 150, 200, 200), color=None, fill=(0, 0, 0))
+        for y in line_rows:
+            page.insert_text((50, y), english, fontsize=10)
+        doc.save(source_path)
+        doc.close()
+
+        # 译文一：只改左框。框外应当全等。
+        doc = fitz.open(source_path)
+        page = doc[0]
+        page.draw_rect(fitz.Rect(49, 399, 281, 501), color=None, fill=(1, 1, 1))
+        for y in line_rows:
+            page.insert_text((50, y), chinese, fontsize=10, fontname="china-s")
+        doc.save(translated_path)
+        doc.close()
+
+        spans, masks, rotations = extract_translated_spans(translated_path)
+        failures += not _check(
+            "六行中文译文都翻回 PDF 空间并落在左框里",
+            len(spans[0]) == 6 and all(299 <= s.box.y0 and s.box.y1 <= 401 for s in spans[0]),
+            f"got {len(spans[0])} spans: {[s.box for s in spans[0]][:2]}",
+        )
+        failures += not _check(
+            "白遮罩被认出且只有一个",
+            len(masks[0]) == 1,
+            f"got {len(masks[0])}",
+        )
+        failures += not _check("未旋转页旋转角为 0", rotations == [0])
+
+        layout = layout_metrics(source_path, translated_path, assembly)
+        failures += not _check(
+            "只译一段时 UTB 为 1",
+            layout["utb"] == 1,
+            f"got {layout['utb']}",
+        )
+        failures += not _check(
+            "译文铺满左框时交并比高",
+            layout["biou"] > 0.75,
+            f"got {layout['biou']}",
+        )
+        failures += not _check(
+            "译文在框内时滞留率接近 1",
+            layout["boxPrecision"] > 0.95,
+            f"got {layout['boxPrecision']}",
+        )
+        failures += not _check(
+            "遮罩没有侵入邻栏",
+            layout["mask"]["intrusionIntoParagraph"] == 0,
+            f"got {layout['mask']}",
+        )
+        baseline_iou = layout["biou"]
+
+        diff = outside_pixel_diff(source_path, translated_path, assembly)
+        failures += not _check(
+            "只改框内时框外像素差异为 0",
+            diff["outsideDiff"] == 0,
+            f"got {diff['outsideDiff']}/{diff['outsideTotal']} samples={diff['outsideSamples'][:3]}",
+        )
+
+        # 译文二：遮罩放大到盖住右栏。侵入必须被抓到。
+        doc = fitz.open(source_path)
+        page = doc[0]
+        page.draw_rect(fitz.Rect(49, 399, 551, 501), color=None, fill=(1, 1, 1))
+        for y in line_rows:
+            page.insert_text((50, y), chinese, fontsize=10, fontname="china-s")
+        doc.save(translated_path)
+        doc.close()
+
+        layout = layout_metrics(source_path, translated_path, assembly)
+        failures += not _check(
+            "遮罩盖住邻栏时侵入被抓到",
+            layout["mask"]["intrusionIntoParagraph"] >= 1,
+            f"got {layout['mask']}",
+        )
+
+        # 译文三：遮罩向下压进图区。
+        doc = fitz.open(source_path)
+        page = doc[0]
+        page.draw_rect(fitz.Rect(49, 399, 281, 601), color=None, fill=(1, 1, 1))
+        doc.save(translated_path)
+        doc.close()
+        layout = layout_metrics(source_path, translated_path, assembly)
+        failures += not _check(
+            "遮罩压进图区时侵入图区被抓到",
+            layout["mask"]["intrusionIntoRegion"] >= 1,
+            f"got {layout['mask']}",
+        )
+
+        # 译文四：拿白矩形盖掉框外那块黑色。像素差异必须抓到。
+        doc = fitz.open(source_path)
+        page = doc[0]
+        page.draw_rect(fitz.Rect(100, 150, 200, 200), color=None, fill=(1, 1, 1))
+        doc.save(translated_path)
+        doc.close()
+        diff = outside_pixel_diff(source_path, translated_path, assembly)
+        failures += not _check(
+            "盖掉框外内容时框外像素差异大于 0",
+            diff["outsideDiff"] > 0,
+            f"got {diff['outsideDiff']}/{diff['outsideTotal']}",
+        )
+
+        # 译文五：译文整块搬到两栏之外的空白带。交并比必须塌成 0，两段都算未
+        # 翻译——这正是"译文跑丢"的形状，也是这条指标最该抓住的病。
+        doc = fitz.open(source_path)
+        page = doc[0]
+        page.draw_rect(fitz.Rect(49, 399, 281, 501), color=None, fill=(1, 1, 1))
+        for y in (250, 265, 280, 295, 310, 325):
+            page.insert_text((50, y), chinese, fontsize=10, fontname="china-s")
+        doc.save(translated_path)
+        doc.close()
+        moved = layout_metrics(source_path, translated_path, assembly)
+        failures += not _check(
+            "译文搬到框外时交并比塌成 0 且两段都算未翻译",
+            moved["biou"] == 0.0 and moved["utb"] == 2,
+            f"moved biou={moved['biou']} utb={moved['utb']} baseline={baseline_iou}",
+        )
+
+        # 残留率：不盖遮罩时原文英文字符整个留在文本层里，比例应当接近 1。
+        doc = fitz.open(source_path)
+        page = doc[0]
+        for y in line_rows:
+            page.insert_text((50, y), chinese, fontsize=10, fontname="china-s")
+        doc.save(translated_path)
+        doc.close()
+        residue = source_residue(source_path, translated_path)
+        failures += not _check(
+            "不盖遮罩时原文残留接近 1",
+            residue["residueRatio"] > 0.95,
+            f"got {residue}",
+        )
+
+    print(f"\n{'FAILED' if failures else 'OK'}  {failures} 项失败")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="z-transplit 版面保留翻译的评测度量库")
+    parser.add_argument("--selftest", action="store_true", help="跑内置自检后退出")
+    args = parser.parse_args()
+    if args.selftest:
+        return selftest()
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

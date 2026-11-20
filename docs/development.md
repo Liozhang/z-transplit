@@ -134,6 +134,76 @@ stderr 每行一个 JSON 诊断，stdout 只放结果与自检的 JSON 行。
 位置，因此混合文档不丢标题层级。页界记账由 `OpenDataLoaderJsonAdapter` 产出
 （纯文本与 Markdown 各一套，收集点不同必须分别记）。
 
+#### 扫描件的真机联调
+
+纯函数与编排已被单测覆盖，但**没有任何测试真的启动过 Python 侧车**——管道
+调用、模型权重下载、`--selftest` 构造引擎这三件事只在真机上验过。联调顺序：
+
+```bash
+node scripts/qa/real-machine.mjs boot
+# 解释器这关先确认：应返回 ready 与一个绝对路径
+node scripts/qa/real-machine.mjs send pyStatus
+node scripts/qa/real-machine.mjs send envStatus
+# 一键安装（几百兆，弱网十几分钟）：装解释器依赖、下模型权重、跑 selftest、
+# 写安装标记并把命令回填进 pdfParser.scan.sidecarPath
+node scripts/qa/real-machine.mjs send sidecarInstall
+node scripts/qa/real-machine.mjs send envStatus      # 应变为就绪且已回填命令
+# 对扫描件夹具跑整条管线
+node scripts/qa/real-machine.mjs send installPdf D:\github_code\z-transplit\scripts\qa\fixtures\scanned-sample.pdf
+node scripts/qa/real-machine.mjs send pipelineStart
+node scripts/qa/real-machine.mjs send translated
+```
+
+要盯的观测点：进度行的 `scan-progress-start` / `scan-progress-retry` /
+`scan-progress-batch` / `scan-progress-summary`；数据目录
+`ztransplit/scan-state/<附件 id>/` 下的逐页 JSON 与 `run-manifest.json`；失败时
+侧车的临时目录会保留（`ScanSidecarClient.ts` 只在失败时不删），里面的
+`result.json` 与 stderr 诊断是定位依据。
+
+`scanned-degraded.pdf` 走的是同一条链（`needsOcr` 对 scanned 与 degraded 一视
+同仁），区别只在分类那一行的计数：它用来验证「有文本层但是乱码」的页确实被
+送去识别，而不是当成数字页直接机器翻译。
+
+#### 扫描件链路的真机试装结果（2026-11-19）
+
+第一次完整试装（Windows + Python 3.13 + Zotero 10.0.8 隔离 profile）连撞四个
+问题，前三个已修，第四个仍未解。按撞到的顺序记，免得下次从头查：
+
+1. **`requirements.txt` 装得出、跑不起。** 只写 `paddleocr` 时 pip 全部成功，
+   但 `--selftest` 过不去。缺两项：`paddlex[ocr]`（paddleocr 只带 `ocr-core`
+   子集，不含 PP-StructureV3 要的全量附加依赖，缺的是 einops、ftfy、
+   premailer、sentencepiece、tiktoken）和 `paddlepaddle` 本身（paddlex 的 151
+   个 extra 里没有一个声明推理引擎）。已补进 requirements.txt。
+
+2. **状态查询读错偏好分支。** `Zotero.Prefs.get` 的第二个参数是分支，漏掉它读
+   的是另一个分支、拿回来恒为 undefined。安装五步全部成功、偏好也确实写进去
+   了，`envStatus` 却一直报「命令未回填」，`ready` 永远是 false。已改用
+   `src/utils/prefs.ts` 的 `getPref`；测试桩也改成忠实于真机语义（不带分支
+   参数就返回空），并补了「四步全齐时 ready 为真」的正面断言——此前只有断言
+   false 的各种形状，这类缺陷照样全绿。
+
+3. **侧车把 PIL 图像传给引擎，被静默忽略。** PaddleX 3.x 的 `predict` 只收
+   `numpy.ndarray` 或文件路径；传 PIL 图像不抛异常，只打一条
+   "Not supported input data type! ... So has been ignored" 然后跳过整页。
+   结果是每页 lines/tables/figures 全空、coverage 0，而侧车报告
+   "recognized N page(s)"。已转成 numpy 数组，并补了「这一页什么都没认到」
+   的显式告警——加上它之后第 4 个问题才立刻可见。
+
+4. **仍未解：oneDNN 的 PIR 属性转换在 Comet Lake CPU 上不实现。** 修完前三个
+   之后引擎真的开始推理，随即在文字检测模型上报
+   `NotImplementedError: (Unimplemented) ConvertPirAttribute2RuntimeAttribute
+   not support [pir::ArrayAttribute<pir::DoubleAttribute>]`（
+   `paddle/fluid/framework/new_executor/instruction/onednn/onednn_instruction.cc`）。
+   试过且无效：`FLAGS_use_mkldnn=false`、`FLAGS_enable_pir_api=0`、
+   升级 paddlepaddle（3.3.1 已是 PyPI 最新）。机器是 i7-10510U（有 AVX2、
+   无 AVX-512）。PaddleX 的 runner 在 `run_mode` 不含 mkldnn 时本应调
+   `disable_mkldnn`，说明融合发生在新执行器的 PIR 阶段，绕不开。
+   **结论：识别链路在本机跑不通，卡在框架层，不是插件代码问题。** 换一台
+   CPU（有 AVX-512）或等 paddle 修这个转换再验。
+
+前三个修复都有单测；第四个的复现步骤就是上面那条最小命令，见
+`addon/scan-sidecar/requirements.txt` 顶部注释里的版本记录。
+
 ### 识别断点与自动续跑（scanRunState）
 
 每批识别成功的页会逐页落盘到 Zotero 数据目录的
@@ -283,6 +353,7 @@ pip 与自检的 argv、命令回填、已就绪零网络、脚本刷新、只�
 | `npm run test:qa` | QA 资产自测：Zotero/fetch mock 自举 + structure-check 正控（无正控的校验器不能证明自己能抓问题） |
 | `npm run check:jar` | 随包 jar 与 `PROVENANCE.json` 的 sha256 / 字节数对账 |
 | `npm run check:python-runtime` | 随包 `PYTHON-RUNTIME.json` 的结构对账（`--online` 追加联网核对构件与镜像） |
+| `npm run test:benchmark` | 版面保留翻译的评测基准：度量库自检 + 与基线逐指标判回归 |
 
 ## 测试分层
 
@@ -376,6 +447,246 @@ node scripts/qa/real-machine.mjs shoot                   # 结束
 
 排版/引擎相关的真机发现都建议带上 `docs/screenshots/` 截图归档（本轮阅读器
 类型门控的四张在 `docs/screenshots/reader-kind/`）。
+
+#### 版式与扫描件夹具
+
+原有两篇夹具都是「HTML 经无头 Edge 打印成 PDF」的产物，但转换命令没有入库，
+加夹具只能靠猜。`scripts/qa/make_pdf_fixtures.py` 把这一步固化，一次生成五篇：
+
+| 夹具 | 版式 | 专门暴露什么 |
+|---|---|---|
+| `formula-dense.pdf` | 双栏 | 编号独立公式、行内公式、公式引用句；含希腊字母与不等号的统计段（喂 `isFormulaParagraph` 误报）；`a² + b² = c²` 这类不含符号类字符的算术式（喂漏报） |
+| `three-column.pdf` | 三栏带栏线 + 跨栏标题 + 通栏图 | 栏检测缺失、栏间文字串位 |
+| `landscape-slides.pdf` | `@page { size: A4 landscape }`，大字号标题 | 非纵向页面、通栏、大字号 |
+| `scanned-sample.pdf` | 纯位图，无文本层 | `textLength` 判不到字符 → scanned 分支 |
+| `scanned-degraded.pdf` | 同源位图 + 损坏的 ToUnicode 文本层 | `saneRatio` 低于 0.9 → degraded 分支 |
+
+```
+python scripts/qa/make_pdf_fixtures.py
+```
+
+两个实现要点，都是实测踩出来的：
+
+- 脚本不用 `python -I`。它要 import 用户 site-packages 里的 pymupdf，隔离模式
+  看不见；它读的外部文件只有仓库自己的 `reading-brain.pdf`，HTML 全是文件内
+  常量，没有需要 `-I` 防的不可信输入。
+- 扫描件的乱码文本层不能直接插乱码字符。分类器认定的乱码是三样——C0/C1 控制符、
+  私用区码位、替换符；实测 C0 控制符能被 pymupdf 原样往返但 PDFBox 会整个丢掉，
+  替换符与私用区码位则被 pymupdf 在插入时换成间隔号（不在乱码类里）。可行的
+  做法是先按原位插一遍正常文字（白色，看不见），再给字体的 ToUnicode 表挂一张
+  把部分码位指向私用区的 CMap——字形由字体编码决定，画面仍是干净扫描图，提取
+  则拿到私用区乱码，这正是真实世界里映射损坏那种 PDF 的成因。
+
+在真机上跑某一篇：
+
+```
+node scripts/qa/real-machine.mjs send installPdf D:\github_code\z-transplit\scripts\qa\fixtures\<夹具>.pdf
+node scripts/qa/real-machine.mjs send pipelineStart
+node scripts/qa/real-machine.mjs send translated      # 轮询到译文附件出现
+node scripts/qa/real-machine.mjs send openShot '{"id":<译文附件 id>,"path":"D:\\zt-qa\\<名>.png"}'
+```
+
+这五篇的字号与元素类型分布已统计（用于定「图内文字」的识别规则，见
+`src/core/pdf/translation/figureTextFilter.ts` 的既有讨论）：图内标注的字号在
+6.0 到 6.8 磅之间，各篇正文的主导字号在 8.5 到 11 磅之间，而最小的正文类元素
+（图题、参考文献）不低于主导字号的 84%。
+
+#### 评测基准（scripts/qa/benchmark/）
+
+在此之前，版面质量只有一种验证方式：截图，人眼对照。截图给不出可复现的答案，
+八个版式修复批次每一批都要回答「修好了还是修坏了」，没有基准就只能每批重新
+看一遍图。这个目录把这件事变成数字。
+
+三个文件，经文件交换数据，互不 import：
+
+| 文件 | 职责 |
+|---|---|
+| `metrics.py` | 只放「怎么算数」。A/B/C 三组指标全是纯函数，带 `--selftest` |
+| `run.py` | 只放「怎么跑」。调解析器、跑无头渲染、出报告、判门禁 |
+| `render-entry.ts` | 无头渲染驱动，esbuild 打包后由 Node 执行。是基准与产品代码之间唯一的接触点 |
+
+`run.py` 的 assemble 模式走的是 `adaptOpenDataLoaderJson` →
+`odlAnalysisToAssembly`，render 模式走 `renderOverlayTranslated`——同一条装配与
+渲染代码，只是不走适配器。因此基准量的是产品自己的排版逻辑，不是复刻品。
+
+```
+python scripts/qa/benchmark/metrics.py --selftest      # 37 条合成扰动断言
+python scripts/qa/benchmark/run.py --regen-keys         # 从夹具 HTML 重生成答案键
+python scripts/qa/benchmark/run.py                      # 跑全部数字版夹具
+python scripts/qa/benchmark/run.py formula-dense        # 只跑一篇
+python scripts/qa/benchmark/run.py --write-baseline     # 产基线（第一跑只做这个）
+python scripts/qa/benchmark/run.py --gate               # 与基线比，判回归
+python scripts/qa/benchmark/run.py --ocr                # 扫描件层
+python scripts/qa/benchmark/run.py --real-machine formula-dense   # 真机抽查
+python scripts/qa/benchmark/run.py --real-machine --reuse-translated formula-dense
+```
+
+真机抽查有两档。默认档会重新点火流水线，全新 profile 的第一次要反复重试
+「PDFViewerApplication not ready in reader iframe」，实测十分钟以上，慢在与版面
+无关的一次性初始化上。`--reuse-translated` 不重点火，直接度量库里已有的译文附件
+（打印文件的修改时间，避免拿一份旧文件得出一个看起来新鲜的结论）——只要比对数字，
+这一档就够了。
+
+答案键（`answer-keys/*.json`）只存语义真值：元素类型、顺序、文本、是否公式段、
+标题层级、表格行列、栏数、横版标记。坐标一概不记——HTML 没有页的概念，坐标由
+度量端按文本相似度与解析器产出配对，避免手抄坐标出错。公式的边界样本是内容推导
+出来的：通篇符号密度跨过阈值 2 的非公式段记 `false-positive-bait`，含上标/属于/
+子集/空集/真减号这些不在符号类里的字符的记 `false-negative-bait`。
+
+三组指标：
+
+- **A 组 解析层**：原文 PDF 经解析器得 JSON，与答案键比。公式判域的精确率与
+  召回率（含逐案表）、段落匹配 F1（按类型分组）、栏串位率、标题层级一致率、
+  表格结构误差、阅读顺序 Kendall tau、图区检出。
+- **B 组 端到端层**：无头渲染产出译文 PDF 后度量。边界框交并比（BabelDOC 论文
+  的 BIoU，另拆出覆盖率与框内滞留率）、每页未翻译块数、越界计数、字号保持率、
+  遮罩侵入（压到别段或图区表格区）、框外像素差异、原文残留率、渲染器统计。
+- **C 组 扫描件层**：侧车产出对 `reading-brain.pdf` 的已知原文。字符错误率、
+  词错误率、段落召回、坐标交并比、阅读顺序。本机推理跑不通（见
+  「扫描件链路的真机试装结果」），这一组现在必然报 `unavailable`，不许假装通过。
+
+坐标系全文只有一套：PDF 用户空间，原点在页面左下角，y 向上。解析器的
+`bounding box` 直接可用；pymupdf 的 span bbox 与 drawings rect 是左上原点 y 向下，
+必须先翻。忘这一步会让所有交并比整体镜像，而数字看起来仍然「合理」——所以翻转
+函数只有一个入口 `flip_y`，并且自检里有一条专门断言它。
+
+三条设计约束，都是踩过才写下来的：
+
+- **门禁判相对回归，不判绝对阈值。** 当前代码是带着八个批次要修的缺陷的，用
+  当前状态定绝对阈值，等于把要修的缺陷一起冻进门禁。第一跑 `--write-baseline`，
+  人工核对后提交 `baseline.json`；之后任何指标朝坏方向越过容差即失败（交并比类
+  0.02，比率类 0.01，计数类 0）。绝对底线只有两条：框外像素差异不大于 0.002
+  （沿用原型那个跑过 14 个文档的探针的阈值）、交并比大于 0。
+- **指标抓不住扰动比没有指标更糟。** 自检用合成小样本断言每个指标都能抓住已知
+  扰动：译文搬到框外，交并比必须塌成 0；白遮罩盖住邻栏，侵入必须报；盖掉框外
+  内容，像素差异必须大于 0。这条纪律真抓到过两个 bug——生成器的终止分支写成
+  `return` 而非 `yield`，门禁因此一个指标都比不了、永远说绿。
+- **真值下标与解析器块下标是两个编号空间。** 答案键 30 个元素、解析器 62 个块
+  （表格单元格与图内标注都算块），直接拿两边的 order 集合求交，只在两边条数
+  恰好相等时碰巧正确。公式三项曾因此在 `formula-dense`（26 对 26）上数字全对、
+  在 `attention-reading`（30 对 62）上恒为 0。现在三项都经配对换算，自检里有一条
+  专门构造错开下标的用例钉住它。
+
+第一跑的数字（2026-11-20，合成译文长度比 0.55）：
+
+| 夹具 | 公式精确率 | 公式召回率 | 段落 F1 | 栏串位率 | 交并比 | 框内滞留 | 框外像素差异 |
+|---|---|---|---|---|---|---|---|
+| reading-brain | — | — | 1.000 | 0.000 | 0.813 | 0.970 | 0.00000 |
+| attention-reading | 1.000 | 1.000 | 0.652 | 0.032 | 0.752 | 0.938 | 0.00000 |
+| formula-dense | 0.571 | 1.000 | 1.000 | 0.038 | 0.785 | 0.974 | 0.00000 |
+| three-column | — | — | 0.894 | 0.115 | 0.729 | 0.924 | 0.00000 |
+| landscape-slides | — | — | 0.813 | 0.000 | 0.705 | 0.899 | 0.00000 |
+
+
+**基准不覆盖什么，说清楚免得误信。** 无头路径不走
+`src/core/pdf/translation/opendataloaderSplitAdapter.ts`，因此不覆盖：页面范围
+选择、译文附件创建、进度汇总、白页兜底合并模式。公式截图的取图路径也不等价——
+无头用 pymupdf 渲染同一块区域，真机是借阅读器的活 pdf.js 实例；截图内容等价，
+取图路径不等价。这三块只能靠 `--real-machine` 抽查确认，那也是它存在的唯一目的：
+不是每批都跑，是回答「无头路径可不可信」。
+
+第一次真机抽查（2026-11-20，`formula-dense`）给出的答案是无头路径在版面指标上
+可信，在原文删除上完全没覆盖：
+
+| 指标 | 真机 | 无头 |
+|---|---|---|
+| 交并比 | 0.723 | 0.785 |
+| 框内滞留 | 0.974 | 0.974 |
+| 每页未翻译块 | 0 | 0 |
+| 遮罩侵入段落 | 0 | 0 |
+| 框外像素差异 | 0.00000 | 0.00000 |
+| **原文残留率** | **0.000** | **1.000** |
+
+交并比差 0.06 是译文长度不同造成的，不是缺陷：真机走模拟引擎，无头走长度受控的
+合成译文，两者填满框的程度本就不同。四项版面指标完全一致，说明无头路径复现的装
+配与渲染和真机是同一条。
+
+原文残留率那一行的 1.000 对 0.000 是真发现：真机跑通了
+`ztransplit-region-text-remover.jar`，原文被真的从内容流里删掉了（所以译文 PDF
+里一个白遮罩都没有，`maskOriginalText` 传的是 false）；无头路径不跑删除器，原文
+整个留在文本层。这正是上面列的不覆盖项，现在有了数字——第三批批次 7 要做的
+「删除器回传跳过流数、为 0 强制回落遮罩」，在无头路径上根本测不到，只能靠真机。
+
+#### 外部基准接入实测（pdf-parse-bench）
+
+自建基准量的是装配与渲染，解析器本身一直缺一把外部的尺子。`pdf-parse-bench`
+（MIT，`pip install pdf-parse-bench`）是 2025-2026 年唯一新的独立解析器横评，
+榜上有 22 个系统，但没有 OpenDataLoader——本项目整个版面链路建立在它上面，
+它在公式与表格提取上的真实位置一直是个未知数。2026-11-20 实测接入，结论分两半。
+
+**能跑通的部分（全部本地，无接口密钥）：**
+
+```
+pip install pdf-parse-bench
+# 基准数据在 HuggingFace，直连不通时用镜像
+#   https://hf-mirror.com/datasets/piushorn/pdf-parse-bench
+# 目录结构：<数据集名>/{pdfs,ground_truth}/<编号>.{pdf,json}
+# 公式集 100 篇，表格集 100 篇，实测下载 11.4 MB / 62 秒
+
+# 1. 用本项目的 jar 解析（参数与产品一致）
+java -jar src/core/pdf/lib/opendataloader-pdf-cli.jar \
+  --format json --output-dir <odl-out> --reading-order xycut \
+  --table-method default --image-output embedded --use-struct-tree <pdf>
+
+# 2. ODL JSON 转成它要的 markdown（scripts/qa/benchmark/external/odl_to_markdown.py）
+python scripts/qa/benchmark/external/odl_to_markdown.py <odl-out> - results/opendataloader
+
+# 3. 不调用裁判的公式覆盖比对
+python scripts/qa/benchmark/external/odl_formula_coverage.py \
+  <数据集>/ground_truth results/opendataloader
+```
+
+实测：解析 100 篇 67 秒，转换 100 篇无一为空。
+
+**跑不通的部分：正式分数必须走 OpenRouter。** `extract()` 与 `evaluate()` 两步
+的客户端 `base_url` 都是硬编码的 `https://openrouter.ai/api/v1`，只从
+`OPENROUTER_API_KEY` 取密钥，没有环境变量能改端点。所以「换成本地裁判模型做到
+全离线」这条路不存在——能换的只有模型 ID，仍走 OpenRouter。设了密钥之后：
+
+```python
+from pathlib import Path
+from pdf_parse_bench import Benchmark
+bench = Benchmark(
+    parser_output_dir=Path("results/opendataloader"),
+    ground_truth_dir=Path("<数据集>/ground_truth"),
+    llm_judge_models=["google/gemma-4-31b-it"],
+)
+bench.extract(); bench.evaluate(); bench.save_benchmark_summary()
+```
+
+榜单显示 100 页的裁判成本约 0.20 到 3.00 美元，取决于选哪个裁判。
+
+**没有密钥时能得到的，是公式覆盖比对（2026-11-20，公式集 100 篇 / 2,070 条公式）：**
+
+| 判据 | 结果 |
+|---|---|
+| 公式内容字符覆盖率（去 LaTeX 命令名后） | 0.998 |
+| 字符找齐的公式（宽松，允许分散在多段） | 2,051/2,070 = 0.991 |
+| 作为连续子串完整出现的公式（严格） | 1,525/2,070 = 0.737 |
+| 解析输出平均段落数 | 29.7 |
+
+这三个数字的层次正是批次 1 的输入：**内容不缺（99.8%），字符不缺（99.1%），
+但 26.3% 的公式不是作为一个整体被提取出来的**。ODL 把 `(I − A)^n =` 这样的
+公式拆成五六个段落，变量提成 Unicode 数学斜体（`𝐾` 是 U+1D43E 而不是 ASCII 的
+K），上下标位置丢失。这与本项目自己的发现完全吻合——`odlToAssembly` 只能靠字符
+密度启发式猜哪段是公式，之所以误报率 43%，根源不在"提不到内容"，在"提不到这是
+一条公式"这个判断。
+
+两个实现要点，都是实测踩出来的：
+
+- **字符比对前必须做 NFKC 归一化。** LaTeX 生成的 PDF，其文本层用的是 Unicode
+  的数学字母数字符号：斜体 K 是 U+1D43E、斜体 X 是 U+1D44B、斜体 f 是 U+1D453。
+  不归一化就把公式里的变量整个算成缺失，第一版覆盖率凭空掉到 0.695（最低篇），
+  把"解析输出把变量提成了数学斜体"误读成"内容丢失"。
+- **覆盖比对的分数与榜上那个 0 到 10 的裁判分不可比。** 该基准自己的论文测出，
+  文本级指标与人判的相关性只有 0.01 到 0.31（公式）、0.70（表格，TEDS/GriTS
+  上限），LLM 裁判才有 0.74 到 0.82。所以上面三个数只能当"这个后端在公式上是
+  否基本可用"的下界估计，不能换算成榜上分数。
+
+**UniMER-Test 加 CDM 暂不接入。** 它评的是"把公式图片转成 LaTeX"，需要一个
+公式识别模型；本项目的公式链路是 OpenDataLoader 加可选的视觉模型端点，当前没
+有这样一个模型可评。等批次 1 把视觉模型提 LaTeX 那段接通，再用它单独量化那一环
+（数据集 Apache-2.0、支持中文公式、可离线，是三个候选里唯一许可证干净的）。
 
 ### README 截图再生成
 

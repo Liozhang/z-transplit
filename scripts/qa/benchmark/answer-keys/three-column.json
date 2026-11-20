@@ -1,0 +1,152 @@
+{
+ "fixture": "three-column",
+ "columns": 3,
+ "landscape": false,
+ "sourceScript": "latin",
+ "elements": [
+  {
+   "order": 0,
+   "type": "heading",
+   "text": "Field Notes from a Three Column Layout",
+   "formula": false,
+   "level": 1
+  },
+  {
+   "order": 1,
+   "type": "body",
+   "text": "A. Whitfield, B. Ferreira, and C. Lindqvist",
+   "formula": false,
+   "cls": "authors"
+  },
+  {
+   "order": 2,
+   "type": "body",
+   "text": "Coastal Research Station",
+   "formula": false,
+   "cls": "affil"
+  },
+  {
+   "order": 3,
+   "type": "heading",
+   "text": "1. Why three columns",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 4,
+   "type": "body",
+   "text": "Three column layouts appear in newsletters, conference programmes, and dense reference sheets. They are a useful stress case for any tool that has to put translated text back where the original text was, because the vertical gap between columns is small and the reading order zig zags down the page.",
+   "formula": false
+  },
+  {
+   "order": 5,
+   "type": "body",
+   "text": "The first column of this fixture carries only running prose, so that a tool which loses track of the column boundary shows up immediately as text drifting into the second column.",
+   "formula": false
+  },
+  {
+   "order": 6,
+   "type": "heading",
+   "text": "2. Measurements",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 7,
+   "type": "body",
+   "text": "Tide height was recorded every fifteen minutes for six weeks. Wind speed and direction came from the station anemometer at ten minute resolution. Water temperature was logged at three depths. All series were resampled to a common fifteen minute grid before comparison, and gaps shorter than two hours were filled by linear interpolation.",
+   "formula": false
+  },
+  {
+   "order": 8,
+   "type": "body",
+   "text": "Longer gaps were left unfilled and flagged in the derived tables, so that any statistic computed over them is reported together with the fraction of missing observations.",
+   "formula": false
+  },
+  {
+   "order": 9,
+   "type": "heading",
+   "text": "3. Preliminary results",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 10,
+   "type": "body",
+   "text": "Mean tide height over the recording window was within four centimetres of the predicted value for every week except the third, when a low pressure system pushed the observed series above prediction for thirty six hours.",
+   "formula": false
+  },
+  {
+   "order": 11,
+   "type": "body",
+   "text": "Water temperature at the shallowest sensor tracked air temperature with a lag of roughly two hours, while the deepest sensor showed no diurnal signal at all. The intermediate depth carried a signal whose amplitude was about half of the shallow one.",
+   "formula": false
+  },
+  {
+   "order": 12,
+   "type": "heading",
+   "text": "4. Instruments",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 13,
+   "type": "body",
+   "text": "The anemometer was calibrated against a hand held unit at the start and end of the campaign. The two readings agreed to within half a metre per second, which is well inside the resolution needed for the comparisons reported here.",
+   "formula": false
+  },
+  {
+   "order": 14,
+   "type": "body",
+   "text": "Temperature sensors were checked in an ice bath before deployment. All three agreed to within one tenth of a degree, and none drifted by more than that over the six weeks.",
+   "formula": false
+  },
+  {
+   "order": 15,
+   "type": "caption",
+   "text": "Figure 1: Water temperature at the shallow and deep sensors over the six week campaign. The shallow series follows the air temperature cycle; the deep series is nearly flat.",
+   "formula": false
+  },
+  {
+   "order": 16,
+   "type": "heading",
+   "text": "5. Discussion",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 17,
+   "type": "body",
+   "text": "The agreement between observed and predicted tide height is good enough that the residual series can be used directly as a wind and pressure proxy for the weeks when the anemometer was offline.",
+   "formula": false
+  },
+  {
+   "order": 18,
+   "type": "body",
+   "text": "The two hour lag at the shallow sensor is consistent with a simple mixed layer model, and the absence of a diurnal signal at depth rules out any direct convective mixing below the thermocline during the campaign.",
+   "formula": false
+  },
+  {
+   "order": 19,
+   "type": "heading",
+   "text": "6. Next steps",
+   "formula": false,
+   "level": 2
+  },
+  {
+   "order": 20,
+   "type": "body",
+   "text": "The next campaign will add a fourth temperature sensor and a current meter. Both are needed to close the heat budget, which is the quantity the station exists to measure.",
+   "formula": false
+  }
+ ],
+ "figures": [
+  {
+   "index": 0
+  }
+ ],
+ "tables": [],
+ "knownGaps": [
+  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+ ]
+}

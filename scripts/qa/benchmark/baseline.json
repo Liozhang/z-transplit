@@ -1,0 +1,1581 @@
+{
+ "generatedAt": "2026-11-20 19:31:55",
+ "results": [
+  {
+   "fixture": "reading-brain",
+   "layout": {
+    "biou": 0.8131871970216898,
+    "biouSamples": 18,
+    "boxRecall": 0.8334127865869518,
+    "boxPrecision": 0.970377057019996,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 0,
+     "bottom": 0,
+     "top": 0
+    },
+    "maxOverflow": {
+     "right": 0.0,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.863574341569721,
+     "p10": 0.7271486935478929,
+     "below06Ratio": 0.0
+    },
+    "mask": {
+     "total": 18,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 15,
+      "translated": 15,
+      "untranslated": 0,
+      "meanIou": 0.8141141954776902,
+      "masks": 15
+     },
+     {
+      "page": 2,
+      "paragraphs": 3,
+      "translated": 3,
+      "untranslated": 0,
+      "meanIou": 0.808552204741689,
+      "masks": 3
+     }
+    ]
+   },
+   "elapsedMs": 3647,
+   "parse": {
+    "spanMarked": 0,
+    "formula": {
+     "tp": 0,
+     "fp": 0,
+     "fn": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "applicable": false,
+     "hardCaseFailures": []
+    },
+    "formulaCases": [
+     {
+      "order": 0,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Reading and the Brain"
+     },
+     {
+      "order": 1,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Jane M. Doe and John Q. Smith"
+     },
+     {
+      "order": 2,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Abstract"
+     },
+     {
+      "order": 3,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Reading is a complex cognitive activity that involves multiple brain r"
+     },
+     {
+      "order": 4,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "We argue that comprehension improves when instruction follows the natu"
+     },
+     {
+      "order": 5,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "1. Introduction"
+     },
+     {
+      "order": 6,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Previous work by Dr. Smith et al. showed measurable gains after twelve"
+     },
+     {
+      "order": 7,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The remainder of the paper is organized as follows. Section 3 reports "
+     },
+     {
+      "order": 8,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2. Methods"
+     },
+     {
+      "order": 9,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "We followed 240 participants aged eight to twelve for two academic yea"
+     },
+     {
+      "order": 10,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "3. Results"
+     },
+     {
+      "order": 11,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Comprehension scores rose by 23 percent on average. The effect was str"
+     },
+     {
+      "order": 12,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Latency measures indicated a 40 ms advantage in the trained group when"
+     },
+     {
+      "order": 13,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "4. Discussion"
+     },
+     {
+      "order": 14,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The results suggest that the brain regions supporting reading adapt to"
+     },
+     {
+      "order": 15,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "5. Conclusions"
+     },
+     {
+      "order": 16,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "We conclude that structured reading practice improves comprehension sc"
+     },
+     {
+      "order": 17,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The classroom experiments outlined here give teachers a concrete sched"
+     }
+    ],
+    "match": {
+     "tp": 18,
+     "fp": 0,
+     "fn": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "f1": 1.0,
+     "applicable": true,
+     "byType": {
+      "body": {
+       "total": 11,
+       "matched": 11,
+       "recall": 1.0
+      },
+      "heading": {
+       "total": 7,
+       "matched": 7,
+       "recall": 1.0
+      }
+     },
+     "meanSim": 1.0
+    },
+    "column": {
+     "blocks": 18,
+     "wideRatio": 0.5555555555555556,
+     "crossColumnRatio": 0.0,
+     "worst": []
+    },
+    "heading": {
+     "pairs": 21,
+     "agreement": 1.0,
+     "sharedHeadings": 7,
+     "truthHeadings": 7,
+     "predictedHeadings": 7
+    },
+    "table": {
+     "truthCount": 0,
+     "predictedCount": 0,
+     "rows": {
+      "truth": [],
+      "predicted": []
+     },
+     "cols": {
+      "truth": [],
+      "predicted": []
+     },
+     "rowError": null,
+     "colError": null
+    },
+    "readingOrder": {
+     "tau": 1.0,
+     "pairs": 18
+    },
+    "figure": {
+     "truth": 0,
+     "predicted": 0,
+     "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    }
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 2052687,
+    "insideChangedRatio": 0.4101475726359868,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 1716,
+    "residualLetters": 1716,
+    "residueRatio": 1.0,
+    "sourceScript": "latin"
+   },
+   "stats": {
+    "paragraphsRendered": 18,
+    "formulasRendered": 0,
+    "overflowed": 0,
+    "imagesRendered": 0,
+    "imagesDropped": 0
+   },
+   "artifacts": {
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-pmj63fpw\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-pmj63fpw\\assembly.json"
+   }
+  },
+  {
+   "fixture": "attention-reading",
+   "layout": {
+    "biou": 0.7526319208666985,
+    "biouSamples": 37,
+    "boxRecall": 0.7975141854098992,
+    "boxPrecision": 0.9376989241793144,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 3,
+     "bottom": 0,
+     "top": 0
+    },
+    "maxOverflow": {
+     "right": 6.00001147460938,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.8294873174190575,
+     "p10": 0.75,
+     "below06Ratio": 0.0
+    },
+    "mask": {
+     "total": 40,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 26,
+      "translated": 26,
+      "untranslated": 0,
+      "meanIou": 0.75613024965055,
+      "masks": 28
+     },
+     {
+      "page": 2,
+      "paragraphs": 11,
+      "translated": 11,
+      "untranslated": 0,
+      "meanIou": 0.7443631437412311,
+      "masks": 12
+     }
+    ]
+   },
+   "elapsedMs": 5049,
+   "parse": {
+    "spanMarked": 2,
+    "formula": {
+     "tp": 1,
+     "fp": 0,
+     "fn": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "f1": 1.0,
+     "applicable": true,
+     "hardCaseFailures": []
+    },
+    "formulaCases": [
+     {
+      "order": 0,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Attention and the Reading Brain: Twelve Weeks of Structured Practice i"
+     },
+     {
+      "order": 1,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Jane M. Doe, John Q. Smith, and Maria Alvarez"
+     },
+     {
+      "order": 2,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Center for Child Cognition, Northfield Institute for Learning Sciences"
+     },
+     {
+      "order": 3,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Abstract — Reading is a complex cognitive activity that involves multi"
+     },
+     {
+      "order": 4,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Keywords: reading acquisition; attention; neuroplasticity; classroom i"
+     },
+     {
+      "order": 5,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "1. Introduction"
+     },
+     {
+      "order": 6,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Previous work by Dr. Smith et al. showed measurable gains after twelve"
+     },
+     {
+      "order": 7,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The remainder of the paper is organized as follows. Section 2 describe"
+     },
+     {
+      "order": 8,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2. Methods"
+     },
+     {
+      "order": 9,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2.1 Participants"
+     },
+     {
+      "order": 10,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "We followed 240 participants aged eight to twelve for two academic yea"
+     },
+     {
+      "order": 11,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2.2 Apparatus and Measures"
+     },
+     {
+      "order": 12,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Eye movements were tracked at 500 Hz with a remote infrared tracker wh"
+     },
+     {
+      "order": 13,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Table 1: Daily training schedule and dose by condition."
+     },
+     {
+      "order": 14,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Adherence was high: classrooms completed 87 percent of scheduled sessi"
+     },
+     {
+      "order": 15,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "3. Results"
+     },
+     {
+      "order": 16,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Comprehension scores rose by 23 percent on average. The effect was str"
+     },
+     {
+      "order": 17,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Figure 1: Mean comprehension gain (points) by training week. The train"
+     },
+     {
+      "order": 18,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "A mediation analysis supported the attention account: when cue-parsing"
+     },
+     {
+      "order": 19,
+      "truth": true,
+      "predicted": true,
+      "hardCase": null,
+      "text": "git = β1xi + β2(xi × t) + ui + εit,"
+     },
+     {
+      "order": 20,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "where git is the comprehension score of child i at week t. Figure 2 sh"
+     },
+     {
+      "order": 21,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Figure 2: Distribution of individual growth slopes in three trained (T"
+     },
+     {
+      "order": 22,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "4. Discussion"
+     },
+     {
+      "order": 23,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The results suggest that the brain regions supporting reading adapt to"
+     },
+     {
+      "order": 24,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "5. Conclusions"
+     },
+     {
+      "order": 25,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "We conclude that structured reading practice improves comprehension sc"
+     },
+     {
+      "order": 26,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "References"
+     },
+     {
+      "order": 27,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Doe, J. M. (2021). Attentional parsing in beginning readers. Journal o"
+     },
+     {
+      "order": 28,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Smith, J. Q. (2019). Practice schedules and reading growth. Reviews of"
+     },
+     {
+      "order": 29,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Alvarez, M. (2023). Eye movements and sentence planning. Studies in Li"
+     }
+    ],
+    "match": {
+     "tp": 30,
+     "fp": 32,
+     "fn": 0,
+     "precision": 0.4838709677419355,
+     "recall": 1.0,
+     "f1": 0.6521739130434783,
+     "applicable": true,
+     "byType": {
+      "body": {
+       "total": 14,
+       "matched": 14,
+       "recall": 1.0
+      },
+      "caption": {
+       "total": 3,
+       "matched": 3,
+       "recall": 1.0
+      },
+      "formula": {
+       "total": 1,
+       "matched": 1,
+       "recall": 1.0
+      },
+      "heading": {
+       "total": 9,
+       "matched": 9,
+       "recall": 1.0
+      },
+      "reference": {
+       "total": 3,
+       "matched": 3,
+       "recall": 1.0
+      }
+     },
+     "meanSim": 0.9998365204264125
+    },
+    "column": {
+     "blocks": 62,
+     "wideRatio": 0.03225806451612903,
+     "crossColumnRatio": 0.03225806451612903,
+     "worst": [
+      {
+       "page": 2,
+       "ratio": 0.848,
+       "text": "The results suggest that the brain regions supporting readin"
+      },
+      {
+       "page": 1,
+       "ratio": 0.758,
+       "text": "Attention and the Reading Brain: Twelve Weeks of Structured "
+      }
+     ]
+    },
+    "heading": {
+     "pairs": 36,
+     "agreement": 1.0,
+     "sharedHeadings": 9,
+     "truthHeadings": 9,
+     "predictedHeadings": 9
+    },
+    "table": {
+     "truthCount": 1,
+     "predictedCount": 1,
+     "rows": {
+      "truth": [
+       5
+      ],
+      "predicted": [
+       5
+      ]
+     },
+     "cols": {
+      "truth": [
+       5
+      ],
+      "predicted": [
+       5
+      ]
+     },
+     "rowError": 0,
+     "colError": 0
+    },
+    "readingOrder": {
+     "tau": 0.9724137931034482,
+     "pairs": 30
+    },
+    "figure": {
+     "truth": 2,
+     "predicted": 0,
+     "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    }
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 1651315,
+    "insideChangedRatio": 0.3565987774535257,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 3900,
+    "residualLetters": 3905,
+    "residueRatio": 1.0012820512820513,
+    "sourceScript": "latin"
+   },
+   "stats": {
+    "paragraphsRendered": 37,
+    "formulasRendered": 1,
+    "overflowed": 0,
+    "imagesRendered": 1,
+    "imagesDropped": 0
+   },
+   "artifacts": {
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b4_5k1si\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b4_5k1si\\assembly.json"
+   }
+  },
+  {
+   "fixture": "formula-dense",
+   "layout": {
+    "biou": 0.7817744937515776,
+    "biouSamples": 26,
+    "boxRecall": 0.7975221604414526,
+    "boxPrecision": 0.9739274221732637,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 0,
+     "bottom": 0,
+     "top": 0
+    },
+    "maxOverflow": {
+     "right": 0.0,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.7893628104854221,
+     "p10": 0.7367035161199665,
+     "below06Ratio": 0.0
+    },
+    "mask": {
+     "total": 30,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 26,
+      "translated": 26,
+      "untranslated": 0,
+      "meanIou": 0.7817744937515776,
+      "masks": 30
+     }
+    ]
+   },
+   "elapsedMs": 4678,
+   "parse": {
+    "spanMarked": 25,
+    "formula": {
+     "tp": 4,
+     "fp": 0,
+     "fn": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "f1": 1.0,
+     "applicable": true,
+     "hardCaseFailures": []
+    },
+    "formulaCases": [
+     {
+      "order": 0,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Estimating Attentional Allocation from Eye Movements: A Formula Dense "
+     },
+     {
+      "order": 1,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "R. Nakamura, K. Osei, and L. Bergström"
+     },
+     {
+      "order": 2,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Department of Cognitive Science, Riverside Institute"
+     },
+     {
+      "order": 3,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Abstract — We derive a family of estimators for the attentional weight"
+     },
+     {
+      "order": 4,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "1. Setup"
+     },
+     {
+      "order": 5,
+      "truth": false,
+      "predicted": false,
+      "hardCase": "false-negative-bait",
+      "text": "Let a sentence consist of n tokens. For token i the observed fixation "
+     },
+     {
+      "order": 6,
+      "truth": true,
+      "predicted": true,
+      "hardCase": null,
+      "text": "αi = exp(θ si) / Σj=1n exp(θ sj) (1)"
+     },
+     {
+      "order": 7,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Equation (1) is the softmax form. It is convenient because the normali"
+     },
+     {
+      "order": 8,
+      "truth": true,
+      "predicted": true,
+      "hardCase": null,
+      "text": "αi / αk = exp(θ (si − sk)) (2)"
+     },
+     {
+      "order": 9,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2. Model"
+     },
+     {
+      "order": 10,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The generative model treats the durations as conditionally independent"
+     },
+     {
+      "order": 11,
+      "truth": true,
+      "predicted": true,
+      "hardCase": null,
+      "text": "ℓ(θ) = Σi=1n di log αi − λ Σi=1n αi (3)"
+     },
+     {
+      "order": 12,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Differentiating (3) and setting the result to zero gives the fixed poi"
+     },
+     {
+      "order": 13,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2.1 Statistics of the estimator"
+     },
+     {
+      "order": 14,
+      "truth": false,
+      "predicted": false,
+      "hardCase": "false-positive-bait",
+      "text": "Under the null hypothesis of no attentional modulation we have θ = 0, "
+     },
+     {
+      "order": 15,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "This paragraph is deliberately dense in Greek letters and inequality s"
+     },
+     {
+      "order": 16,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2.2 A formula the heuristic cannot see"
+     },
+     {
+      "order": 17,
+      "truth": false,
+      "predicted": false,
+      "hardCase": "false-negative-bait",
+      "text": "Some formulae contain no character from the heuristic's symbol class a"
+     },
+     {
+      "order": 18,
+      "truth": false,
+      "predicted": false,
+      "hardCase": "false-positive-bait",
+      "text": "Other unseen cases include the limit notation limn→∞, the trigonometri"
+     },
+     {
+      "order": 19,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "3. Relation to reading time"
+     },
+     {
+      "order": 20,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Total reading time for the sentence is the duration-weighted sum of th"
+     },
+     {
+      "order": 21,
+      "truth": true,
+      "predicted": true,
+      "hardCase": null,
+      "text": "T = (1/n) Σi=1n di / (1 + exp(−θ si)) (4)"
+     },
+     {
+      "order": 22,
+      "truth": false,
+      "predicted": false,
+      "hardCase": "false-positive-bait",
+      "text": "Equation (4) reduces to the mean duration when θ = 0 and to a max-like"
+     },
+     {
+      "order": 23,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "References"
+     },
+     {
+      "order": 24,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Nakamura, R. (2020). Attention as a softmax over surprisal. Journal of"
+     },
+     {
+      "order": 25,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Osei, K. (2021). Correlation robust variance estimates for fixation du"
+     }
+    ],
+    "match": {
+     "tp": 26,
+     "fp": 0,
+     "fn": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "f1": 1.0,
+     "applicable": true,
+     "byType": {
+      "body": {
+       "total": 13,
+       "matched": 13,
+       "recall": 1.0
+      },
+      "formula": {
+       "total": 4,
+       "matched": 4,
+       "recall": 1.0
+      },
+      "heading": {
+       "total": 7,
+       "matched": 7,
+       "recall": 1.0
+      },
+      "reference": {
+       "total": 2,
+       "matched": 2,
+       "recall": 1.0
+      }
+     },
+     "meanSim": 0.9978320634006159
+    },
+    "column": {
+     "blocks": 26,
+     "wideRatio": 0.038461538461538464,
+     "crossColumnRatio": 0.038461538461538464,
+     "worst": [
+      {
+       "page": 1,
+       "ratio": 0.824,
+       "text": "Estimating Attentional Allocation from Eye Movements: A Form"
+      }
+     ]
+    },
+    "heading": {
+     "pairs": 21,
+     "agreement": 1.0,
+     "sharedHeadings": 7,
+     "truthHeadings": 7,
+     "predictedHeadings": 7
+    },
+    "table": {
+     "truthCount": 0,
+     "predictedCount": 0,
+     "rows": {
+      "truth": [],
+      "predicted": []
+     },
+     "cols": {
+      "truth": [],
+      "predicted": []
+     },
+     "rowError": null,
+     "colError": null
+    },
+    "readingOrder": {
+     "tau": 1.0,
+     "pairs": 26
+    },
+    "figure": {
+     "truth": 0,
+     "predicted": 0,
+     "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    }
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 476303,
+    "insideChangedRatio": 0.39787494657063205,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 3164,
+    "residualLetters": 3238,
+    "residueRatio": 1.0233881163084704,
+    "sourceScript": "latin"
+   },
+   "stats": {
+    "paragraphsRendered": 26,
+    "formulasRendered": 11,
+    "overflowed": 0,
+    "imagesRendered": 4,
+    "imagesDropped": 0
+   },
+   "artifacts": {
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-cowkqjtb\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-cowkqjtb\\assembly.json"
+   }
+  },
+  {
+   "fixture": "three-column",
+   "layout": {
+    "biou": 0.7289010569537483,
+    "biouSamples": 26,
+    "boxRecall": 0.7848432832825678,
+    "boxPrecision": 0.9239385438629414,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 3,
+     "bottom": 0,
+     "top": 0
+    },
+    "maxOverflow": {
+     "right": 6.0,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.7646228336398428,
+     "p10": 0.7057785356523177,
+     "below06Ratio": 0.0
+    },
+    "mask": {
+     "total": 27,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 26,
+      "translated": 26,
+      "untranslated": 0,
+      "meanIou": 0.7289010569537483,
+      "masks": 27
+     }
+    ]
+   },
+   "elapsedMs": 3888,
+   "parse": {
+    "spanMarked": 0,
+    "formula": {
+     "tp": 0,
+     "fp": 0,
+     "fn": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "applicable": false,
+     "hardCaseFailures": []
+    },
+    "formulaCases": [
+     {
+      "order": 0,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Field Notes from a Three Column Layout"
+     },
+     {
+      "order": 1,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "A. Whitfield, B. Ferreira, and C. Lindqvist"
+     },
+     {
+      "order": 2,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Coastal Research Station"
+     },
+     {
+      "order": 3,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "1. Why three columns"
+     },
+     {
+      "order": 4,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Three column layouts appear in newsletters, conference programmes, and"
+     },
+     {
+      "order": 5,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The first column of this fixture carries only running prose, so that a"
+     },
+     {
+      "order": 6,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "2. Measurements"
+     },
+     {
+      "order": 7,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Tide height was recorded every fifteen minutes for six weeks. Wind spe"
+     },
+     {
+      "order": 8,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Longer gaps were left unfilled and flagged in the derived tables, so t"
+     },
+     {
+      "order": 9,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "3. Preliminary results"
+     },
+     {
+      "order": 10,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Mean tide height over the recording window was within four centimetres"
+     },
+     {
+      "order": 11,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Water temperature at the shallowest sensor tracked air temperature wit"
+     },
+     {
+      "order": 12,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "4. Instruments"
+     },
+     {
+      "order": 13,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The anemometer was calibrated against a hand held unit at the start an"
+     },
+     {
+      "order": 14,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Temperature sensors were checked in an ice bath before deployment. All"
+     },
+     {
+      "order": 15,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Figure 1: Water temperature at the shallow and deep sensors over the s"
+     },
+     {
+      "order": 16,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "5. Discussion"
+     },
+     {
+      "order": 17,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The agreement between observed and predicted tide height is good enoug"
+     },
+     {
+      "order": 18,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The two hour lag at the shallow sensor is consistent with a simple mix"
+     },
+     {
+      "order": 19,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "6. Next steps"
+     },
+     {
+      "order": 20,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The next campaign will add a fourth temperature sensor and a current m"
+     }
+    ],
+    "match": {
+     "tp": 21,
+     "fp": 5,
+     "fn": 0,
+     "precision": 0.8076923076923077,
+     "recall": 1.0,
+     "f1": 0.8936170212765957,
+     "applicable": true,
+     "byType": {
+      "body": {
+       "total": 13,
+       "matched": 13,
+       "recall": 1.0
+      },
+      "caption": {
+       "total": 1,
+       "matched": 1,
+       "recall": 1.0
+      },
+      "heading": {
+       "total": 7,
+       "matched": 7,
+       "recall": 1.0
+      }
+     },
+     "meanSim": 1.0
+    },
+    "column": {
+     "blocks": 26,
+     "wideRatio": 0.038461538461538464,
+     "crossColumnRatio": 0.11538461538461539,
+     "worst": [
+      {
+       "page": 1,
+       "ratio": 0.858,
+       "text": "Figure 1: Water temperature at the shallow and deep sensors "
+      },
+      {
+       "page": 1,
+       "ratio": 0.563,
+       "text": "Tide height was recorded every fifteen minutes for six weeks"
+      },
+      {
+       "page": 1,
+       "ratio": 0.475,
+       "text": "Field Notes from a Three Column Layout"
+      }
+     ]
+    },
+    "heading": {
+     "pairs": 21,
+     "agreement": 1.0,
+     "sharedHeadings": 7,
+     "truthHeadings": 7,
+     "predictedHeadings": 7
+    },
+    "table": {
+     "truthCount": 0,
+     "predictedCount": 0,
+     "rows": {
+      "truth": [],
+      "predicted": []
+     },
+     "cols": {
+      "truth": [],
+      "predicted": []
+     },
+     "rowError": null,
+     "colError": null
+    },
+    "readingOrder": {
+     "tau": 0.9238095238095239,
+     "pairs": 21
+    },
+    "figure": {
+     "truth": 1,
+     "predicted": 0,
+     "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    }
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 839583,
+    "insideChangedRatio": 0.3727533144429047,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 2329,
+    "residualLetters": 2329,
+    "residueRatio": 1.0,
+    "sourceScript": "latin"
+   },
+   "stats": {
+    "paragraphsRendered": 26,
+    "formulasRendered": 0,
+    "overflowed": 0,
+    "imagesRendered": 0,
+    "imagesDropped": 0
+   },
+   "artifacts": {
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-0ckcc183\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-0ckcc183\\assembly.json"
+   }
+  },
+  {
+   "fixture": "landscape-slides",
+   "layout": {
+    "biou": 0.7047969499636575,
+    "biouSamples": 19,
+    "boxRecall": 0.7719917377730381,
+    "boxPrecision": 0.898663429481673,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 4,
+     "bottom": 0,
+     "top": 1
+    },
+    "maxOverflow": {
+     "right": 5.746006591796885,
+     "bottom": 0.0,
+     "top": 1.190860778808542
+    },
+    "fontSize": {
+     "median": 0.7726239095551689,
+     "p10": 0.7037037037037037,
+     "below06Ratio": 0.0
+    },
+    "mask": {
+     "total": 20,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 17,
+      "translated": 17,
+      "untranslated": 0,
+      "meanIou": 0.6897526247984131,
+      "masks": 18
+     },
+     {
+      "page": 2,
+      "paragraphs": 2,
+      "translated": 2,
+      "untranslated": 0,
+      "meanIou": 0.8326737138682341,
+      "masks": 2
+     }
+    ]
+   },
+   "elapsedMs": 3859,
+   "parse": {
+    "spanMarked": 0,
+    "formula": {
+     "tp": 0,
+     "fp": 0,
+     "fn": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "applicable": false,
+     "hardCaseFailures": []
+    },
+    "formulaCases": [
+     {
+      "order": 0,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Reading Practice Changes What Children Look At"
+     },
+     {
+      "order": 1,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Twelve weeks of structured practice, 240 children, three classrooms pe"
+     },
+     {
+      "order": 2,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "The claim"
+     },
+     {
+      "order": 3,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Structured reading practice does not merely make children faster. It c"
+     },
+     {
+      "order": 4,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "What we did"
+     },
+     {
+      "order": 5,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "240 children aged eight to twelve, matched in pairs by baseline litera"
+     },
+     {
+      "order": 6,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Twelve weeks of daily forty minute sessions, three activity blocks eac"
+     },
+     {
+      "order": 7,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Eye movements tracked at 500 Hz; comprehension scored by two blind rat"
+     },
+     {
+      "order": 8,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "What we found"
+     },
+     {
+      "order": 9,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Comprehension scores rose 23 percent on average, and the rise was larg"
+     },
+     {
+      "order": 10,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Figure 1: Mean comprehension gain by measurement point. The trained gr"
+     },
+     {
+      "order": 11,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "Why it matters"
+     },
+     {
+      "order": 12,
+      "truth": false,
+      "predicted": false,
+      "hardCase": null,
+      "text": "If practice changes where children look rather than only how fast they"
+     }
+    ],
+    "match": {
+     "tp": 13,
+     "fp": 6,
+     "fn": 0,
+     "precision": 0.6842105263157895,
+     "recall": 1.0,
+     "f1": 0.8125000000000001,
+     "applicable": true,
+     "byType": {
+      "body": {
+       "total": 4,
+       "matched": 4,
+       "recall": 1.0
+      },
+      "caption": {
+       "total": 1,
+       "matched": 1,
+       "recall": 1.0
+      },
+      "heading": {
+       "total": 5,
+       "matched": 5,
+       "recall": 1.0
+      },
+      "listItem": {
+       "total": 3,
+       "matched": 3,
+       "recall": 1.0
+      }
+     },
+     "meanSim": 1.0
+    },
+    "column": {
+     "blocks": 19,
+     "wideRatio": 0.2631578947368421,
+     "crossColumnRatio": 0.0,
+     "worst": []
+    },
+    "heading": {
+     "pairs": 10,
+     "agreement": 1.0,
+     "sharedHeadings": 5,
+     "truthHeadings": 5,
+     "predictedHeadings": 5
+    },
+    "table": {
+     "truthCount": 0,
+     "predictedCount": 0,
+     "rows": {
+      "truth": [],
+      "predicted": []
+     },
+     "cols": {
+      "truth": [],
+      "predicted": []
+     },
+     "rowError": null,
+     "colError": null
+    },
+    "readingOrder": {
+     "tau": 1.0,
+     "pairs": 13
+    },
+    "figure": {
+     "truth": 1,
+     "predicted": 0,
+     "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    }
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 2225809,
+    "insideChangedRatio": 0.43891035136794204,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 1061,
+    "residualLetters": 1061,
+    "residueRatio": 1.0,
+    "sourceScript": "latin"
+   },
+   "stats": {
+    "paragraphsRendered": 19,
+    "formulasRendered": 0,
+    "overflowed": 0,
+    "imagesRendered": 0,
+    "imagesDropped": 0
+   },
+   "artifacts": {
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-uxzr2lam\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-uxzr2lam\\assembly.json"
+   }
+  }
+ ]
+}

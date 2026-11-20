@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Three Column Sample</title>
+<style>
+  @page { size: A4; margin: 1.6cm 1.5cm; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Times New Roman", "Noto Serif", serif;
+    font-size: 8.5pt; line-height: 1.4; color: #111;
+  }
+  .paper { column-count: 3; column-gap: 0.6cm; column-rule: 0.5pt solid #bbb; }
+  header.full, .span-all { column-span: all; }
+  h1 { font-size: 16pt; text-align: center; margin: 0 0 6pt 0; line-height: 1.2; }
+  .authors { font-style: italic; text-align: center; margin: 0 0 3pt 0; font-size: 9pt; }
+  .affil { text-align: center; font-size: 8pt; color: #444; margin: 0 0 10pt 0; }
+  h2 { font-size: 10pt; margin: 9pt 0 4pt 0; page-break-after: avoid; }
+  p { margin: 0 0 5pt 0; text-align: justify; }
+  figure { margin: 6pt 0; text-align: center; page-break-inside: avoid; }
+  figcaption { font-size: 7.5pt; text-align: justify; color: #222; margin-top: 2pt; }
+</style>
+</head>
+<body>
+<div class="paper">
+  <header class="full">
+    <h1>Field Notes from a Three Column Layout</h1>
+    <p class="authors">A. Whitfield, B. Ferreira, and C. Lindqvist</p>
+    <p class="affil">Coastal Research Station</p>
+  </header>
+
+  <h2>1. Why three columns</h2>
+  <p>Three column layouts appear in newsletters, conference programmes, and dense
+  reference sheets. They are a useful stress case for any tool that has to put
+  translated text back where the original text was, because the vertical gap
+  between columns is small and the reading order zig zags down the page.</p>
+  <p>The first column of this fixture carries only running prose, so that a tool
+  which loses track of the column boundary shows up immediately as text drifting
+  into the second column.</p>
+
+  <h2>2. Measurements</h2>
+  <p>Tide height was recorded every fifteen minutes for six weeks. Wind speed and
+  direction came from the station anemometer at ten minute resolution. Water
+  temperature was logged at three depths. All series were resampled to a common
+  fifteen minute grid before comparison, and gaps shorter than two hours were
+  filled by linear interpolation.</p>
+  <p>Longer gaps were left unfilled and flagged in the derived tables, so that any
+  statistic computed over them is reported together with the fraction of missing
+  observations.</p>
+
+  <h2>3. Preliminary results</h2>
+  <p>Mean tide height over the recording window was within four centimetres of the
+  predicted value for every week except the third, when a low pressure system
+  pushed the observed series above prediction for thirty six hours.</p>
+  <p>Water temperature at the shallowest sensor tracked air temperature with a lag
+  of roughly two hours, while the deepest sensor showed no diurnal signal at all.
+  The intermediate depth carried a signal whose amplitude was about half of the
+  shallow one.</p>
+
+  <h2>4. Instruments</h2>
+  <p>The anemometer was calibrated against a hand held unit at the start and end of
+  the campaign. The two readings agreed to within half a metre per second, which
+  is well inside the resolution needed for the comparisons reported here.</p>
+  <p>Temperature sensors were checked in an ice bath before deployment. All three
+  agreed to within one tenth of a degree, and none drifted by more than that over
+  the six weeks.</p>
+
+  <figure class="span-all">
+    <svg width="430" height="150" viewBox="0 0 430 150" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="428" height="148" fill="#ffffff" stroke="#999" stroke-width="0.5"/>
+      <line x1="40" y1="120" x2="410" y2="120" stroke="#333" stroke-width="1"/>
+      <line x1="40" y1="120" x2="40" y2="20" stroke="#333" stroke-width="1"/>
+      <line x1="40" y1="90" x2="410" y2="90" stroke="#ddd" stroke-width="0.6"/>
+      <line x1="40" y1="55" x2="410" y2="55" stroke="#ddd" stroke-width="0.6"/>
+      <polyline points="50,112 100,100 150,104 200,86 250,74 300,80 350,62 400,52"
+                fill="none" stroke="#2ca02c" stroke-width="2"/>
+      <polyline points="50,114 100,110 150,112 200,106 250,108 300,100 350,98 400,92"
+                fill="none" stroke="#ff7f0e" stroke-width="2" stroke-dasharray="5,3"/>
+      <text x="30" y="123" font-size="8" text-anchor="end" fill="#333">0</text>
+      <text x="30" y="93" font-size="8" text-anchor="end" fill="#333">15</text>
+      <text x="30" y="58" font-size="8" text-anchor="end" fill="#333">30</text>
+      <text x="50" y="134" font-size="8" text-anchor="middle" fill="#333">Wk 1</text>
+      <text x="150" y="134" font-size="8" text-anchor="middle" fill="#333">Wk 3</text>
+      <text x="250" y="134" font-size="8" text-anchor="middle" fill="#333">Wk 5</text>
+      <text x="400" y="134" font-size="8" text-anchor="middle" fill="#333">Wk 6</text>
+      <line x1="270" y1="28" x2="295" y2="28" stroke="#2ca02c" stroke-width="2"/>
+      <text x="300" y="31" font-size="8" fill="#333">Shallow sensor</text>
+      <line x1="270" y1="40" x2="295" y2="40" stroke="#ff7f0e" stroke-width="2" stroke-dasharray="5,3"/>
+      <text x="300" y="43" font-size="8" fill="#333">Deep sensor</text>
+    </svg>
+    <figcaption><b>Figure 1:</b> Water temperature at the shallow and deep sensors
+    over the six week campaign. The shallow series follows the air temperature
+    cycle; the deep series is nearly flat.</figcaption>
+  </figure>
+
+  <h2>5. Discussion</h2>
+  <p>The agreement between observed and predicted tide height is good enough that
+  the residual series can be used directly as a wind and pressure proxy for the
+  weeks when the anemometer was offline.</p>
+  <p>The two hour lag at the shallow sensor is consistent with a simple mixed layer
+  model, and the absence of a diurnal signal at depth rules out any direct
+  convective mixing below the thermocline during the campaign.</p>
+
+  <h2>6. Next steps</h2>
+  <p>The next campaign will add a fourth temperature sensor and a current meter.
+  Both are needed to close the heat budget, which is the quantity the station
+  exists to measure.</p>
+</div>
+</body>
+</html>
