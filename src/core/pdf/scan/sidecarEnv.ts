@@ -43,7 +43,7 @@
 
 import { getString } from "../../../utils/locale";
 import { safeDebug } from "../../../utils/logger";
-import { setPref } from "../../../utils/prefs";
+import { setPref, getPref } from "../../../utils/prefs";
 import { ZTransplitCancelledError } from "../CancelledError";
 import { readBundledFile, runProcess } from "../OpenDataLoaderPdfClient";
 import { pypiIndexUrls } from "../OdlJarDownloader";
@@ -249,19 +249,17 @@ export async function getSidecarEnvStatus(): Promise<SidecarEnvStatus> {
   const pythonPath = marker?.pythonPath ?? resolved?.path;
   const pythonSource = resolved?.source ?? marker?.pythonSource;
   const dependencies = Boolean(marker) && scriptLanded && marker?.pythonPath === pythonPath;
+  // 命令偏好必须走 getPref：Zotero.Prefs.get 的第二个参数是分支，漏掉它读的是
+  // 另一个分支，拿回来恒为 undefined。真机实测（2026-11-19）：安装五步全部
+  // 成功、偏好也确实写进去了，可状态查询因为漏了这个参数一直报"命令未回填"，
+  // ready 永远是 false——设置面板上装好了也显示没装好。
   const configured = await (async () => {
-    try {
-      const current = (globalThis as any).Zotero?.Prefs?.get(
-        "extensions.zotero.ztransplit." + SIDECAR_PATH_PREF,
-      );
-      return (
-        typeof current === "string" &&
-        current.includes(sidecarPath) &&
-        Boolean(marker)
-      );
-    } catch {
-      return false;
-    }
+    const current = getPref(SIDECAR_PATH_PREF);
+    return (
+      typeof current === "string" &&
+      current.includes(sidecarPath) &&
+      Boolean(marker)
+    );
   })();
 
   if (!interpreter) {

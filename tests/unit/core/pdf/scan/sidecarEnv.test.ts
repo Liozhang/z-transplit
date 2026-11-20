@@ -177,7 +177,12 @@ function installHost(): void {
     isARM: false,
     Prefs: {
       values: new Map<string, string>(),
-      get(key: string) {
+      // 第二个参数是分支。真机上漏掉它读的是另一个分支，拿回来是空——桩必须
+      // 复现这个行为，否则"漏分支参数"这类缺陷在测试里永远测不出来：
+      // sidecarEnv 的状态查询就曾因此漏过，安装五步全成功、偏好也确实写进去
+      // 了，状态却一直报"命令未回填"（真机 2026-11-19）。
+      get(key: string, branch?: boolean) {
+        if (branch !== true) return "";
         return this.values.get(key) ?? "";
       },
       set(key: string, value: string) {
@@ -439,7 +444,7 @@ describe("installSidecarEnv", () => {
 
     // 命令已回填，且形如 "<python>" "<script>"（用户不需要手抄）
     const prefs = (globalThis as any).Zotero.Prefs;
-    expect(prefs.get(PREF_KEY)).toBe(`"${PYTHON_EXE}" "${SIDECAR_PY}"`);
+    expect(prefs.get(PREF_KEY, true)).toBe(`"${PYTHON_EXE}" "${SIDECAR_PY}"`);
 
     // 安装标记记下解释器、脚本、索引源与引擎版本
     const marker = JSON.parse(
@@ -494,7 +499,7 @@ describe("installSidecarEnv", () => {
 
     // 用的是 PATH 上解析出来的那个解释器，不是受管运行时
     expect(out.pythonPath).toBe(SYSTEM_PYTHON_PATH);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe(
       `"${SYSTEM_PYTHON_PATH}" "${SIDECAR_PY}"`,
     );
     // 受管运行时没有下载、没有解包、没有落地
@@ -544,7 +549,7 @@ describe("installSidecarEnv", () => {
     const before = runProcess.mock.calls.length;
     const out = await installSidecarEnv({});
     expect(out.sidecarPath).toBe(SIDECAR_PY);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe(
       `"${PYTHON_EXE}" "${SIDECAR_PY}"`,
     );
     // 只有一次解释器探活，没有 pip、没有自检
@@ -559,7 +564,7 @@ describe("installSidecarEnv", () => {
     host.prefWriteFails = false;
     const out = await installSidecarEnv({});
     expect(out.sidecarPath).toBe(SIDECAR_PY);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe(
       `"${PYTHON_EXE}" "${SIDECAR_PY}"`,
     );
   });
@@ -602,7 +607,7 @@ describe("installSidecarEnv 失败路径", () => {
     await expect(installSidecarEnv({})).rejects.toThrow(/No matching distribution/);
     // 标记与命令偏好都不该留下
     expect(await fs.exists(`${SIDECAR_DIR}\\env.json`)).toBe(false);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe("");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe("");
   });
 
   it("自检失败：引擎装好了但跑不起来，同样不写标记", async () => {
@@ -610,7 +615,7 @@ describe("installSidecarEnv 失败路径", () => {
     await expect(installSidecarEnv({})).rejects.toThrow(/sidecar-error-selftest/);
     await expect(installSidecarEnv({})).rejects.toThrow(/WinError 126/);
     expect(await fs.exists(`${SIDECAR_DIR}\\env.json`)).toBe(false);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe("");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe("");
     // pip 已经跑过（自检在依赖之后）
     expect(runProcess.mock.calls.some((c) => (c[1] as string[]).includes("pip"))).toBe(true);
   });
@@ -621,7 +626,7 @@ describe("installSidecarEnv 失败路径", () => {
     const argvSets = runProcess.mock.calls.map((c) => c[1] as string[]);
     expect(argvSets.some((a) => a.includes("pip"))).toBe(false);
     expect(argvSets.some((a) => a.includes("--selftest"))).toBe(false);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe("");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe("");
   });
 
   it("随包缺件但盘上已有脚本：保留原文件，装好的环境仍能补写命令", async () => {
@@ -633,7 +638,7 @@ describe("installSidecarEnv 失败路径", () => {
     expect(out.sidecarPath).toBe(SIDECAR_PY);
     // 盘上的脚本没被清掉，命令补写成功
     expect(new TextDecoder().decode(await fs.read(SIDECAR_PY))).toBe("# sidecar.py\n");
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe(
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe(
       `"${PYTHON_EXE}" "${SIDECAR_PY}"`,
     );
   });
@@ -654,7 +659,7 @@ describe("installSidecarEnv 失败路径", () => {
     // 文案里带等待分钟数，用户知道等的是多久
     await expect(installSidecarEnv({})).rejects.toThrow(/30/);
     expect(await fs.exists(`${SIDECAR_DIR}\\env.json`)).toBe(false);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe("");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe("");
   });
 
   it("取消信号已中止：按取消归类（name 可识别），不写标记、不回填命令", async () => {
@@ -664,7 +669,7 @@ describe("installSidecarEnv 失败路径", () => {
       installSidecarEnv({ signal: controller.signal }),
     ).rejects.toMatchObject({ name: "ZTransplitCancelled" });
     expect(await fs.exists(`${SIDECAR_DIR}\\env.json`)).toBe(false);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe("");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe("");
   });
 });
 
@@ -708,6 +713,21 @@ describe("getSidecarEnvStatus", () => {
     expect(status.error).toContain("sidecar-status-command-missing");
   });
 
+  it("四步全齐：ready 为真", async () => {
+    // 这条是"装完了"的正面断言。缺了它，状态查询里任何一处判错都只是让
+    // ready 停在 false，而现有用例只断言 false 的各种形状，照样全绿——
+    // 真机上"命令未回填"那个误报就是这么漏过去的（2026-11-19）。
+    await installSidecarEnv({});
+    const status = await getSidecarEnvStatus();
+    expect(status).toMatchObject({
+      ready: true,
+      interpreter: true,
+      dependencies: true,
+      commandConfigured: true,
+    });
+    expect(status.error).toBeUndefined();
+  });
+
   it("解释器探活不过：不算已安装", async () => {
     runProcess.mockImplementation(async () => ({
       exitCode: 1,
@@ -731,7 +751,7 @@ describe("discardSidecarEnv", () => {
     expect(await fs.exists(SIDECAR_PY)).toBe(true);
     await discardSidecarEnv();
     expect(await fs.exists(SIDECAR_DIR)).toBe(false);
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toBe("");
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toBe("");
     // 命令偏好被清掉后状态回到依赖缺失层
     const status = await getSidecarEnvStatus();
     expect(status.ready).toBe(false);
@@ -747,6 +767,6 @@ describe("discardSidecarEnv", () => {
     host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 30);
     const out = await installSidecarEnv({});
     expect(out.sidecarPath).toBe(getSidecarScriptPath());
-    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY)).toContain(SIDECAR_PY);
+    expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toContain(SIDECAR_PY);
   });
 });

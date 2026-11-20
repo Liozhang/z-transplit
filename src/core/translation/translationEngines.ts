@@ -1885,6 +1885,18 @@ export async function createAIBatchTranslator(
     Math.floor(inputBudgetTokens * charsPerToken),
   );
 
+  // ── 逐段兜底：把引擎内容里的 JSON 信封解成唯一一条译文 ──
+  // 定义与用法见下方兜底循环内的注释。
+  const unwrapSingleTranslation = (content: string): string | null => {
+    const trimmed = content.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+    const parsed = parseJsonFromMarkdown(trimmed);
+    if (!parsed || typeof parsed !== "object") return null;
+    const arr = Array.isArray(parsed) ? parsed : parsed.translations;
+    if (!Array.isArray(arr) || arr.length !== 1) return null;
+    return typeof arr[0] === "string" ? arr[0] : null;
+  };
+
   // ── Timeouts ──
   // chatJson is a single non-streaming round trip → generous total timeout.
   // chat() likewise returns once, so the idle budget acts as a total timeout.
@@ -2079,7 +2091,12 @@ export async function createAIBatchTranslator(
           IDLE_TIMEOUT_SINGLE_MS,
           signal,
         );
-        const content = result.content || "";
+        const raw = result.content || "";
+        // 兜底路径的提示词要求「只输出译文」，但配了 response_format:
+        // json_object 的端点会无视这条要求，仍旧回 {"translations":["..."]}。
+        // 信封不解包，整串 JSON 就会当成译文渲染进 PDF。能解出唯一一条译文
+        // 就用它，解不出才按纯文本用。
+        const content = unwrapSingleTranslation(raw) ?? raw;
         translations.push(content || texts[i]);
         if (!content && texts[i].trim()) failedIndices.push(i);
       } catch (e) {

@@ -183,7 +183,9 @@ class Engines:
                 use_textline_orientation=False,
             )
         except Exception as exc:  # pragma: no cover - environment dependent
-            self._import_error = f"PPStructureV3 unavailable: {exc}"
+            self._import_error = _describe_engine_failure(
+                "PPStructureV3", exc
+            )
             raise RuntimeError(self._import_error)
         return self._structure
 
@@ -201,9 +203,34 @@ class Engines:
                 use_textline_orientation=False,
             )
         except Exception as exc:  # pragma: no cover - environment dependent
-            self._import_error = f"PaddleOCR unavailable: {exc}"
+            self._import_error = _describe_engine_failure("PaddleOCR", exc)
             raise RuntimeError(self._import_error)
         return self._ocr
+
+
+def _describe_engine_failure(engine: str, exc: Exception) -> str:
+    """把引擎构造失败翻译成"缺哪个包"。
+
+    PaddleX 把缺依赖包在一句通用文案里（"A dependency error occurred during
+    pipeline creation. Please refer to the installation documentation..."），
+    真正的原因在 __cause__ 里：缺附加依赖时报 DependencyError 并给出该装的
+    extra，缺推理引擎时报 "dependency 'paddlepaddle' is not installed"。
+
+    真机实测（2026-11-19，Windows + Python 3.13）：只装 paddleocr 时连撞两种
+    失败，而侧车原来只回显那句通用文案，指不到缺哪个包，只能靠手工 import 才
+    查出根因。这里把因果链摊开，让 --selftest 的诊断直接可用。
+    """
+    chain = []
+    node = exc
+    depth = 0
+    while node is not None and depth < 6:
+        text = str(node).strip()
+        if text:
+            chain.append(text)
+        node = getattr(node, "__cause__", None)
+        depth += 1
+    detail = " | ".join(chain) if chain else exc.__class__.__name__
+    return f"{engine} unavailable: {detail}"
 
 
 def _iter_results(result: Any) -> List[Any]:
@@ -240,13 +267,37 @@ FIGURE_LABELS = {"figure", "image", "chart", "figure_graph"}
 CAPTION_LABELS = {"figure_caption", "table_caption", "caption", "formula_caption"}
 
 
-def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, Any]:
+def _as_engine_input(image):
+    """PIL 图像 → numpy 数组，交给识别引擎。
+
+    PaddleX 3.x 的 predict 只接受 numpy.ndarray 或文件路径。传 PIL 图像不会
+    抛异常，而是打一条 "Not supported input data type! ... So has been
+    ignored" 然后把这一页整个跳过——真机实测 2026-11-19（paddleocr 3.7.0 /
+    paddlex 3.7.2）：每页 lines/formulas/tables/figures 全空、coverage 0，
+    侧车却报告 "recognized 2 page(s)"，因为一条异常都没抛。转成数组这条
+    静默失败才会消失。
+
+    顺带处理 alpha 通道：引擎要三通道 RGB，四通道位图直接喂会因通道数不符
+    被拒。
+    """
+    import numpy as np
+
+    arr = np.asarray(image)
+    if arr.ndim == 3 and arr.shape[2] == 4:
+        arr = arr[:, :, :3]
+    return np.ascontiguousarray(arr)
+
+
+def recognize_page(
+    engines: Engines, image, warnings: List[str], page_number: int
+) -> Dict[str, Any]:
     """Run the engine set over one rendered page; return the protocol dict."""
     # Inside the caller's per-page try: an engine that cannot be built (import
     # failure, architecture mismatch) is a clear per-page reason, and the
     # "degrade to text-only" promise still holds for a layout-only failure.
     structure = engines.structure()
     ocr = engines.ocr()
+    engine_input = _as_engine_input(image)
 
     height_px, width_px = image.height, image.width
 
@@ -254,7 +305,7 @@ def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, An
     #    geometry the renderer needs (font size is estimated from line height).
     lines: List[Dict[str, Any]] = []
     try:
-        for res in _iter_results(ocr.predict(image)):
+        for res in _iter_results(ocr.predict(engine_input)):
             payload = _result_payload(res)
             rec_texts = _first(payload, "rec_texts", "texts", default=None)
             if rec_texts is None:
@@ -285,7 +336,7 @@ def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, An
     # 2) Layout + formula + table via the structure pipeline.
     regions: List[Dict[str, Any]] = []
     try:
-        for res in _iter_results(structure.predict(image)):
+        for res in _iter_results(structure.predict(engine_input)):
             payload = _result_payload(res)
             items = _first(payload, "parsing_res_list", "res_list", default=None)
             if items is None:
@@ -377,6 +428,17 @@ def recognize_page(engines: Engines, image, warnings: List[str]) -> Dict[str, An
     region_boxes = [r["bbox"] for r in regions] + [l["bbox"] for l in lines]
     page_area = float(width_px) * float(height_px)
     coverage = 0.0 if page_area <= 0 else min(1.0, _union_area(region_boxes, width_px, height_px) / page_area)
+
+    # 空页必须说出来。PaddleX 对不支持的输入是"打一条 warning 然后跳过"，
+    # 不抛异常——真机实测 2026-11-19 因此出现过每页全空、coverage 0，而侧车
+    # 仍报告 "recognized N page(s)"，插件侧只能看到一堆可疑页重试。这里把
+    # "这一页什么都没认到"显式写进 diagnostics.warnings（README 承诺读不到的
+    # 东西都进 warnings），调用方不必靠覆盖率反推。
+    if not out_lines and not regions:
+        warnings.append(
+            f"page {page_number} recognized nothing: no text lines and no layout "
+            "blocks (check the engine input type and the rendered image)"
+        )
 
     return {
         "lines": out_lines,
@@ -546,7 +608,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
             bitmap = page.render(scale=dpi / 72.0, rotation=0)
             image = bitmap.to_pil()
-            payload = recognize_page(engines, image, warnings)
+            payload = recognize_page(engines, image, warnings, page_number)
             payload.update(
                 {
                     "pageNumber": page_number,

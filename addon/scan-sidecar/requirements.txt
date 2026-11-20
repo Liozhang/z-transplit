@@ -4,9 +4,29 @@
 # 而 PaddleOCR 的默认模型与结果字段名跟随小版本变化，跨大版本可能改名或改
 # 导入路径。加上界让"同一份 requirements 在不同时间装出同一套行为"，升级
 # 时改这里并重跑 sidecar.py --selftest 验证。
-# 已验证组合（2026-11）：paddleocr 3.4.x + pypdfium2 4.30+（Python 3.12）。
-# paddleocr 提供 PP-StructureV3（版面/公式/表格）与 PaddleOCR（行级文字）。
+#
+# 前三项是一个整体，少任何一项 --selftest 都过不去（真机实测 2026-11-19，
+# Windows + Python 3.13 + paddleocr 3.7.0 / paddlex 3.7.2 / paddlepaddle
+# 3.3.1，逐项补齐后才拿到 {"selftest":"ok"}）：
+#
+#   paddleocr   只带 paddlex 的 ocr-core 子集，不含 PP-StructureV3 要的全量
+#               ocr 附加依赖；
+#   paddlex[ocr] 补上那个全量附加依赖（einops、ftfy、premailer、
+#               sentencepiece、tiktoken 等），但 paddlex 的 151 个 extra 里
+#               没有一个声明推理引擎本身；
+#   paddlepaddle 就是那个引擎。缺它时报的是
+#               「Engine 'paddle_static' is unavailable because dependency
+#               'paddlepaddle' is not installed」。
+#
+# 只写 paddleocr 一份时装得下、跑不起：pip 全部成功，--selftest 才失败，
+# 而且失败信息被包成一句"依赖错误，请查阅安装文档"，指不到具体缺哪个包。
+#
+# paddleocr 与 paddlex 给的是同一个宽松区间，实际生效的是 paddleocr 自己那条
+# 更紧的 pin（3.7.0 钉 paddlex>=3.7.0,<3.8.0）；这里写宽是为了换 paddleocr
+# 小版本时不必同步改两处。升级任一项都要重跑 --selftest。
 paddleocr>=3.3,<4
+paddlex[ocr]>=3.3,<4
+paddlepaddle>=3.0,<4
 # PDF 渲染（无 GTK 依赖的纯二进制渲染器）。自检会渲染一页做导入与栅格化
 # 探活——Windows 上缺 VC++ 运行库或轮子架构不符都在这一步暴露。
 pypdfium2>=4.30,<6

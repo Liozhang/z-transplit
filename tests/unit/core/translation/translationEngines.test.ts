@@ -568,6 +568,47 @@ describe("custom engine (OpenAI-compatible)", () => {
     expect(JSON.parse(h.fetchCalls[2].body).response_format).toBeUndefined();
   });
 
+  it("batch: 兜底拿到 JSON 信封时解包，不把整串 JSON 当译文", async () => {
+    customPrefs();
+    // 端点对批量请求一律 500（逼走逐段兜底），对逐段请求回 JSON 信封——
+    // 配了 response_format: json_object 的网关正是这个行为：无视提示词里
+    // 「只输出译文」的要求，仍旧包信封。
+    route("chat/completions", (call) => {
+      const body = JSON.parse(call.body);
+      const user = body.messages[body.messages.length - 1]?.content ?? "";
+      if (String(user).includes("segments")) {
+        return jsonResponse({ error: "boom" }, false, 500, "Internal Server Error");
+      }
+      return jsonResponse({
+        choices: [
+          { message: { content: '{"translations":["注意力资源的重组发生在训练后期"]}' } },
+        ],
+      });
+    });
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["The reorganization of attentional resources"]);
+    expect(result.translations).toEqual(["注意力资源的重组发生在训练后期"]);
+    expect(result.failedIndices).toEqual([]);
+  });
+
+  it("batch: 兜底拿到普通文本时原样使用（信封解包不误伤正常译文）", async () => {
+    customPrefs();
+    route("chat/completions", (call) => {
+      const body = JSON.parse(call.body);
+      const user = body.messages[body.messages.length - 1]?.content ?? "";
+      if (String(user).includes("segments")) {
+        return jsonResponse({ error: "boom" }, false, 500, "Internal Server Error");
+      }
+      return jsonResponse({ choices: [{ message: { content: "注意力资源的重组" } }] });
+    });
+
+    const handle = await createAIBatchTranslator("zh-CN", "en-US");
+    const result = await handle.translate(["The reorganization"]);
+    expect(result.translations).toEqual(["注意力资源的重组"]);
+    expect(result.failedIndices).toEqual([]);
+  });
+
   it("batch: falls back to per-paragraph, then originals, when the endpoint is down", async () => {
     customPrefs();
     route("chat/completions", () =>
@@ -584,7 +625,7 @@ describe("custom engine (OpenAI-compatible)", () => {
     expect(h.fetchCalls).toHaveLength(7);
     // Per-paragraph level uses the single-paragraph formula prompt.
     const last = JSON.parse(h.fetchCalls[h.fetchCalls.length - 1].body);
-    expect(last.messages[0].content).toContain("{v0}");
+    expect(last.messages[0].content).toContain("$...$");
     expect(last.messages[1]).toEqual({ role: "user", content: "y" });
   });
 
