@@ -122,6 +122,7 @@ export type FluentMessageId =
   | 'odl-progress-parsing'
   | 'odl-progress-preparing'
   | 'odl-progress-remove-original'
+  | 'odl-progress-remove-original-ineffective'
   | 'odl-progress-render-white'
   | 'odl-progress-shot-done'
   | 'odl-progress-shot-failed'
