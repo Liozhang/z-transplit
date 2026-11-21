@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-21 19:09:20",
+ "generatedAt": "2026-11-22 00:44:21",
  "results": [
   {
    "fixture": "reading-brain",
@@ -16,7 +16,8 @@
     "overflow": {
      "right": 0,
      "bottom": 0,
-     "top": 0
+     "top": 0,
+     "silentRight": 0
     },
     "maxOverflow": {
      "right": 0.0,
@@ -59,7 +60,7 @@
      }
     ]
    },
-   "elapsedMs": 4371,
+   "elapsedMs": 3405,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -285,12 +286,13 @@
     "paragraphsRendered": 18,
     "formulasRendered": 0,
     "overflowed": 0,
+    "overflowedRight": 0,
     "imagesRendered": 0,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b6bcp0c2\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b6bcp0c2\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2c01zzum\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2c01zzum\\assembly.json"
    }
   },
   {
@@ -308,7 +310,8 @@
     "overflow": {
      "right": 3,
      "bottom": 0,
-     "top": 0
+     "top": 0,
+     "silentRight": 0
     },
     "maxOverflow": {
      "right": 6.00001147460938,
@@ -351,7 +354,7 @@
      }
     ]
    },
-   "elapsedMs": 5710,
+   "elapsedMs": 4520,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -693,12 +696,13 @@
     "paragraphsRendered": 38,
     "formulasRendered": 1,
     "overflowed": 0,
+    "overflowedRight": 3,
     "imagesRendered": 1,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-if5qe89o\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-if5qe89o\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-tnd9_eqs\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-tnd9_eqs\\assembly.json"
    }
   },
   {
@@ -716,7 +720,8 @@
     "overflow": {
      "right": 0,
      "bottom": 0,
-     "top": 0
+     "top": 0,
+     "silentRight": 0
     },
     "maxOverflow": {
      "right": 0.0,
@@ -751,7 +756,7 @@
      }
     ]
    },
-   "elapsedMs": 5228,
+   "elapsedMs": 3993,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -1049,12 +1054,13 @@
     "paragraphsRendered": 26,
     "formulasRendered": 11,
     "overflowed": 0,
+    "overflowedRight": 0,
     "imagesRendered": 4,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-4pvzlz6v\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-4pvzlz6v\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-o0ar0z5o\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-o0ar0z5o\\assembly.json"
    }
   },
   {
@@ -1072,7 +1078,8 @@
     "overflow": {
      "right": 3,
      "bottom": 0,
-     "top": 0
+     "top": 0,
+     "silentRight": 0
     },
     "maxOverflow": {
      "right": 6.0,
@@ -1107,7 +1114,7 @@
      }
     ]
    },
-   "elapsedMs": 4153,
+   "elapsedMs": 3388,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1382,12 +1389,13 @@
     "paragraphsRendered": 27,
     "formulasRendered": 0,
     "overflowed": 0,
+    "overflowedRight": 3,
     "imagesRendered": 0,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2rh44o5q\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2rh44o5q\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-7tccedcq\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-7tccedcq\\assembly.json"
    }
   },
   {
@@ -1405,7 +1413,8 @@
     "overflow": {
      "right": 4,
      "bottom": 0,
-     "top": 1
+     "top": 1,
+     "silentRight": 0
     },
     "maxOverflow": {
      "right": 5.746006591796885,
@@ -1448,7 +1457,7 @@
      }
     ]
    },
-   "elapsedMs": 3916,
+   "elapsedMs": 3172,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1651,12 +1660,13 @@
     "paragraphsRendered": 19,
     "formulasRendered": 0,
     "overflowed": 0,
+    "overflowedRight": 4,
     "imagesRendered": 0,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-bcj3wvee\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-bcj3wvee\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-c5j5rzsm\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-c5j5rzsm\\assembly.json"
    }
   }
  ]
