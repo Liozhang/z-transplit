@@ -1,0 +1,196 @@
+{
+  "file name" : "reading-brain.pdf",
+  "number of pages" : 2,
+  "author" : null,
+  "title" : "Reading and the Brain",
+  "creation date" : "D:20260929090750+00'00'",
+  "modification date" : "D:20260929090750+00'00'",
+  "kids" : [ {
+    "type" : "heading",
+    "pdfua_tag" : "H1",
+    "id" : 1,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 751.561, 257.705, 772.599 ],
+    "heading level" : 1,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 18.997,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Reading and the Brain"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 2,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 725.542, 214.572, 737.718 ],
+    "font" : "TimesNewRomanPS-ItalicMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Jane M. Doe and John Q. Smith"
+  }, {
+    "type" : "heading",
+    "pdfua_tag" : "H2",
+    "id" : 3,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 689.324, 118.154, 702.613 ],
+    "heading level" : 2,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 12.0,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Abstract"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 4,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 631.792, 521.999, 677.718 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Reading is a complex cognitive activity that involves multiple brain regions. In this paper, we review recent evidence from longitudinal studies of children and discuss how structured reading practice shapes neural circuits over time."
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 5,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 589.792, 521.997, 619.218 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "We argue that comprehension improves when instruction follows the natural rhythm of attention, and we outline a set of classroom experiments that test the claim directly."
+  }, {
+    "type" : "heading",
+    "pdfua_tag" : "H2",
+    "id" : 6,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 555.824, 150.627, 569.113 ],
+    "heading level" : 2,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 12.0,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "1. Introduction"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 7,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 498.292, 521.998, 544.218 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Previous work by Dr. Smith et al. showed measurable gains after twelve weeks of daily practice. However, the underlying mechanisms remain poorly understood. Section 2 describes the methods that were used to collect and analyze the data."
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 8,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 455.542, 521.993, 484.968 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "The remainder of the paper is organized as follows. Section 3 reports results, Section 4 discusses them, and Section 5 states our conclusions."
+  }, {
+    "type" : "heading",
+    "pdfua_tag" : "H2",
+    "id" : 9,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 421.574, 130.166, 434.863 ],
+    "heading level" : 2,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 12.0,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "2. Methods"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 10,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 346.792, 521.998, 410.718 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "We followed 240 participants aged eight to twelve for two academic years. Each session lasted forty minutes and was recorded with the consent of the parents. Eye movements were tracked at 500 Hz. Language assessments were administered three times per year and scored by two independent raters who were blind to the experimental condition."
+  }, {
+    "type" : "heading",
+    "pdfua_tag" : "H2",
+    "id" : 11,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 312.824, 122.836, 326.113 ],
+    "heading level" : 2,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 12.0,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "3. Results"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 12,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 272.542, 521.997, 301.968 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Comprehension scores rose by 23 percent on average. The effect was strongest for participants who began with the lowest baseline scores. Gains persisted at the twelve month follow up."
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 13,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 230.542, 521.993, 259.218 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "Latency measures indicated a 40 ms advantage in the trained group when the sentence contained a rare word or an ambiguous referent."
+  }, {
+    "type" : "heading",
+    "pdfua_tag" : "H2",
+    "id" : 14,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 196.574, 139.518, 209.863 ],
+    "heading level" : 2,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 12.0,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "4. Discussion"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 15,
+    "page number" : 1,
+    "bounding box" : [ 73.5, 138.292, 522.0, 184.968 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "The results suggest that the brain regions supporting reading adapt to regular practice much like muscles respond to training. Future work should examine whether the benefits generalize to second language learners."
+  }, {
+    "type" : "heading",
+    "pdfua_tag" : "H2",
+    "id" : 16,
+    "page number" : 2,
+    "bounding box" : [ 73.5, 742.574, 147.521, 755.863 ],
+    "heading level" : 2,
+    "font" : "TimesNewRomanPS-BoldMT",
+    "font size" : 12.0,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "5. Conclusions"
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 17,
+    "page number" : 2,
+    "bounding box" : [ 73.5, 701.542, 521.992, 730.968 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "We  conclude  that  structured  reading  practice  improves  comprehension  scores  and  that  the improvement is durable."
+  }, {
+    "type" : "paragraph",
+    "pdfua_tag" : "P",
+    "id" : 18,
+    "page number" : 2,
+    "bounding box" : [ 73.5, 659.542, 521.995, 688.968 ],
+    "font" : "TimesNewRomanPSMT",
+    "font size" : 10.995,
+    "text color" : "[0.0667, 0.0667, 0.0667]",
+    "content" : "The classroom experiments outlined here give teachers a concrete schedule to work with, and they give researchers a reproducible setting in which the neural claims of this paper can be tested again."
+  } ]
+}
