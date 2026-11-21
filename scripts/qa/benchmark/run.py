@@ -652,7 +652,9 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
         "figureText": metrics.figure_text(key, assembly, str(fixture_pdf)),
     }
 
-    layout = metrics.layout_metrics(str(fixture_pdf), str(out_pdf), assembly)
+    # 渲染端自己的诊断也传进去，度量才能算出 silentRight——它看见而产品没报的
+    # 右溢出。见 metrics.layout_metrics 的 docstring。
+    layout = metrics.layout_metrics(str(fixture_pdf), str(out_pdf), assembly, stats)
     layout["mask"]["punch"] = metrics.mask_punch(str(fixture_pdf), str(out_pdf), assembly)
     pixel = metrics.outside_pixel_diff(str(fixture_pdf), str(out_pdf), assembly)
     residue = metrics.source_residue(str(fixture_pdf), str(out_pdf), key.get("sourceScript", "latin"))
@@ -702,6 +704,9 @@ WATCHED: list[tuple[str, str, str]] = [
     ("layout.overflow.right", "count", "lower"),
     ("layout.overflow.bottom", "count", "lower"),
     ("layout.overflow.top", "count", "lower"),
+    # 度量看见而渲染端没报的右溢出。渲染端补上横向计数之后它该归零；不为 0 说明
+    # 读者看得见译文画出框外而产品统计不知道。
+    ("layout.overflow.silentRight", "count", "lower"),
     ("layout.fontSize.below06Ratio", "ratio", "lower"),
     ("layout.fontSize.p10", "ratio", "higher"),
     ("layout.mask.intrusionIntoParagraph", "count", "lower"),
@@ -833,9 +838,10 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "遮罩侵入段",
         "遮罩侵图区",
         "遮罩打穿",
+        "静默右溢",
         "框外像素差异",
         "原文残留",
-        "渲染溢出",
+        "渲染溢出 纵/横",
     ]
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "---|" * len(header))
@@ -858,9 +864,14 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             str(layout.get("mask", {}).get("intrusionIntoParagraph", "")),
             str(layout.get("mask", {}).get("intrusionIntoRegion", "")),
             str(layout.get("mask", {}).get("punch", {}).get("punchedMasks", "")),
+            str(layout.get("overflow", {}).get("silentRight", "")),
             fmt(pixel.get("outsideDiffRatio"), 5),
             fmt(result.get("residue", {}).get("residueRatio")),
-            str(result.get("stats", {}).get("overflowed", "")),
+            # 纵向与横向分开显示：批 5 之前渲染端只数纵向，横向溢出一处都没报过，
+            # 读者看得见译文画出框外而产品统计说一切正常。两个数各有各的含义——
+            # 纵向是"塞不下被截断"，横向是"折行宽度的地板把字画出了框"。
+            f"{result.get('stats', {}).get('overflowed', '')}"
+            f"/{result.get('stats', {}).get('overflowedRight', '')}",
         ]
         lines.append("| " + " | ".join(row) + " |")
     lines.append("")

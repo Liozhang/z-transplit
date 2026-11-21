@@ -1065,12 +1065,20 @@ def _mask_ownership(
     return owned, len(masks), intrusion_paragraph, intrusion_region
 
 
-def layout_metrics(source_pdf: str, translated_pdf: str, assembly: dict) -> dict:
+def layout_metrics(
+    source_pdf: str,
+    translated_pdf: str,
+    assembly: dict,
+    stats: dict | None = None,
+) -> dict:
     """B 组：版面保留的全部指标。
 
     assembly 是 render-entry.ts 产出的装配视图（段落框、字号、图区、表格区、
     公式块）。它是渲染器真正的输入，所以度量以它为准，而不是以原始解析产出
     为准——用渲染器没看到的框去要求译文落位，会系统性冤枉它。
+
+    stats 是渲染端自己回吐的诊断（overflowed、overflowedRight 等）。给了它才能
+    算出 silentRight——度量看见而产品没报的溢出。缺省时按产品什么都没报算。
     """
     fitz = _fitz()
     spans_by_page, masks_by_page, _ = extract_translated_spans(translated_pdf)
@@ -1177,7 +1185,20 @@ def layout_metrics(source_pdf: str, translated_pdf: str, assembly: dict) -> dict
         "boxPrecision": sum(precision_samples) / len(precision_samples) if precision_samples else 0.0,
         "utb": untranslated_total,
         "utbReasons": untranslated_reasons,
-        "overflow": overflow_counts,
+        "overflow": {
+            **overflow_counts,
+            # 度量数到而产品没报的右溢出处数。产品侧（LayoutPreservingRenderer）此前
+            # 只判纵向，横向溢出一处都没报过，而这一项在五篇上一共数到 10 处——读者
+            # 看得见译文画出框外，产品统计却说一切正常。批 5 给渲染端补上横向计数，
+            # 这一项就是那件事生效与否的直接检验，也是将来的哨兵。
+            #
+            # 注意它只说明"产品没有少报"，不说明"产品没有多报"：产品报得比度量多时
+            # 它同样是 0。多报要靠 stats.overflowedRight 与 overflow.right 的绝对值
+            # 对比人工看。
+            "silentRight": max(
+                0, overflow_counts["right"] - int((stats or {}).get("overflowedRight", 0) or 0)
+            ),
+        },
         "maxOverflow": max_overflow,
         "fontSize": {
             "median": sorted_ratios[len(sorted_ratios) // 2] if sorted_ratios else 0.0,
@@ -2182,6 +2203,78 @@ def selftest() -> int:
             "没有彩色背景时一个都不报",
             punch_c["punchedMasks"] == 0 and punch_c["fills"] == 0,
             f"got {punch_c}",
+        )
+
+        # ── 静默右溢（silentRight）──
+        # 同一个 assembly，一段窄到放不下译文的段落。量它的时候故意把渲染端诊断
+        # 传成空——那就是批 5 之前的真实状况：渲染端只判纵向，横向溢出一处都没报，
+        # 而度量侧在五篇上一共数到 10 处。补上传入真实 overflowedRight 之后它该
+        # 归零。
+        silent_assembly = {
+            "pages": [
+                {
+                    "pageNumber": 1,
+                    "width": 600,
+                    "height": 800,
+                    "paragraphs": [
+                        {"text": "p", "x0": 350, "y0": 400, "x1": 370, "y1": 410, "size": 6}
+                    ],
+                    "images": [],
+                    "tables": [],
+                }
+            ]
+        }
+        silent_src = os.path.join(tmp, "silent-src.pdf")
+        silent_dst = os.path.join(tmp, "silent-out.pdf")
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=800)
+        page.insert_text((50, 410), "source line", fontsize=10)
+        doc.save(silent_src)
+        doc.close()
+        doc = fitz.open(silent_src)
+        page = doc[0]
+        # 段落框在用户空间 x 350–370、y 400–410；遮罩跟着外扩一磅。中文画在
+        # pymupdf 坐标 (350, 395)——pymupdf 是左上原点，y 395 对应用户空间
+        # 405，落在段框内，所以 _assign_spans 认得出它属于这段。四个 6 磅汉字共
+        # 24 磅宽，右界 374 超出段框右界 370，右溢 4 磅。
+        page.draw_rect(fitz.Rect(349, 385, 371, 405), color=None, fill=(1, 1, 1))
+        page.insert_text((350, 395), "刻度译文", fontsize=6, fontname="china-s")
+        doc.save(silent_dst)
+        doc.close()
+
+        # 渲染端什么都没报——silentRight 应等于度量数到的右溢出处数。
+        silent_none = layout_metrics(silent_src, silent_dst, silent_assembly, {})
+        failures += not _check(
+            "渲染端没报横向溢出时 silentRight 等于度量数到的处数",
+            silent_none["overflow"]["silentRight"] == silent_none["overflow"]["right"]
+            and silent_none["overflow"]["silentRight"] > 0,
+            f"got {silent_none['overflow']}",
+        )
+
+        # 渲染端报够了——silentRight 归零。
+        silent_ok = layout_metrics(
+            silent_src,
+            silent_dst,
+            silent_assembly,
+            {"overflowedRight": silent_none["overflow"]["right"]},
+        )
+        failures += not _check(
+            "渲染端报够了时 silentRight 归零",
+            silent_ok["overflow"]["silentRight"] == 0,
+            f"got {silent_ok['overflow']}",
+        )
+
+        # 渲染端报得比度量多（过度报告）时不为负——下限是 0。
+        silent_over = layout_metrics(
+            silent_src,
+            silent_dst,
+            silent_assembly,
+            {"overflowedRight": silent_none["overflow"]["right"] + 5},
+        )
+        failures += not _check(
+            "渲染端报得更多时 silentRight 不为负",
+            silent_over["overflow"]["silentRight"] == 0,
+            f"got {silent_over['overflow']}",
         )
 
     print(f"\n{'FAILED' if failures else 'OK'}  {failures} 项失败")
