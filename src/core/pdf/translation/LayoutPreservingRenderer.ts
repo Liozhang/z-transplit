@@ -219,7 +219,14 @@ export interface RenderResult {
   stats: {
     paragraphsRendered: number;
     formulasRendered: number;
+    /** 纵向放不下（两条杠杆用尽后仍超高，或被硬截断）的段落数。 */
     overflowed: number;
+    /**
+     * 横向溢出的行数：某一行画出来的右界超出段落右界超过 1 磅。与度量侧
+     * `layout.overflow.right` 同口径。此前渲染端不数这项，读者看得见译文画出
+     * 框外而产品统计说一切正常。
+     */
+    overflowedRight: number;
     /** Raster images composited back onto the page (ODL path only). */
     imagesRendered: number;
     imagesDropped: number;
@@ -282,6 +289,7 @@ export async function renderLayoutPreserving(
     paragraphsRendered: 0,
     formulasRendered: 0,
     overflowed: 0,
+    overflowedRight: 0,
     imagesRendered: 0,
     imagesDropped: 0,
   };
@@ -448,6 +456,7 @@ export async function renderOverlayTranslated(
     paragraphsRendered: 0,
     formulasRendered: 0,
     overflowed: 0,
+    overflowedRight: 0,
     imagesRendered: 0,
     imagesDropped: 0,
   };
@@ -638,11 +647,19 @@ function renderParagraph(
   text: string,
   defaultLineHeight: number,
   useCJK: boolean,
-  stats: { overflowed: number },
+  stats: { overflowed: number; overflowedRight: number },
 ): void {
   const font = pickFont(fonts, p);
   let size = p.size;
-  const maxWidth = Math.max(10, p.x1 - p.x0); // wrap width = paragraph right - left boundary
+  // 折行宽度 = 段落右界减左界，下限 10 磅。
+  //
+  // 那个 10 磅地板曾经想去掉，实测证明不能去：坐标轴刻度与图例标签宽 3 到 6 磅，
+  // 按真实宽度折行会每行只放一个字，行数暴涨，字号被两条杠杆砍到 4 磅地板、内容
+  // 被截断——五篇的 boxRecall 全线下降、fontSize.below06Ratio 从 0 涨到 0.208。
+  // 对读者那是净损害：右溢 3 磅但字号正常且内容较完整，好过塞进框内但字极小且丢
+  // 内容。所以地板保留，窄段放不下这件事交给横向溢出去报（见下面的
+  // overflowedRight）——靠"说出来"兜底，而不是靠"改绘制"。
+  const maxWidth = Math.max(10, p.x1 - p.x0);
   const height = Math.max(size, p.y1 - p.y0); // original paragraph height
   // Lower shrink floor (40% of source / 4pt) — gives the renderer more room
   // to absorb long translations before resorting to clipping.
@@ -731,6 +748,22 @@ function renderParagraph(
     if (line.length === 0) {
       baselineY -= size * lh;
       continue;
+    }
+    // 横向溢出：这一行画出来的右界超出段落右界超过 1 磅就记一次。阈值取 1 磅是
+    // 为了与度量侧 layout.overflow 的 `right > 1.0` 对上口径——此前渲染端只判
+    // 纵向，横向溢出一处都没报过，而度量侧在五篇上一共数到 10 处。读者看得见
+    // 译文画出框外，产品统计却说一切正常，这就是本段要堵的口子。
+    //
+    // 宽度用整行测量，不逐段量：混合字体路径（drawLineMixed）把一行拆成 CJK 与
+    // Latin 分别绘制，但整行总宽与单字体绘制相同，一次测量就够。
+    let lineWidth = 0;
+    try {
+      lineWidth = font.widthOfTextAtSize(line, size);
+    } catch (e) {
+      safeDebug("[Z-Transplit] LayoutPreservingRenderer: " + e);
+    }
+    if (p.x0 + lineWidth - p.x1 > 1) {
+      stats.overflowedRight++;
     }
     try {
       // Mixed-font rendering: when a Latin font is available, split the line
