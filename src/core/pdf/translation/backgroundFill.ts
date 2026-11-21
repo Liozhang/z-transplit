@@ -136,7 +136,12 @@ async function inflateZlib(data: Uint8Array): Promise<Uint8Array> {
   const raw = data.subarray(2, data.length - 4);
   // Blob + Response 的组合在 Zotero 7 的 Firefox 与 Node 18+ 里都有，而且避开
   // 了 ReadableStream 读写端在不同 TS lib 配置下的签名分歧。
-  const piped = new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  //
+  // 拷一份再交给 Blob：`subarray` 返回的是带 ArrayBufferLike 参数的
+  // Uint8Array，旧版 lib 的 BlobPart 不认它（node 配置会报 TS2322）。
+  const copy = new Uint8Array(raw.length);
+  copy.set(raw);
+  const piped = new Blob([copy]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
   return new Uint8Array(await new Response(piped).arrayBuffer());
 }
 
