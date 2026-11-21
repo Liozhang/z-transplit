@@ -292,7 +292,7 @@ async function assemble(config: RenderConfig): Promise<void> {
   }
 }
 
-function render(config: RenderConfig): void {
+async function render(config: RenderConfig): Promise<void> {
   const inputPath = config.renderInput;
   const sourcePath = config.source;
   const outPdf = config.outPdf;
@@ -330,6 +330,12 @@ function render(config: RenderConfig): void {
   });
 
   const fonts = config.fonts ?? {};
+  // 每页 /Rotate，渲染前一次读好：删除区域清单要用它把显示空间的段落框变换回
+  // 原始空间（删除器解析的是内容流）。产品的 opendataloaderSplitAdapter 从源
+  // PDF 读这个值传进 buildRemovalRects，这里照做，否则无头路径量到的删除区域
+  // 与产品实际删的不是同一份。
+  const sourceDoc = await PDFDocument.load(sourceBytes);
+  const rotations = sourceDoc.getPages().map((p) => p.getRotation().angle);
   renderOverlayTranslated(sourceBytes, assemblies, input.translations ?? [], {
     targetLanguage: config.targetLanguage ?? "zh-CN",
     docTitle: config.docTitle ?? "Z-Transplit benchmark",
@@ -345,8 +351,13 @@ function render(config: RenderConfig): void {
       if (config.outStats) writeJson(config.outStats, result.stats);
       if (config.outRects) {
         // 删除区域清单走产品自己的函数生成：度量要量的正是"适配器打算删哪些
-        // 区域"，不是度量自己猜一份。
-        const rects = buildRemovalRects(assemblies, input.translations ?? []);
+        // 区域"，不是度量自己猜一份。旋转已在上面读好。
+        const rects = buildRemovalRects(
+          assemblies,
+          input.translations ?? [],
+          undefined,
+          rotations,
+        );
         fs.mkdirSync(path.dirname(config.outRects), { recursive: true });
         fs.writeFileSync(config.outRects, serializeRemovalRects(rects), "utf8");
       }
@@ -371,7 +382,7 @@ function main(): void {
   // 两条分支都要把拒绝接住：async 函数的未处理拒绝在 Node 22 上是致命错误，
   // 会把真正的失败原因盖成一个没有上下文的 UnhandledPromiseRejection。
   if (config.mode === "assemble") assemble(config).catch((e) => fail(`装配失败：${e}`));
-  else if (config.mode === "render") render(config);
+  else if (config.mode === "render") render(config).catch((e) => fail(`渲染失败：${e}`));
   else fail(`未知模式 ${String(config.mode)}，只支持 assemble 与 render`);
 }
 
