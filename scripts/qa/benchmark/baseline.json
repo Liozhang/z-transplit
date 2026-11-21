@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-22 00:44:21",
+ "generatedAt": "2026-11-22 01:41:03",
  "results": [
   {
    "fixture": "reading-brain",
@@ -60,7 +60,7 @@
      }
     ]
    },
-   "elapsedMs": 3405,
+   "elapsedMs": 8599,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -267,6 +267,29 @@
      "paragraphs": 0,
      "byPage": {},
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
+    },
+    "pageRoles": {
+     "digital": 2,
+     "scanned": 0,
+     "degraded": 0,
+     "nonDigitalParagraphs": 0,
+     "byPage": {
+      "1": {
+       "kind": "digital",
+       "textLength": 1493,
+       "blockCount": 15,
+       "saneRatio": 1.0,
+       "paragraphs": 15
+      },
+      "2": {
+       "kind": "digital",
+       "textLength": 277,
+       "blockCount": 3,
+       "saneRatio": 1.0,
+       "paragraphs": 3
+      }
+     },
+     "note": "角色判据取自产品 classifyPages（有效字符 < 24 记 scanned，可读字符比例 < 0.9 记 degraded）；nonDigitalParagraphs 大于 0 即无头路径把本该走 OCR 的页走了 ODL 装配"
     }
    },
    "pixel": {
@@ -291,8 +314,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2c01zzum\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2c01zzum\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-q5fv0vbn\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-q5fv0vbn\\assembly.json"
    }
   },
   {
@@ -354,7 +377,7 @@
      }
     ]
    },
-   "elapsedMs": 4520,
+   "elapsedMs": 9374,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -677,6 +700,29 @@
       "2": 2
      },
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
+    },
+    "pageRoles": {
+     "digital": 2,
+     "scanned": 0,
+     "degraded": 0,
+     "nonDigitalParagraphs": 0,
+     "byPage": {
+      "1": {
+       "kind": "digital",
+       "textLength": 2995,
+       "blockCount": 26,
+       "saneRatio": 1.0,
+       "paragraphs": 26
+      },
+      "2": {
+       "kind": "digital",
+       "textLength": 1140,
+       "blockCount": 11,
+       "saneRatio": 1.0,
+       "paragraphs": 12
+      }
+     },
+     "note": "角色判据取自产品 classifyPages（有效字符 < 24 记 scanned，可读字符比例 < 0.9 记 degraded）；nonDigitalParagraphs 大于 0 即无头路径把本该走 OCR 的页走了 ODL 装配"
     }
    },
    "pixel": {
@@ -701,8 +747,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-tnd9_eqs\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-tnd9_eqs\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-lqq3mdyn\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-lqq3mdyn\\assembly.json"
    }
   },
   {
@@ -756,7 +802,7 @@
      }
     ]
    },
-   "elapsedMs": 3993,
+   "elapsedMs": 7500,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -1035,6 +1081,22 @@
      "paragraphs": 0,
      "byPage": {},
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
+    },
+    "pageRoles": {
+     "digital": 1,
+     "scanned": 0,
+     "degraded": 0,
+     "nonDigitalParagraphs": 0,
+     "byPage": {
+      "1": {
+       "kind": "digital",
+       "textLength": 3425,
+       "blockCount": 26,
+       "saneRatio": 1.0,
+       "paragraphs": 26
+      }
+     },
+     "note": "角色判据取自产品 classifyPages（有效字符 < 24 记 scanned，可读字符比例 < 0.9 记 degraded）；nonDigitalParagraphs 大于 0 即无头路径把本该走 OCR 的页走了 ODL 装配"
     }
    },
    "pixel": {
@@ -1059,8 +1121,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-o0ar0z5o\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-o0ar0z5o\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-fu43yky0\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-fu43yky0\\assembly.json"
    }
   },
   {
@@ -1114,7 +1176,7 @@
      }
     ]
    },
-   "elapsedMs": 3388,
+   "elapsedMs": 5591,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1370,6 +1432,22 @@
       "1": 5
      },
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
+    },
+    "pageRoles": {
+     "digital": 1,
+     "scanned": 0,
+     "degraded": 0,
+     "nonDigitalParagraphs": 0,
+     "byPage": {
+      "1": {
+       "kind": "digital",
+       "textLength": 2391,
+       "blockCount": 26,
+       "saneRatio": 1.0,
+       "paragraphs": 27
+      }
+     },
+     "note": "角色判据取自产品 classifyPages（有效字符 < 24 记 scanned，可读字符比例 < 0.9 记 degraded）；nonDigitalParagraphs 大于 0 即无头路径把本该走 OCR 的页走了 ODL 装配"
     }
    },
    "pixel": {
@@ -1394,8 +1472,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-7tccedcq\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-7tccedcq\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-w00cwwfg\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-w00cwwfg\\assembly.json"
    }
   },
   {
@@ -1457,7 +1535,7 @@
      }
     ]
    },
-   "elapsedMs": 3172,
+   "elapsedMs": 5207,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1641,6 +1719,29 @@
       "1": 6
      },
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
+    },
+    "pageRoles": {
+     "digital": 2,
+     "scanned": 0,
+     "degraded": 0,
+     "nonDigitalParagraphs": 0,
+     "byPage": {
+      "1": {
+       "kind": "digital",
+       "textLength": 893,
+       "blockCount": 17,
+       "saneRatio": 1.0,
+       "paragraphs": 17
+      },
+      "2": {
+       "kind": "digital",
+       "textLength": 216,
+       "blockCount": 2,
+       "saneRatio": 1.0,
+       "paragraphs": 2
+      }
+     },
+     "note": "角色判据取自产品 classifyPages（有效字符 < 24 记 scanned，可读字符比例 < 0.9 记 degraded）；nonDigitalParagraphs 大于 0 即无头路径把本该走 OCR 的页走了 ODL 装配"
     }
    },
    "pixel": {
@@ -1665,8 +1766,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-c5j5rzsm\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-c5j5rzsm\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2wanj19a\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2wanj19a\\assembly.json"
    }
   }
  ]
