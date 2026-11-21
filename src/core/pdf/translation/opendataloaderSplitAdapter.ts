@@ -100,6 +100,7 @@ import {
 import {
   isOriginalTextRemovalEnabled,
   inspectFormTextRegions,
+  isRemovalEffective,
   removeOriginalText,
 } from "../OriginalTextRemovalClient";
 import {
@@ -758,7 +759,26 @@ export async function translateAndSplitWithOpenDataLoader(
         const rectsContent = serializeRemovalRects(
           buildRemovalRects(assemblies, translatedSets, pageSizes),
         );
-        cleanedBytes = await removeOriginalText(inputPath, rectsContent, opts.signal);
+        const removal = await removeOriginalText(inputPath, rectsContent, opts.signal);
+        // 退出码 0 不等于删掉了东西。删除器按设计只处理页面内容流（第 0 层），
+        // 表单与透明组内部的文字一律保留；那种文档上它报 opsRemoved=0，产出的
+        // PDF 文本层与原文逐字节相同。此前这里照单全收，随即关掉遮罩——结果是
+        // 原文完整保留、译文叠在原文字上、没有任何遮罩盖住原文。
+        //
+        // 所以多问一句：真删掉东西了吗？没有就当作这次删除没发生，回落遮罩。
+        // 遮罩会盖住残留的原文，那正是这条边界该有的行为。
+        if (isRemovalEffective(removal.stats)) {
+          cleanedBytes = removal.bytes;
+        } else {
+          safeDebug(
+            "[Z-Transplit] opendataloaderSplitAdapter: original-text removal removed "
+              + `nothing (pagesTouched=${removal.stats.pagesTouched} `
+              + `opsRemoved=${removal.stats.opsRemoved} `
+              + `streamsSkippedInlineImage=${removal.stats.streamsSkippedInlineImage})`
+              + " — falling back to masks",
+          );
+          onProgress(getString("odl-progress-remove-original-ineffective"));
+        }
       } catch (e) {
         safeDebug(
           "[Z-Transplit] opendataloaderSplitAdapter: original-text removal failed, falling back to masks: " +
