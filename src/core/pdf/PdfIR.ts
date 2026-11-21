@@ -147,7 +147,16 @@ export interface RepeatedElement {
   region: RepeatedRegionType;
   pageNumber: number;
   bbox: BBox;
-  /** How many pages contain this same text in the same position */
+  /**
+   * How many pages in the document carry this same text in the same region
+   * (header/footer). Grouped by (region, text), not by bbox: the same running
+   * head sits a fraction of a point differently on each page, and grouping by
+   * coordinates would split it into singletons.
+   *
+   * Nothing in the product reads this field yet — `repeatedElements` itself has
+   * no consumer outside the adapter that fills it. It is an observation, not a
+   * behavior: correctness of the header/footer EXCLUSION does not depend on it.
+   */
   occurrences: number;
 }
 

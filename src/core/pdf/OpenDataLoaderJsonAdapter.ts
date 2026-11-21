@@ -234,6 +234,30 @@ function normalizeOdlElement(el: any): void {
   }
 }
 
+/**
+ * 统计每个页眉页脚在整篇文档里出现于多少页，写回 `occurrences`。
+ *
+ * 分组键取 (region, text)，不取坐标：同一个书眉在各页的边界框常有零点几磅的
+ * 出入（基线与页边距的舍入），按坐标分组会把本该算重复的两条拆开，得到的
+ * 计数恒为 1——那正是这个字段此前的样子。
+ *
+ * 原地改传入的 pages 数组。调用点在所有页处理完之后，此时跨页计数才拿得到。
+ */
+function countRepeatedOccurrences(pages: PdfPageAnalysis[]): void {
+  const totals = new Map<string, number>();
+  for (const page of pages) {
+    for (const el of page.repeatedElements) {
+      const key = `${el.region}\u0000${el.text}`;
+      totals.set(key, (totals.get(key) ?? 0) + 1);
+    }
+  }
+  for (const page of pages) {
+    for (const el of page.repeatedElements) {
+      el.occurrences = totals.get(`${el.region}\u0000${el.text}`) ?? 0;
+    }
+  }
+}
+
 function toBBox(box: [number, number, number, number]): BBox {
   const [left, bottom, right, top] = box;
   return {
@@ -554,7 +578,11 @@ export function adaptOpenDataLoaderJson(
           region: regionType,
           pageNumber: kid.pageNumber,
           bbox: toBBox(kid.boundingBox),
-          occurrences: 1,
+          // 占位，文档级统计算出真实值——见函数末尾的 countRepeatedOccurrences。
+          // 此前这里硬编码 1，而 RepeatedElement.occurrences 的注释说它数
+          // "多少页含同样文字"，字段与承诺不符，和 backgroundColor 那次是同
+          // 一类问题：接口留好了、注释写清了，赋值的那一行从来不肯做那件事。
+          occurrences: 0,
         });
         // NOTE: headers/footers (page numbers, running heads) are NOT pushed
         // into textBlocks. They were previously emitted with fontSize:0 (then
@@ -688,6 +716,9 @@ export function adaptOpenDataLoaderJson(
 
   if (openPageSpan) filteredPageSpans.push(openPageSpan);
   if (openMarkdownSpan) filteredMarkdownPageSpans.push(openMarkdownSpan);
+
+  // 页眉页脚的跨页出现次数：全部页处理完之后才算得出来，写回 occurrences。
+  countRepeatedOccurrences(pages);
 
   return {
     source: "tier2-opendataloader-pdf",
