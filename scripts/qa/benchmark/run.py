@@ -650,6 +650,7 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
         "readingOrder": metrics.reading_order(key, odl, matched_pairs),
         "figure": metrics.figure_detection(key, odl),
         "figureText": metrics.figure_text(key, assembly, str(fixture_pdf)),
+        "pageRoles": metrics.page_roles(assembly),
     }
 
     # 渲染端自己的诊断也传进去，度量才能算出 silentRight——它看见而产品没报的
@@ -695,6 +696,11 @@ WATCHED: list[tuple[str, str, str]] = [
     # 图内文字被当正文处理的段落数。量的是产品行为，不是解析器必然检不出的
     # 东西，所以进门禁：产品侧改成排除之后它该降下来，不改则一直绿。
     ("parse.figureText.paragraphs", "count", "lower"),
+    # 非数字页上装配出的段落数。产品把扫描页与劣质文本层页路由给识别侧车，
+    # 无头路径不跑那段编排；这一项大于 0 就是无头路径把本该走 OCR 的页走了
+    # ODL 装配。它量的是无头路径的可信度，不是产品缺陷——五篇数字夹具上恒为
+    # 0，涨起来说明无头路径开始照单全收不该它接的页。
+    ("parse.pageRoles.nonDigitalParagraphs", "count", "lower"),
     ("parse.heading.agreement", "ratio", "higher"),
     ("parse.readingOrder.tau", "ratio", "higher"),
     ("layout.biou", "ratio", "higher"),
@@ -839,6 +845,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "遮罩侵图区",
         "遮罩打穿",
         "静默右溢",
+        "非数字页段",
         "框外像素差异",
         "原文残留",
         "渲染溢出 纵/横",
@@ -857,6 +864,10 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             fmt(parse.get("column", {}).get("crossColumnRatio")),
             fmt(parse.get("column", {}).get("mergedBlockRatio")),
             str(parse.get("figureText", {}).get("paragraphs", "")),
+            # 非数字页上装配出的段落数。产品把这些页路由给识别侧车，无头路径
+            # 不跑那段编排——这一列大于 0 就说明无头路径把本该走 OCR 的页走了
+            # ODL 装配（扫描页是 0 段没东西译，劣质页是满段乱码被当正文）。
+            str(parse.get("pageRoles", {}).get("nonDigitalParagraphs", "")),
             fmt(layout.get("biou")),
             fmt(layout.get("boxPrecision")),
             str(layout.get("utb", "")),

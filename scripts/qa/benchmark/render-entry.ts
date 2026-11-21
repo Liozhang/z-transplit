@@ -28,6 +28,8 @@ import { PDFDocument } from "pdf-lib";
 import { adaptOpenDataLoaderJson } from "../../../src/core/pdf/OpenDataLoaderJsonAdapter";
 import { odlAnalysisToAssembly } from "../../../src/core/pdf/translation/odlToAssembly";
 import { collectFillRects } from "../../../src/core/pdf/translation/backgroundFill";
+import { classifyPages, pageTextStats } from "../../../src/core/pdf/scan/pageClassification";
+import type { PageKind } from "../../../src/core/pdf/scan/pageClassification";
 import {
   renderOverlayTranslated,
 } from "../../../src/core/pdf/translation/LayoutPreservingRenderer";
@@ -108,6 +110,27 @@ interface AssemblyJson {
     originalText: string;
     bbox: { x0: number; y0: number; x1: number; y1: number };
   }>;
+  /**
+   * 逐页角色。判据直接用产品自己的 `classifyPages`，不在这里重写一遍——
+   * 同一个判断写在两处，其中一处迟早会过期，而过期的那处会静默给出错答案。
+   *
+   * 为什么无头路径也要分类：产品在 `opendataloaderSplitAdapter` 里按这个结果
+   * 把扫描页与劣质文本层页路由给识别侧车，无头路径不跑那段编排，于是扫描页
+   * 装配出 0 段、劣质页装配出满页乱码，两种情况都毫无信号。有了这个字段，
+   * 度量侧才看得见"这一页本该走 OCR 却走了 ODL"。
+   */
+  pageRoles: PageRoleJson[];
+}
+
+/** 一页的角色与它引出的事实。 */
+interface PageRoleJson {
+  pageNumber: number;
+  kind: PageKind;
+  textLength: number;
+  blockCount: number;
+  saneRatio: number;
+  /** 该页装配出的段落数。非数字页的这个数大于 0 就是越权。 */
+  paragraphs: number;
 }
 
 interface RenderInputJson extends AssemblyJson {
@@ -205,7 +228,7 @@ async function assemble(config: RenderConfig): Promise<void> {
     );
   }
 
-  const out: AssemblyJson = { pages: [], formulaBlocks: [] };
+  const out: AssemblyJson = { pages: [], formulaBlocks: [], pageRoles: [] };
   built.assemblies.forEach((assembly, index) => {
     const page = analysis.pages[index];
     const sourcePage = sourcePages[index];
@@ -240,11 +263,33 @@ async function assemble(config: RenderConfig): Promise<void> {
     originalText: f.originalText,
     bbox: { x0: f.bbox.x, y0: f.bbox.y, x1: f.bbox.x + f.bbox.width, y1: f.bbox.y + f.bbox.height },
   }));
+  // 页面角色：判据取自产品自己的分类器，输入是同一份 analysis。非数字页的
+  // 段落数一并记下——它大于 0 就说明这一页本该走 OCR 却走了 ODL 装配。
+  const classification = classifyPages(analysis.pages);
+  out.pageRoles = analysis.pages.map((page, index) => {
+    const stats = pageTextStats(page);
+    return {
+      pageNumber: page.pageNumber,
+      kind: classification.kinds[index],
+      textLength: stats.textLength,
+      blockCount: stats.blockCount,
+      saneRatio: stats.saneRatio,
+      paragraphs: built.assemblies[index]?.paragraphs.length ?? 0,
+    };
+  });
   writeJson(outPath, out);
   const paragraphCount = out.pages.reduce((n, p) => n + p.paragraphs.length, 0);
+  const offRole = out.pageRoles.filter((r) => r.kind !== "digital");
+  const offRoleParagraphs = offRole.reduce((n, r) => n + r.paragraphs, 0);
   process.stdout.write(
     `assembled pages=${out.pages.length} paragraphs=${paragraphCount} formulas=${out.formulaBlocks.length}\n`,
   );
+  if (offRole.length > 0) {
+    // 明确说出来，不混在 assembled 那一行里：扫描页 0 段与劣质页满段乱码是两
+    // 种完全不同的情形，前者是"没东西可译"，后者是"把乱码当正文译了"。
+    const kinds = offRole.map((r) => `${r.pageNumber}:${r.kind}`).join(" ");
+    process.stdout.write(`非数字页 ${offRole.length} 页（${kinds}），其中装配出 ${offRoleParagraphs} 段\n`);
+  }
 }
 
 function render(config: RenderConfig): void {

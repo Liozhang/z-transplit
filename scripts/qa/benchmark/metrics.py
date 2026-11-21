@@ -850,6 +850,78 @@ def figure_text(key: dict, assembly: dict, source_pdf: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+# 页面角色的两种非数字取值。数字页不列出来：判定函数返回的第三种值就是它，
+# 这里只关心"不是数字页"的两种，写死字符串会让多出来的第四种角色被漏掉。
+NON_DIGITAL_KINDS = ("scanned", "degraded")
+
+
+def page_roles(assembly: dict) -> dict:
+    """逐页角色，以及非数字页被装配出多少段。
+
+    角色判据不在这一侧：无头驱动调产品自己的 `classifyPages`，把结果写进
+    assembly.json 的 pageRoles。同一个判断只写在产品里一处，度量侧只读数。
+    写在两处，其中一处迟早过期，而过期的那处会静默给出错答案——这一批要量的
+    恰恰是"哪一页本该走 OCR"。
+
+    三项数字：
+      digital / scanned / degraded   各类页数
+      nonDigitalParagraphs           非数字页上装配出的段落数
+
+    最后一项是这一组的核心。产品在 `opendataloaderSplitAdapter` 里按同一判据把
+    扫描页与劣质文本层页路由给识别侧车，无头路径不跑那段编排，于是：
+
+      扫描页   → 装配出 0 段。没有东西可译，输出一篇没翻译的 PDF，零信号。
+      劣质页   → 装配出满段乱码。文本层是私用区码位（ToUnicode 映射损坏的
+                 典型特征），会被当正文送给翻译引擎。
+
+    两种情形的产品行为都是对的（前者抛 scan-error-sidecar-unconfigured，
+    后者走 OCR），错的是无头路径把它们照单全收且不说话。这一项大于 0 就是
+    "本该走 OCR 却走了 ODL"，是无头路径可不可信的哨兵，不是产品缺陷。
+
+    五篇数字夹具上它应当全为 0；两篇扫描夹具上没有答案键、跑不进默认集合，
+    所以默认集合里它恒为 0——它是护栏，不是覆盖率。覆盖扫描件要靠 --ocr，
+    而本机 PaddleOCR 推理跑不通，那一项目前必然报缺数据。
+    """
+    roles = assembly.get("pageRoles") or []
+    counts = {"digital": 0, "scanned": 0, "degraded": 0}
+    non_digital_paragraphs = 0
+    by_page: dict[str, dict] = {}
+    for role in roles:
+        kind = str(role.get("kind") or "")
+        if kind in counts:
+            counts[kind] += 1
+        paragraphs = int(role.get("paragraphs") or 0)
+        if kind in NON_DIGITAL_KINDS:
+            non_digital_paragraphs += paragraphs
+        by_page[str(role.get("pageNumber"))] = {
+            "kind": kind,
+            "textLength": int(role.get("textLength") or 0),
+            "blockCount": int(role.get("blockCount") or 0),
+            "saneRatio": round(float(role.get("saneRatio") or 0.0), 4),
+            "paragraphs": paragraphs,
+        }
+    if not roles:
+        # 旧 assembly.json 没有这个字段（重新生成基线之前的产物）。报缺而不报
+        # 0：0 会被读成"没有非数字页"，而事实是"不知道有没有"。
+        return {
+            "digital": None,
+            "scanned": None,
+            "degraded": None,
+            "nonDigitalParagraphs": None,
+            "note": "assembly.json 无 pageRoles 字段，重新跑 assemble 才有",
+        }
+    return {
+        **counts,
+        "nonDigitalParagraphs": non_digital_paragraphs,
+        "byPage": by_page,
+        "note": (
+            "角色判据取自产品 classifyPages（有效字符 < 24 记 scanned，"
+            "可读字符比例 < 0.9 记 degraded）；nonDigitalParagraphs 大于 0 "
+            "即无头路径把本该走 OCR 的页走了 ODL 装配"
+        ),
+    }
+
+
 def _fitz():
     """延迟导入 pymupdf。A 组与 C 组不需要它，自检的核心断言也不应该被一个
     可选的第三方库挡住。"""
@@ -1791,6 +1863,71 @@ def selftest() -> int:
     near = vector_clusters([Box(0, 0, 10, 10), Box(12, 0, 22, 10)], 20)
     failures += not _check(
         "间隙小于阈值的矢量路径并成一簇", len(near) == 1, f"got {len(near)}"
+    )
+
+    # ── 页面角色（page_roles）──
+    # 角色判据在产品侧（classifyPages），无头驱动只把结果搬进 assembly.json。
+    # 这里合成三种 pageRoles，逐条钉住度量侧该报出什么：
+    #   1. 全数字页 → 三类计数对得上，越权段为 0；
+    #   2. 劣质文本层页装配出了段 → 越权段必须报出来（这是无头路径把乱码当
+    #      正文译掉的那一档，scanned-degraded 实测 2 页 18 段）；
+    #   3. 扫描页 0 段 → 越权段为 0，但页数要记在 scanned 里（没东西可译，
+    #      与"照单全收"是两回事，不能因为越权段是 0 就当它干净）；
+    #   4. 旧 assembly.json 没有这个字段 → 报缺不报 0。
+    roles_digital = page_roles(
+        {
+            "pageRoles": [
+                {"pageNumber": 1, "kind": "digital", "textLength": 1770, "blockCount": 18,
+                 "saneRatio": 1.0, "paragraphs": 11},
+                {"pageNumber": 2, "kind": "digital", "textLength": 1602, "blockCount": 16,
+                 "saneRatio": 1.0, "paragraphs": 9},
+            ]
+        }
+    )
+    failures += not _check(
+        "全数字页时三类计数与总页数一致",
+        roles_digital["digital"] == 2 and roles_digital["scanned"] == 0
+        and roles_digital["degraded"] == 0 and roles_digital["nonDigitalParagraphs"] == 0,
+        f"got {roles_digital}",
+    )
+    roles_degraded = page_roles(
+        {
+            "pageRoles": [
+                {"pageNumber": 1, "kind": "digital", "textLength": 900, "blockCount": 9,
+                 "saneRatio": 1.0, "paragraphs": 6},
+                {"pageNumber": 2, "kind": "degraded", "textLength": 1770, "blockCount": 18,
+                 "saneRatio": 0.707, "paragraphs": 18},
+            ]
+        }
+    )
+    failures += not _check(
+        "劣质页装配出段落时越权段报得出数",
+        roles_degraded["degraded"] == 1 and roles_degraded["nonDigitalParagraphs"] == 18,
+        f"got {roles_degraded}",
+    )
+    failures += not _check(
+        "数字页的段落不计入越权段",
+        roles_degraded["nonDigitalParagraphs"] == 18,
+        f"got {roles_degraded}",
+    )
+    roles_scanned = page_roles(
+        {
+            "pageRoles": [
+                {"pageNumber": 1, "kind": "scanned", "textLength": 0, "blockCount": 0,
+                 "saneRatio": 1.0, "paragraphs": 0},
+            ]
+        }
+    )
+    failures += not _check(
+        "扫描页 0 段时越权段为 0 但页数记在 scanned",
+        roles_scanned["scanned"] == 1 and roles_scanned["nonDigitalParagraphs"] == 0,
+        f"got {roles_scanned}",
+    )
+    roles_missing = page_roles({})
+    failures += not _check(
+        "缺 pageRoles 时报缺不报 0",
+        roles_missing["nonDigitalParagraphs"] is None,
+        f"got {roles_missing}",
     )
 
     # 合并块：bbox 完整包住四个同页其它块。宽度判据分不清"合法通栏元素"与
