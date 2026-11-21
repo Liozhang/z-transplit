@@ -129,6 +129,12 @@ class FixtureHtmlParser(HTMLParser):
         self.capture: dict | None = None
         self.elements: list[dict] = []
         self.figures = 0
+        # 图内 SVG 文字节点数，按图序号存。图内文字（坐标轴刻度、图例、坐标轴
+        # 标题）在夹具 HTML 里全是 <svg><text>，数它就有图内文字的真值——不需要
+        # pymupdf，也不需要给解析器认图归属。figure_depth 跟着 <figure> 的开合
+        # 增减，嵌套的 svg 不另计，所以 <text> 只要在任一层 figure 内就算。
+        self.figure_depth = 0
+        self.figure_text_spans: list[int] = []
         self.tables: list[dict] = []
         self.style_text: list[str] = []
         self.table_stack: list[dict] = []
@@ -147,6 +153,12 @@ class FixtureHtmlParser(HTMLParser):
 
         if tag == "figure":
             self.figures += 1
+            self.figure_depth += 1
+            self.figure_text_spans.append(0)
+        # <text> 的计数必须放在下面那道 skip_depth/capture 提前返回之前：图内的
+        # svg 不会开 capture（CAPTURE_TAGS 里没有 svg），放在后面就一个都数不到。
+        if tag == "text" and self.figure_depth:
+            self.figure_text_spans[-1] += 1
         if tag == "table":
             self.table_stack.append({"rows": 0, "cols": 0})
         if tag == "tr" and self.table_stack:
@@ -187,6 +199,8 @@ class FixtureHtmlParser(HTMLParser):
             self.tables.append(self.table_stack.pop())
         if self.stack and self.stack[-1] == tag:
             self.stack.pop()
+        if tag == "figure" and self.figure_depth:
+            self.figure_depth -= 1
         if tag in ("div", "section") and self.refs_depth:
             self.refs_depth -= 1
 
@@ -251,15 +265,29 @@ class FixtureHtmlParser(HTMLParser):
             "landscape": "landscape" in style.lower(),
             "sourceScript": "latin",
             "elements": self.elements,
-            "figures": [{"index": i} for i in range(self.figures)],
+            "figures": [
+                {"index": i, "textSpans": spans}
+                for i, spans in enumerate(self.figure_text_spans)
+            ],
             "tables": self.tables,
             "knownGaps": [
-                "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+                "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值",
+                "figureTextFilter 依赖删除器 --inspect 报含文字表单对象，而五篇夹具的图"
+                "全是页面层矢量图，--inspect 实测返回 0，图内文字排除从未生效",
             ],
         }
 
 
 def regen_keys() -> int:
+    """从夹具 HTML 重新生成答案键。
+
+    生成是纯 HTML 语义的，坐标一概产不出。但答案键里存着一批手工实测补进去的
+    字段（columnLeftEdges 是各栏左缘的 PDF 坐标，来自渲染后测量），全量覆盖会
+    把它们静默清掉——那批真值就白量了。所以写文件前先把旧文件里"新的产不出、
+    旧的还在"的字段合并回去，并打印一行说明合并了什么。
+    """
+    # 只保留明确知道是手工补的字段，不要无脑合并——那会让删掉的字段复活。
+    PRESERVED = ("columnLeftEdges",)
     KEY_DIR.mkdir(parents=True, exist_ok=True)
     written = 0
     for fixture in FIXTURES:
@@ -270,12 +298,25 @@ def regen_keys() -> int:
         parser.feed(html_path.read_text(encoding="utf-8"))
         key = parser.summary(fixture["name"])
         out = KEY_DIR / f"{fixture['name']}.json"
+        carried: list[str] = []
+        if out.exists():
+            try:
+                previous = json.loads(out.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                previous = {}
+            for field in PRESERVED:
+                if field in previous and field not in key:
+                    key[field] = previous[field]
+                    carried.append(field)
         out.write_text(json.dumps(key, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         formulas = sum(1 for e in key["elements"] if e["formula"])
         baits = sum(1 for e in key["elements"] if e.get("hardCase"))
+        spans = sum(f.get("textSpans", 0) for f in key["figures"])
         print(
             f"{fixture['name']:20s} 元素 {len(key['elements']):3d}  公式段 {formulas}  "
-            f"边界样本 {baits}  栏 {key['columns']}  横版 {key['landscape']}  表 {len(key['tables'])}"
+            f"边界样本 {baits}  栏 {key['columns']}  横版 {key['landscape']}  "
+            f"表 {len(key['tables'])}  图 {len(key['figures'])}  图内文字 {spans}"
+            + (f"  保留 {','.join(carried)}" if carried else "")
         )
         written += 1
     print(f"\n写了 {written} 个答案键到 {KEY_DIR}")
@@ -608,6 +649,7 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
         "table": metrics.table_structure(key, odl),
         "readingOrder": metrics.reading_order(key, odl, matched_pairs),
         "figure": metrics.figure_detection(key, odl),
+        "figureText": metrics.figure_text(key, assembly, str(fixture_pdf)),
     }
 
     layout = metrics.layout_metrics(str(fixture_pdf), str(out_pdf), assembly)
@@ -647,6 +689,9 @@ WATCHED: list[tuple[str, str, str]] = [
     # 合并块才是该门禁的：通栏标题与图注本来就超宽，宽度判据有一个下不去的最低
     # 值；而跨栏合并块吞掉邻段，通栏元素不吞，这一项能真正归零。
     ("parse.column.mergedBlockRatio", "ratio", "lower"),
+    # 图内文字被当正文处理的段落数。量的是产品行为，不是解析器必然检不出的
+    # 东西，所以进门禁：产品侧改成排除之后它该降下来，不改则一直绿。
+    ("parse.figureText.paragraphs", "count", "lower"),
     ("parse.heading.agreement", "ratio", "higher"),
     ("parse.readingOrder.tau", "ratio", "higher"),
     ("layout.biou", "ratio", "higher"),
@@ -777,6 +822,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "段落 F1",
         "栏串位率",
         "合并块率",
+        "图内文字段",
         "交并比",
         "框内滞留",
         "未翻译块",
@@ -800,6 +846,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             fmt(parse.get("match", {}).get("f1")),
             fmt(parse.get("column", {}).get("crossColumnRatio")),
             fmt(parse.get("column", {}).get("mergedBlockRatio")),
+            str(parse.get("figureText", {}).get("paragraphs", "")),
             fmt(layout.get("biou")),
             fmt(layout.get("boxPrecision")),
             str(layout.get("utb", "")),

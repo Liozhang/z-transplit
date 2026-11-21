@@ -1,10 +1,6 @@
 {
  "fixture": "attention-reading",
  "columns": 2,
- "columnLeftEdges": [
-  45.0,
-  310.1
- ],
  "landscape": false,
  "sourceScript": "latin",
  "elements": [
@@ -205,10 +201,12 @@
  ],
  "figures": [
   {
-   "index": 0
+   "index": 0,
+   "textSpans": 8
   },
   {
-   "index": 1
+   "index": 1,
+   "textSpans": 7
   }
  ],
  "tables": [
@@ -218,6 +216,11 @@
   }
  ],
  "knownGaps": [
-  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值"
+  "SVG 矢量图进 PDF 后不是位图，解析器提不到图元素，图区检出数天然低于真值",
+  "figureTextFilter 依赖删除器 --inspect 报含文字表单对象，而五篇夹具的图全是页面层矢量图，--inspect 实测返回 0，图内文字排除从未生效"
+ ],
+ "columnLeftEdges": [
+  45.0,
+  310.1
  ]
 }
