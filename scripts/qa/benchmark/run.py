@@ -63,6 +63,7 @@ JAR_CANDIDATES = [
     ROOT / "src" / "core" / "pdf" / "lib" / "opendataloader-pdf-cli.jar",
     Path(r"D:\zt-qa\data\ztransplit\lib\opendataloader-pdf-cli.jar"),
 ]
+REMOVER_JAR = ROOT / "src" / "core" / "pdf" / "lib" / "ztransplit-region-text-remover.jar"
 
 # 夹具清单。layout 一列只作报告里的分组标签，真正的栏数与方向从 HTML 解析。
 # 扫描件两篇没有 HTML 源，它们的标准答案来自派生源（reading-brain 的已知
@@ -426,6 +427,41 @@ def parse_with_jar(fixture_pdf: Path, workdir: Path) -> Path:
     return produced
 
 
+def clean_with_remover(fixture_pdf: Path, rects_path: Path, workdir: Path) -> Path | None:
+    """用原文删除器跑一遍，返回删完的 PDF 路径。
+
+    为什么无头路径要跑它：删除此前只在真机上量过（第一次真机抽查给出原文残留
+    率 0.000 对 1.000），而无头路径压根不调用删除器——它产出 rects.txt 就丢在
+    那里。那是整套基准里唯一"真机测得、无头从来没测过"的环节，而它守护的正是
+    读者能不能复制到原文。
+
+    参数与产品一致：jar 路径、rects 文件、输出 PDF，三个位置参数，没有额外开关。
+    删除器把统计打在 stderr 上，这里原样收着交给度量侧解析。
+
+    失败不抛：删除器缺失或崩溃时返回 None，度量侧报缺数据。基准不该因为一个
+    可选环节的缺失而整篇失败。
+    """
+    if not REMOVER_JAR.exists():
+        return None
+    out_path = workdir / "cleaned.pdf"
+    try:
+        result = run(
+            [
+                "java",
+                "-jar",
+                str(REMOVER_JAR),
+                str(fixture_pdf),
+                str(rects_path),
+                str(out_path),
+            ]
+        )
+    except OSError:
+        return None
+    if result.returncode != 0 or not out_path.exists():
+        return None
+    return out_path
+
+
 def bundle_driver(workdir: Path | None = None) -> Path:
     """把 TypeScript 驱动打包成 Node 可执行的文件。
 
@@ -660,6 +696,15 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
     pixel = metrics.outside_pixel_diff(str(fixture_pdf), str(out_pdf), assembly)
     residue = metrics.source_residue(str(fixture_pdf), str(out_pdf), key.get("sourceScript", "latin"))
 
+    # 原文删除：无头路径此前只产出 rects.txt 从不调用删除器，于是删除效果只能
+    # 靠真机抽查量。这里补上——用同一份 rects 跑一遍 jar，再量删完的 PDF 还剩
+    # 多少原文。这不改变译文 PDF 的产出路径（渲染仍用未删的源），是一次独立的
+    # 旁路测量，所以不影响任何既有版面指标。
+    cleaned = clean_with_remover(fixture_pdf, rects_path, workdir)
+    removal = metrics.removal_effect(
+        str(fixture_pdf), str(cleaned) if cleaned else None, rects_path
+    )
+
     return {
         "fixture": name,
         "layout": next((f["layout"] for f in FIXTURES if f["name"] == name), ""),
@@ -668,6 +713,7 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
         "layout": layout,
         "pixel": pixel,
         "residue": residue,
+        "removal": removal,
         "stats": stats,
         "artifacts": {
             "translatedPdf": str(out_pdf),
@@ -701,6 +747,14 @@ WATCHED: list[tuple[str, str, str]] = [
     # ODL 装配。它量的是无头路径的可信度，不是产品缺陷——五篇数字夹具上恒为
     # 0，涨起来说明无头路径开始照单全收不该它接的页。
     ("parse.pageRoles.nonDigitalParagraphs", "count", "lower"),
+    # 删除后原文残留。旁路测量（用装配层的区域文件跑删除器，量删完的 PDF），
+    # 不改变译文 PDF 的产出路径。涨起来说明删除器对该篇删不动了——批 7 修的
+    # 正是"退出码 0 但一个字符都没删"那种情形。
+    #
+    # 注意它不为 0 不必然是缺陷：attention-reading 的 0.031 全部来自那张从未
+    # 被翻译的表格（表格在装配层没有对应段落，既不译也不删），属第三批批次 8
+    # 的题目。所以这一项设的是绝对底线而不是"必须为 0"。
+    ("removal.residueRatio", "ratio", "lower"),
     ("parse.heading.agreement", "ratio", "higher"),
     ("parse.readingOrder.tau", "ratio", "higher"),
     ("layout.biou", "ratio", "higher"),
@@ -846,6 +900,8 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "遮罩打穿",
         "静默右溢",
         "非数字页段",
+        "删除区域数",
+        "删除后残留",
         "框外像素差异",
         "原文残留",
         "渲染溢出 纵/横",
@@ -856,6 +912,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         parse = result.get("parse", {})
         layout = result.get("layout", {})
         pixel = result.get("pixel", {})
+        removal = result.get("removal", {})
         row = [
             result["fixture"],
             fmt(parse.get("formula", {}).get("precision")),
@@ -868,6 +925,16 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             # 不跑那段编排——这一列大于 0 就说明无头路径把本该走 OCR 的页走了
             # ODL 装配（扫描页是 0 段没东西译，劣质页是满段乱码被当正文）。
             str(parse.get("pageRoles", {}).get("nonDigitalParagraphs", "")),
+            # 删除区域数与删完后的原文残留。这一对是旁路测量：用装配层产出的同一份
+            # 区域文件跑一遍删除器，再量删完的 PDF 还剩多少源语言字母。它不改变
+            # 译文 PDF 的产出路径，所以不影响上面任何版面指标。
+            #
+            # 残留不为 0 有两种完全不同的原因，看数字大小能分：attention-reading
+            # 的 0.031 全部来自那张从未被翻译的表格（表格在装配层没有对应段落，
+            # 既不译也不删），那是第三批批次 8 的题目；若某篇残留接近 1，说明删除
+            # 器对该篇一个字符都没删掉——那正是批 7 修的情形。
+            str(removal.get("requested", "")),
+            fmt(removal.get("residueRatio"), 3) if removal.get("residueRatio") is not None else "未测",
             fmt(layout.get("biou")),
             fmt(layout.get("boxPrecision")),
             str(layout.get("utb", "")),

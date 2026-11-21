@@ -1541,6 +1541,59 @@ def source_residue(source_pdf: str, translated_pdf: str, source_script: str = "l
 # ---------------------------------------------------------------------------
 
 
+def removal_effect(source_pdf: str, cleaned_pdf: str | None, rects_path: str) -> dict:
+    """原文删除器的实际效果：区域给了多少，删完还剩多少原文。
+
+    为什么单立一项：`source_residue` 量的是**译文 PDF** 的原文残留，而译文 PDF
+    在无头路径上从不调用删除器（删除只在真机上跑，第一次真机抽查给出残留率
+    0.000 对无头 1.000）。所以那一项回答的是"遮罩盖住了多少"，回答不了"删除器
+    删掉了多少"——而后者才是读者能不能复制到原文的那个开关。
+
+    这里补一次旁路测量：拿装配层产出的同一份 rects.txt 跑一遍 jar，再量删完的
+    PDF 还剩多少源语言字母。它**不改变译文 PDF 的产出路径**（渲染仍用未删的
+    源），所以不影响任何既有版面指标。
+
+    两个数字：
+      requested  区域文件里的矩形数（去掉注释行）。为 0 说明没有段落被要求删。
+      residueRatio  删完的 PDF 里源语言字母占比。0 表示删干净了。
+
+    cleaned_pdf 为 None（jar 缺失或跑失败）时报缺不报 0：0 会被读成"删得干净"，
+    而事实是"没测"。
+    """
+    requested = 0
+    try:
+        with open(rects_path, encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    requested += 1
+    except OSError:
+        return {
+            "requested": None,
+            "residueRatio": None,
+            "note": "读不了区域文件，删除效果未测",
+        }
+
+    if cleaned_pdf is None:
+        return {
+            "requested": requested,
+            "residueRatio": None,
+            "note": "删除器 jar 缺失或执行失败，删除效果未测",
+        }
+
+    measured = source_residue(source_pdf, cleaned_pdf, "latin")
+    return {
+        "requested": requested,
+        "residueRatio": measured["residueRatio"],
+        "sourceLetters": measured["sourceLetters"],
+        "residualLetters": measured["residualLetters"],
+        "note": (
+            "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文"
+            "残留。不影响译文 PDF 的产出路径"
+        ),
+    }
+
+
 def _edit_distance(a: str, b: str) -> int:
     """标准编辑距离。CER 与 WER 共用，不引第三方库。"""
     if a == b:
@@ -2260,6 +2313,47 @@ def selftest() -> int:
             "不盖遮罩时原文残留接近 1",
             residue["residueRatio"] > 0.95,
             f"got {residue}",
+        )
+
+        # ── 删除效果（removal_effect）──
+        # 三个变体对应三种真实情形，前两种是这次修复的核心：
+        #   1. 区域文件为空 → requested 为 0，而 residue 仍报得出来（原文一个字
+        #      没删，残留 1.0）。删除器对这种情形照样退出码 0、照样产出合法 PDF。
+        #   2. jar 没跑成 → 报缺不报 0。0 会被读成"删得干净"，而事实是"没测"。
+        #   3. 区域正常 → requested 数得对。
+        empty_rects = os.path.join(tmp, "empty-rects.txt")
+        with open(empty_rects, "w", encoding="utf-8") as fh:
+            fh.write("# page x0 y0 x1 y1\n")
+        empty_effect = removal_effect(source_path, source_path, empty_rects)
+        failures += not _check(
+            "空区域文件时 requested 为 0 且残留仍报得出来",
+            empty_effect["requested"] == 0
+            and empty_effect["residueRatio"] is not None
+            and empty_effect["residueRatio"] > 0.95,
+            f"got {empty_effect}",
+        )
+        missing_effect = removal_effect(source_path, None, empty_rects)
+        failures += not _check(
+            "删除器没跑成时报缺不报 0",
+            missing_effect["residueRatio"] is None and missing_effect["requested"] == 0,
+            f"got {missing_effect}",
+        )
+        filled_rects = os.path.join(tmp, "filled-rects.txt")
+        with open(filled_rects, "w", encoding="utf-8") as fh:
+            # 中间那个空行是故意的：区域文件允许空行，数的时候必须跳过。
+            fh.write("# page x0 y0 x1 y1\n1 40 100 300 120\n1 40 130 300 150\n\n1 40 160 300 180\n")
+        filled_effect = removal_effect(source_path, source_path, filled_rects)
+        failures += not _check(
+            "区域文件数得过（注释与空行不算）",
+            filled_effect["requested"] == 3,
+            f"got {filled_effect}",
+        )
+        unreadable_effect = removal_effect(source_path, source_path, os.path.join(tmp, "no-such.txt"))
+        failures += not _check(
+            "区域文件读不了时报缺",
+            unreadable_effect["requested"] is None
+            and unreadable_effect["residueRatio"] is None,
+            f"got {unreadable_effect}",
         )
 
         # ── 遮罩打穿（mask_punch）──
