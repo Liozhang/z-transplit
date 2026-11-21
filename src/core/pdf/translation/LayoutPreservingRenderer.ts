@@ -90,14 +90,28 @@ const LANG_LINEHEIGHT_MAP: Record<string, number> = {
  *
  * The four cases (pageW/pageH = UN-rotated MediaBox dimensions):
  *   0°:   identity
- *   90°:  x' = y,          y' = pageW - x       (and swap conceptually)
+ *   90°:  x' = pageW - y,  y' = x
  *   180°: x' = pageW - x,  y' = pageH - y
- *   270°: x' = pageH - y,  y' = x
- * where (x, y) is a point's bottom-left in ODL space and (x', y') is the raw
- * space coordinate. We transform the four bbox corners and take the min/max.
+ *   270°: x' = y,          y' = pageH - x
+ * where (x, y) is a point's bottom-left in ODL display space and (x', y') is
+ * the raw-space coordinate. We transform the four bbox corners and take the
+ * min/max.
  *
- * NOTE: the current fixtures are all rotation=0, so this is verified via
- * synthetic unit tests rather than real PDFs.
+ * These formulas are verified against REAL rotated PDFs, not derived on paper:
+ * reading-brain was saved with /Rotate 90/180/270 (MediaBox unchanged), parsed
+ * three times, and the same paragraph's bbox paired across all four rotations
+ * by text. The rotation-0 bbox IS that paragraph's true raw-space position, so
+ * the other three must land on it. See tests/node/rotation-transform.spec.ts,
+ * which hard-codes the measured numbers.
+ *
+ * The 90° and 270° cases were SWAPPED until 2026-11-22 (batch 8). That is not a
+ * style slip — applying the old 90° formula to real data put the box at
+ * y = −177.6, i.e. off the page entirely. The renderer had refused rotated
+ * pages outright ever since ("we have no real rotated fixture to verify
+ * against"), which is why the wrong formula survived: nothing exercised it.
+ * pdf-lib's `page.getWidth()` returns the UN-rotated MediaBox size on every
+ * rotation (measured: 594.96 × 841.92 for all of 90/180/270), which is why
+ * pageW appears in the 90° case and pageH in the 270° case.
  */
 export function applyRotation(
   p: Paragraph,
@@ -117,11 +131,11 @@ export function applyRotation(
   const transformed = corners.map(([x, y]) => {
     switch (rot) {
       case 90:
-        return [y, pageW - x] as [number, number];
+        return [pageW - y, x] as [number, number];
       case 180:
         return [pageW - x, pageH - y] as [number, number];
       case 270:
-        return [pageH - y, x] as [number, number];
+        return [y, pageH - x] as [number, number];
       default:
         return [x, y] as [number, number];
     }
@@ -469,16 +483,23 @@ export async function renderOverlayTranslated(
     const page = pages[i];
     // Read the page's /Rotate. Overlay drawing uses pdf-lib's RAW coordinate
     // space (MediaBox, pre-rotation), but OpenDataLoader reports bboxes in the
-    // DISPLAY space (post-rotation). For rotation≠0 these differ and a correct
+    // DISPLAY space (post-rotation), so every paragraph box goes through
+    // applyRotation below.
+    //
+    // This used to REFUSE rotated pages outright, on the grounds that "a correct
     // transform requires a real rotated-PDF fixture to verify — which we don't
-    // have. Rather than emit an UNVERIFIED transform that could place text
-    // off-page (the integration test proved the naive formula is wrong), we
-    // refuse rotated pages with a clear error so users aren't silently given a
-    // broken translation. Rotation 0 is the common case and works as-is.
+    // have". That fixture now exists (scripts/qa/fixtures/reading-brain-rot*.pdf,
+    // the same document saved with /Rotate 90/180/270), and measuring against it
+    // showed the transform's 90° and 270° cases were SWAPPED — the old 90° formula
+    // put a real paragraph at y = −177.6, off the page. So the refusal was
+    // guarding against a real bug, and the fix is to correct the transform rather
+    // than keep refusing. See applyRotation for the derivation and
+    // tests/node/rotation-transform.spec.ts for the measured numbers.
+    //
+    // Text orientation needs no special handling: text drawn horizontally in raw
+    // space is rotated by the viewer along with everything else, so the
+    // translation appears at the same angle as the original it covers.
     const rotation = page.getRotation().angle;
-    if (rotation !== 0) {
-      throw new Error(getString("render-error-rotated-page", { angle: rotation }));
-    }
     const pageW = page.getWidth();
     const pageH = page.getHeight();
 

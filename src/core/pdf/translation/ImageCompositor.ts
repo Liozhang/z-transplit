@@ -94,6 +94,12 @@ export async function compositeFormulas(
  * Rotate a `PlacedImage`-style bbox from ODL display space into raw page space.
  * Same transform as `applyRotation` but for the simpler `{x,y,width,height}`
  * shape (no baseline fields). rotation=0 is a no-op.
+ *
+ * The two implementations must stay identical — they feed the same page and a
+ * mismatch puts formula screenshots somewhere other than the text they belong
+ * to. Both are verified against real rotated PDFs; see `applyRotation` for the
+ * derivation and tests/node/rotation-transform.spec.ts for the measured numbers.
+ * The 90°/270° cases were swapped in BOTH files until 2026-11-22 (batch 8).
  */
 export function rotateBBox(
   b: { x: number; y: number; width: number; height: number },
@@ -112,11 +118,11 @@ export function rotateBBox(
   const transformed = corners.map(([x, y]) => {
     switch (rot) {
       case 90:
-        return [y, pageW - x] as [number, number];
+        return [pageW - y, x] as [number, number];
       case 180:
         return [pageW - x, pageH - y] as [number, number];
       case 270:
-        return [pageH - y, x] as [number, number];
+        return [y, pageH - x] as [number, number];
       default:
         return [x, y] as [number, number];
     }
