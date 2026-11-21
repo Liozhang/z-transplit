@@ -1162,6 +1162,75 @@ Control / Choral reading / 10 / Yes / Yes …`），而表格既不译、也不�
 什么都没量。现在一篇都没跑成时直接判失败并列出每篇的错误；部分失败则照常比，但把缺的
 几篇点出来。
 
+### 第四批测试补齐
+
+前八批修的都是缺陷，这一批补的是覆盖。做法是先把缺口摸出来：`src/` 下 118 个
+`.ts` 文件，90 个被测试直接引用，28 个零引用。按"值得补的程度"排下来，动手的
+是前几名。
+
+补完之后 vitest 从 1505 条增至 1632 条（新增 5 个文件 127 条），
+`tests/node` 从 24 个文件 289 条增至 29 个 416 条。缺口仍在的主要是 host 耦合的
+编排层（`opendataloaderSplitAdapter` 1186 行只被 `vi.mock` 碰到、
+`splitViewFactory.openSplitView` 名字在测试里零出现），那需要 fake 一整套引擎回调
+与 pdf-lib，是另一件事。
+
+#### 补测的五个文件
+
+**`tests/node/font-style-parser.spec.ts`（17 条）** —— 全仓最大的"纯函数却零测试"
+模块，286 行，文件头自己写着 "safe to unit-test in Node without Zotero/PDF deps"。
+它在产品里决定渲染端选哪个字体变体、用什么填充色。三处实现细节被单独钉住：不加
+`/i` 的原因（`/i` 会让字符类也大小写不敏感，边界判定整体失效）、短后缀 token 要
+左边界而长后缀不要、颜色三种量纲混用（判据是"大于 1 就除以 255"）。
+
+**`tests/node/table-and-merge.spec.ts`（15 条）** —— 表格转 Markdown、SHA-256、
+逐页 PDF 合并。`tableToMarkdown` 此前只有一条注释提到它；`sha256Hex` 是 JRE 与 jar
+两个校验方共用的唯一实现；`mergePageBytes` 是白底模式产出整篇译文的那一步。
+
+**`tests/node/utils-bundle.spec.ts`（24 条）** —— `Semaphore`、`isIMEComposing`、
+`abort` 的三级回退、`dom` 的 XHTML 助手、`ZTransplitCancelledError`。挑它们的理由
+不是"没测"而是"在最不经意的处被依赖"：信号量放太宽会把机器压垮；IME 谓词决定合成期
+按 Enter 是确认候选还是提交；取消错误的识别契约是按 `name` 而不是按消息文本。
+
+**`tests/node/probes-and-clamps.spec.ts`（25 条）** —— 能力探测、路径拼接、视觉
+可用性、坐标夹取，外加批 8 新加的 `collectPageRotations`。
+
+**`tests/node/split-sync-predicates.spec.ts`（16 条）** —— `splitViewSync.ts` 有
+410 行 13 个导出，`fractionMoved` 与 `hFractionMoved` 这两个名字在整个 tests/ 里
+一次都没出现过。它们决定"这一次滚动算不算用户操作"，判轻了会把缩放重排的瞬时跳动
+当成用户滚动形成乒乓，判重了分屏粘手。
+
+#### 补测抓出来的三个真问题
+
+**一、`pdfMerge` 的注释说了句假话。** 原话是 "Empty input → an empty (zero-page)
+PDF, so callers don't need a special case"。实测两半都不成立：
+
+```
+PDFDocument.create()            报 0 页
+create() → save() → load()      变成 1 页
+```
+
+是 pdf-lib 的往返行为。所以"空进空出"是个假承诺，而调用方
+（`opendataloaderSplitAdapter`）其实**有**一道 `pageBytes.length === 0` 的显式
+特判。注释已改成真实行为，并说明那道特判不能凭这句话删掉。
+
+**二、`joinWorkPath` 的 `??` 不捕获抛出的异常。** 实现是
+`PathUtils?.join?.(dir, name) ?? \`${dir}\\${name}\``。可选链加 `??` 覆盖的是
+"PathUtils 不存在"与"join 不是函数"两种情形，不覆盖 join 抛异常——`??` 只接
+`null`/`undefined`。测试原本断言的是"抛错时走反斜杠回退"，跑出来发现异常照旧传出。
+判断这是有意的：宿主把 join 实现了却让它抛错是宿主的 bug，安静退回反斜杠会把问题
+藏起来，产出一个混合分隔符的路径让 IOUtils 在后面拒收，报错点离病根隔了整层。
+测试改成钉住真实行为并写下这个理由。
+
+**三、阈值断言踩到浮点表示。** `fractionMoved` 的边界原本想用 `0.502 - 0.5` 当
+"恰好等于阈值"，实测差值是 `0.0020000000000000018`，比阈值大一点点，断言随平台漂。
+改成以 0 为基准的 `0.002`（减去 0 得到的还是同一个双精度数，与阈值严格相等），
+并把这一点写进注释。
+
+#### 副产物：一处文档与实现不符的更正
+
+`collectPageRotations` 对零页文档返回 `[0]` 而不是 `[]`——同一个 pdf-lib 往返怪状。
+与 `mergePageBytes` 那处相邻记录，下次升级 pdf-lib 时两处一起看见。
+
 #### 外部基准接入实测（pdf-parse-bench）
 
 自建基准量的是装配与渲染，解析器本身一直缺一把外部的尺子。`pdf-parse-bench`
