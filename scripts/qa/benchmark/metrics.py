@@ -676,6 +676,175 @@ def figure_detection(key: dict, odl: OdlDoc) -> dict:
     }
 
 
+# 图内文字判据：字号相对该页文字跨度字号中位数的比例上限。
+FIGURE_TEXT_SIZE_RATIO = 0.8
+# 矢量路径分簇的间隙阈值，按页高的比例取。
+FIGURE_CLUSTER_GAP_RATIO = 0.03
+
+
+def median_font_size(spans: list[tuple[float, Box]]) -> float | None:
+    """文字跨度字号的中位数。空表返回 None——不适用，不报 0。
+
+    为什么是中位数不是众数：横版幻灯片那一页的字号众数是 6.75，而那正是图内
+    文字的字号。按众数取阈值会得 5.40，一篇图内文字都检不出。中位数 10.24
+    正常。五篇夹具上逐一量过，中位数在两个方向上都稳。
+    """
+    sizes = sorted(size for size, _ in spans)
+    if not sizes:
+        return None
+    n = len(sizes)
+    mid = n // 2
+    return sizes[mid] if n % 2 else (sizes[mid - 1] + sizes[mid]) / 2
+
+
+def vector_clusters(rects: list[Box], gap: float) -> list[Box]:
+    """把矢量路径的包围盒按间隙贪心合并成簇。
+
+    为什么要分簇而不能用全局并集：通栏元素与页面装饰会把并集拉到接近整页，
+    全局并集内的文字从表格正文到标题全都有（attention-reading 页 1 实测并集
+    内有 77 个跨度，字号从 6.0 到 10.99）。分簇之后每个簇才对应一块真实的
+    图形区域。
+
+    间隙阈值故意取粗（页高的 3%）：三栏那篇的装饰栏线与图只隔 6.8 磅，任何
+    精细阈值都会把它们并成一簇。并成一簇不可怕——簇内正文靠字号条件挡掉，
+    见 figure_text 的判据。真正要防的是把两个相隔很远的图形合成一簇。
+    """
+    ordered = sorted(rects, key=lambda r: (r.x0, r.y0))
+    clusters: list[Box] = []
+    for rect in ordered:
+        for index, cluster in enumerate(clusters):
+            if (
+                rect.x0 <= cluster.x1 + gap
+                and cluster.x0 <= rect.x1 + gap
+                and rect.y0 <= cluster.y1 + gap
+                and cluster.y0 <= rect.y1 + gap
+            ):
+                # union_with 返回新 Box 而不原地改，所以要把返回值放回列表。
+                clusters[index] = cluster.union_with(rect)
+                break
+        else:
+            clusters.append(Box(rect.x0, rect.y0, rect.x1, rect.y1))
+    return clusters
+
+
+def figure_text_span_boxes(
+    spans: list[tuple[float, Box]],
+    clusters: list[Box],
+    median: float | None,
+) -> list[Box]:
+    """按判据挑出图内文字的跨度框。
+
+    两个条件同时满足：字号小于中位数的 0.8 倍，且跨度中心落在某个矢量簇内。
+
+    字号条件是主力：五篇上图内文字字号 6.00 与 6.75，正文 8.50 起，比值
+    0.61 到 0.71，都在阈值内。簇条件是护栏，挡掉"正文里恰好有小字号"的情形
+    ——脚注、上标、参考文献小字通常不在图形区域里。
+
+    表格文字因此不误伤：attention-reading 页 1 的表格文字字号 8.20，与中位数
+    8.80 的比值 0.93，过不了字号这一关。
+    """
+    if median is None or median <= 0:
+        return []
+    limit = median * FIGURE_TEXT_SIZE_RATIO
+    hits: list[Box] = []
+    for size, box in spans:
+        if size >= limit:
+            continue
+        cx = (box.x0 + box.x1) / 2
+        cy = (box.y0 + box.y1) / 2
+        if any(c.x0 <= cx <= c.x1 and c.y0 <= cy <= c.y1 for c in clusters):
+            hits.append(box)
+    return hits
+
+
+def figure_text(key: dict, assembly: dict, source_pdf: str) -> dict:
+    """图内文字被当成正文处理的程度。
+
+    量三件事，层层递进：
+      truth      答案键的图内文字跨度真值，来自夹具 HTML 的 SVG <text> 节点
+                 （ FixtureHtmlParser 数出来的，与解析器无关）
+      detected   判据从源 PDF 检出的跨度数——用来验证判据本身准不准
+      paragraphs 装配段落里落在检出并集内的数量——产品实际把多少图内文字
+                 当正文翻译、画遮罩、删原文、叠译文
+
+    为什么读源 PDF 不读译文 PDF：译文里原文可能已被删除器删掉，从译文数不出
+    来。源 PDF 的文本层与矢量路径都是完整的。
+
+    为什么这一项进门禁而 figure_detection 不进：figure_detection 量的是解析器
+    必然检不出的东西；这一项量的是产品行为，基线记下当前值，产品侧改了降下来
+    是改善，不改则一直绿，不会假红。
+    """
+    fitz = _fitz()
+    truth = sum(f.get("textSpans", 0) or 0 for f in key.get("figures", []))
+
+    pages = {p.get("pageNumber"): p for p in assembly.get("pages", [])}
+    detected = 0
+    as_body = 0
+    by_page: dict[str, int] = {}
+    usable = False
+
+    doc = fitz.open(source_pdf)
+    try:
+        for page in doc:
+            height = page.rect.height
+            spans: list[tuple[float, Box]] = []
+            for block in page.get_text("dict").get("blocks", []):
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "")
+                        if not text.strip():
+                            continue
+                        spans.append(
+                            (float(span.get("size", 0.0)), flip_y(span["bbox"], height))
+                        )
+            if not spans:
+                continue
+            usable = True
+            median = median_font_size(spans)
+            rects = [flip_y(list(d["rect"]), height) for d in page.get_drawings()]
+            clusters = vector_clusters(rects, height * FIGURE_CLUSTER_GAP_RATIO)
+            hits = figure_text_span_boxes(spans, clusters, median)
+            detected += len(hits)
+
+            # 与装配段落配对：段落框与任一检出跨度框有交集即算被当正文处理。
+            #
+            # 不能用"段落中心落在跨度内"：一个段落常含多个图内跨度，三栏的
+            # `Wk 1 Wk 3 Wk 5 Wk 6` 是 4 个跨度并成一段，段落中心落在 Wk 3 与
+            # Wk 5 之间的空档里，按中心判会把这段整个漏掉——而它恰恰是最显眼
+            # 的一处图内文字。
+            paragraph = pages.get(page.number + 1)
+            if not paragraph or not hits:
+                continue
+            count = 0
+            for para in paragraph.get("paragraphs", []):
+                box = Box(para.get("x0", 0), para.get("y0", 0), para.get("x1", 0), para.get("y1", 0))
+                overlaps = any(box.intersect(h) > 0 for h in hits)
+                if overlaps:
+                    count += 1
+            as_body += count
+            by_page[str(page.number + 1)] = count
+    finally:
+        doc.close()
+
+    if not usable:
+        return {
+            "truth": truth,
+            "detected": None,
+            "paragraphs": None,
+            "note": "源 PDF 无文字跨度，判据不适用",
+        }
+    return {
+        "truth": truth,
+        "detected": detected,
+        "paragraphs": as_body,
+        "byPage": by_page,
+        "note": (
+            "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；"
+            "figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # B 组：端到端版面
 # ---------------------------------------------------------------------------
@@ -1436,6 +1605,77 @@ def selftest() -> int:
         "建立不了主流栏宽时不判串位",
         bleed_few["crossColumnRatio"] == 0.0,
         f"got {bleed_few}",
+    )
+
+    # ── 图内文字判据 ──
+    # 这三个纯函数是批 3 新度量 figure_text 的核心。合成数据逐个钉住判据的边界：
+    # 一条写反就整篇检不出或整页误伤，而两者在报告上都看不出异常——前者恒为 0
+    # 像"没有图内文字"，后者把正文算进去像"图很多"。
+    failures += not _check(
+        "字号中位数取中间值，不用众数",
+        abs(median_font_size([(10.0, a), (10.0, a), (6.0, a)]) - 10.0) < 1e-9,
+    )
+    failures += not _check(
+        "偶数个跨度取中间两个的均值",
+        abs(median_font_size([(8.0, a), (10.0, a), (12.0, a), (14.0, a)]) - 11.0) < 1e-9,
+    )
+    failures += not _check(
+        "空表返回 None 而不是 0", median_font_size([]) is None
+    )
+    # 横版幻灯片那一页的字号众数正是图内文字的 6.75（12 个，比正文任一档都多）。
+    # 这条断言钉住那个真实反例：换成众数判据，阈值会掉到 5.40，一篇图内文字都
+    # 检不出。合成数据照那页的真实分布取：6.75×12、9.49×2、10.99×11、15.0×3。
+    landscape_sizes = (
+        [(6.75, a)] * 12 + [(9.49, a)] * 2 + [(10.99, a)] * 11 + [(15.0, a)] * 3
+    )
+    failures += not _check(
+        "众数落在图内文字上时中位数仍取正文",
+        abs(median_font_size(landscape_sizes) - 10.24) < 1e-9,
+        f"got {median_font_size(landscape_sizes)}",
+    )
+
+    # 图内小字号命中；同页的正文（字号 10，是中位数的 1.0 倍）不命中。
+    fig_spans = [
+        (10.0, Box(0, 0, 100, 10)),    # 正文
+        (10.0, Box(0, 20, 100, 30)),   # 正文
+        (10.0, Box(0, 40, 100, 50)),   # 正文
+        (6.0, Box(20, 60, 40, 70)),    # 图内刻度，落在簇内
+        (6.0, Box(50, 60, 80, 70)),    # 图内图例，落在簇内
+    ]
+    fig_clusters = [Box(10, 55, 90, 75)]
+    fig_hits = figure_text_span_boxes(fig_spans, fig_clusters, 10.0)
+    failures += not _check(
+        "图内小字号命中、正文不命中",
+        len(fig_hits) == 2,
+        f"got {len(fig_hits)}",
+    )
+
+    # 表格文字：字号只比正文小一截，过不了字号这一关。这是簇条件之外的第二道
+    # 护栏——attention-reading 页 1 的表格文字字号 8.20、中位数 8.80，比值 0.93。
+    table_spans = [
+        (10.0, Box(0, 0, 100, 10)),
+        (10.0, Box(0, 20, 100, 30)),
+        (8.2, Box(20, 40, 60, 50)),   # 表格单元格，落在簇内
+    ]
+    failures += not _check(
+        "表格同号文字不误伤",
+        figure_text_span_boxes(table_spans, fig_clusters, 10.0) == [],
+    )
+
+    # 没有矢量路径就没有簇，字号再小也不判——脚注与参考文献小字靠这一条挡住。
+    failures += not _check(
+        "没有矢量簇时一篇都不判",
+        figure_text_span_boxes(fig_spans, [], 10.0) == [],
+    )
+
+    # 相距很远的两个图形必须是两簇，不能因为间隙阈值粗就并成一簇。
+    far = vector_clusters([Box(0, 0, 10, 10), Box(500, 500, 510, 510)], 20)
+    failures += not _check(
+        "相距远的矢量路径分成两簇", len(far) == 2, f"got {len(far)}"
+    )
+    near = vector_clusters([Box(0, 0, 10, 10), Box(12, 0, 22, 10)], 20)
+    failures += not _check(
+        "间隙小于阈值的矢量路径并成一簇", len(near) == 1, f"got {len(near)}"
     )
 
     # 合并块：bbox 完整包住四个同页其它块。宽度判据分不清"合法通栏元素"与

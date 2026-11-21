@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-21 00:55:03",
+ "generatedAt": "2026-11-21 13:52:43",
  "results": [
   {
    "fixture": "reading-brain",
@@ -53,7 +53,7 @@
      }
     ]
    },
-   "elapsedMs": 3627,
+   "elapsedMs": 5113,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -253,6 +253,13 @@
      "truth": 0,
      "predicted": 0,
      "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    },
+    "figureText": {
+     "truth": 0,
+     "detected": 0,
+     "paragraphs": 0,
+     "byPage": {},
+     "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     }
    },
    "pixel": {
@@ -276,8 +283,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mxqbwfml\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mxqbwfml\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-nezw4fbx\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-nezw4fbx\\assembly.json"
    }
   },
   {
@@ -332,7 +339,7 @@
      }
     ]
    },
-   "elapsedMs": 4805,
+   "elapsedMs": 7146,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -645,6 +652,16 @@
      "truth": 2,
      "predicted": 0,
      "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    },
+    "figureText": {
+     "truth": 15,
+     "detected": 15,
+     "paragraphs": 7,
+     "byPage": {
+      "1": 5,
+      "2": 2
+     },
+     "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     }
    },
    "pixel": {
@@ -668,8 +685,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mupkcl9a\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-mupkcl9a\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-za41e9p1\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-za41e9p1\\assembly.json"
    }
   },
   {
@@ -716,7 +733,7 @@
      }
     ]
    },
-   "elapsedMs": 4497,
+   "elapsedMs": 6346,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -988,6 +1005,13 @@
      "truth": 0,
      "predicted": 0,
      "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    },
+    "figureText": {
+     "truth": 0,
+     "detected": 0,
+     "paragraphs": 0,
+     "byPage": {},
+     "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     }
    },
    "pixel": {
@@ -1011,8 +1035,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-3atdn0fh\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-3atdn0fh\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a0au2kgc\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a0au2kgc\\assembly.json"
    }
   },
   {
@@ -1059,7 +1083,7 @@
      }
     ]
    },
-   "elapsedMs": 3695,
+   "elapsedMs": 5408,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1306,6 +1330,15 @@
      "truth": 1,
      "predicted": 0,
      "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    },
+    "figureText": {
+     "truth": 9,
+     "detected": 9,
+     "paragraphs": 5,
+     "byPage": {
+      "1": 5
+     },
+     "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     }
    },
    "pixel": {
@@ -1329,8 +1362,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-42okh4gj\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-42okh4gj\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a5fm2s32\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a5fm2s32\\assembly.json"
    }
   },
   {
@@ -1385,7 +1418,7 @@
      }
     ]
    },
-   "elapsedMs": 3455,
+   "elapsedMs": 4615,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1560,6 +1593,15 @@
      "truth": 1,
      "predicted": 0,
      "note": "SVG 矢量图不进解析器的图元素，检出数天然低于真值"
+    },
+    "figureText": {
+     "truth": 12,
+     "detected": 12,
+     "paragraphs": 6,
+     "byPage": {
+      "1": 6
+     },
+     "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     }
    },
    "pixel": {
@@ -1583,8 +1625,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-of68i7oe\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-of68i7oe\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-q3qcv_f6\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-q3qcv_f6\\assembly.json"
    }
   }
  ]
