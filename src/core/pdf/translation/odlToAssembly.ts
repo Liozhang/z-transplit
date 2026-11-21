@@ -42,6 +42,7 @@ import type {
   PlacedImage,
 } from "./translationIR";
 import { parseFontStyle, parseTextColor } from "./fontStyleParser";
+import { pickBackgroundColor, type FillRect } from "./backgroundFill";
 import {
   allocateText,
   detectColumnEdges,
@@ -103,15 +104,34 @@ export interface OdlAssemblyOutput {
  *
  * Pure function — safe to unit-test in Node without JVM/Zotero.
  */
+/**
+ * 装配的可选增强输入。
+ *
+ * 全部可选，缺省时装配行为与加上这些字段之前完全一致——这样既有的二十多处
+ * 调用点一个都不用改。
+ */
+export interface AssemblyOptions {
+  /**
+   * 每页的矩形背景填充，来自 backgroundFill.collectFillRects。给了它，段落
+   * 就带上 `backgroundColor`，渲染端的遮罩不再一律涂白，而是用段落所在区域
+   * 的真实背景色——否则彩色标注框、表格斑马纹会被打穿。
+   *
+   * 传空数组或不传都等于"没有背景信息"，遮罩退回白色，即加上该字段之前的
+   * 行为。数组长度与页数不一致时按页号取，取不到就当没有。
+   */
+  backgroundFills?: FillRect[][];
+}
+
 export function odlAnalysisToAssembly(
   analysis: PdfDocumentAnalysis,
+  options: AssemblyOptions = {},
 ): OdlAssemblyOutput {
   const assemblies: AssemblyResult[] = [];
   const pageSizes: PageSize[] = [];
   const formulaBlocks: FormulaBlock[] = [];
 
   analysis.pages.forEach((page, idx) => {
-    const built = pageAnalysisToAssembly(page, idx + 1);
+    const built = pageAnalysisToAssembly(page, idx + 1, options.backgroundFills?.[idx]);
     assemblies.push(built.assembly);
     pageSizes.push(built.pageSize);
     formulaBlocks.push(...built.formulaBlocks);
@@ -127,6 +147,7 @@ export function odlAnalysisToAssembly(
 export function pageAnalysisToAssembly(
   page: PdfPageAnalysis,
   pageNumber: number,
+  backgroundFills?: FillRect[],
 ): {
   assembly: AssemblyResult;
   pageSize: PageSize;
@@ -261,6 +282,11 @@ export function pageAnalysisToAssembly(
   for (const entry of entries) {
     if (!entry.text) continue;
     const { x, y, width: w, height } = entry.box;
+    // 遮罩画的是段落框外扩 1 磅，所以用同一个外扩框去取背景色——颜色才与
+    // 实际被涂掉的那块区域一致。
+    const background = backgroundFills?.length
+      ? pickBackgroundColor(backgroundFills, { x0: x - 1, y0: y - 1, x1: x + w + 1, y1: y + height + 1 })
+      : null;
 
     // Formula detection. Two sources, priority order:
     //   1. 原生公式区域（OCR 侧车的 isFormula 块，文本即 LaTeX）：直接带出，
@@ -300,6 +326,11 @@ export function pageAnalysisToAssembly(
       ...(entry.bold ? { bold: true } : {}),
       ...(entry.italic ? { italic: true } : {}),
       ...(entry.color ? { color: entry.color } : {}),
+      // 背景色：段落框内面积最大的那个矩形填充。采样在装配外做（要读源 PDF
+      // 的内容流），这里只做选取。取不到就不带这个字段，渲染端照旧涂白。
+      ...(background
+        ? { backgroundColor: background }
+        : {}),
     });
     texts.push(entry.marked);
     paragraphIndex++;

@@ -27,6 +27,7 @@ import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import { adaptOpenDataLoaderJson } from "../../../src/core/pdf/OpenDataLoaderJsonAdapter";
 import { odlAnalysisToAssembly } from "../../../src/core/pdf/translation/odlToAssembly";
+import { collectFillRects } from "../../../src/core/pdf/translation/backgroundFill";
 import {
   renderOverlayTranslated,
 } from "../../../src/core/pdf/translation/LayoutPreservingRenderer";
@@ -180,7 +181,15 @@ async function assemble(config: RenderConfig): Promise<void> {
   if (!sourcePath) fail("assemble 模式需要 source（原文 PDF）——页面尺寸从它取");
   const root = readJson(odlPath);
   const analysis: PdfDocumentAnalysis = adaptOpenDataLoaderJson(root);
-  const built = odlAnalysisToAssembly(analysis);
+  // 遮罩配色：从原文 PDF 的内容流取矩形填充，段落带上 background color 之后
+  // 遮罩不再一律涂白。采样失败只当没有背景信息，不影响其余装配。
+  let backgroundFills: Awaited<ReturnType<typeof collectFillRects>> = [];
+  try {
+    backgroundFills = await collectFillRects(new Uint8Array(fs.readFileSync(sourcePath)));
+  } catch (e) {
+    process.stderr.write(`background-fill sampling skipped: ${e}\n`);
+  }
+  const built = odlAnalysisToAssembly(analysis, { backgroundFills });
 
   // 页面尺寸一律读原文 PDF。解析器的 JSON 不带 MediaBox，适配器只能猜一个
   // 标准尺寸——猜的是 612×792（Letter），而 A4 夹具实际是 594.96×841.92。

@@ -59,6 +59,7 @@ import { parsePdfWithOpenDataLoader } from "../backendSelector";
 import { PdfParseError } from "../PdfParseError";
 import { ZTransplitCancelledError as TranslationCancelledError } from "../CancelledError";
 import { odlAnalysisToAssembly } from "./odlToAssembly";
+import { collectFillRects } from "./backgroundFill";
 import type { FormulaBlock } from "./odlToAssembly";
 import type { PdfDocumentAnalysis } from "../PdfIR";
 import { emptyAnalysisFromProbe, probePdfPages } from "../scan/pdfPageProbe";
@@ -426,7 +427,20 @@ export async function translateAndSplitWithOpenDataLoader(
         e,
     );
   }
-  const base = odlAnalysisToAssembly(analysis);
+  // 遮罩配色：从原文 PDF 的内容流取矩形填充，段落带上 backgroundColor 之后
+  // 遮罩不再一律涂白，彩色标注框与表格斑马纹不会被打穿。采样失败只当没有
+  // 背景信息（遮罩退回白色，即此前行为），不影响管线其余部分。
+  let backgroundFills: Awaited<ReturnType<typeof collectFillRects>> = [];
+  try {
+    const IOUtils = (globalThis as any).IOUtils;
+    if (IOUtils?.read) {
+      const sourceBytes = realmLocalCopy(await IOUtils.read(inputPath));
+      backgroundFills = await collectFillRects(sourceBytes);
+    }
+  } catch (e) {
+    safeDebug("[Z-Transplit] opendataloaderSplitAdapter: background-fill sampling skipped: " + e);
+  }
+  const base = odlAnalysisToAssembly(analysis, { backgroundFills });
   const baseAssemblies = base.assemblies;
   const basePageSizes = base.pageSizes;
   const baseFormulaBlocks = base.formulaBlocks;
