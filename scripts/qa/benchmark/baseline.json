@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-22 02:04:19",
+ "generatedAt": "2026-11-22 02:32:03",
  "results": [
   {
    "fixture": "reading-brain",
@@ -60,7 +60,7 @@
      }
     ]
    },
-   "elapsedMs": 6122,
+   "elapsedMs": 4629,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -308,6 +308,8 @@
    "removal": {
     "requested": 18,
     "residueRatio": 0.0,
+    "tableRatio": 0.0,
+    "nonTableRatio": 0.0,
     "sourceLetters": 1716,
     "residualLetters": 0,
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
@@ -321,8 +323,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-hvspp3r0\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-hvspp3r0\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-lydk26kq\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-lydk26kq\\assembly.json"
    }
   },
   {
@@ -384,7 +386,7 @@
      }
     ]
    },
-   "elapsedMs": 7483,
+   "elapsedMs": 6060,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -748,6 +750,8 @@
    "removal": {
     "requested": 38,
     "residueRatio": 0.03076923076923077,
+    "tableRatio": 0.03076923076923077,
+    "nonTableRatio": 0.0,
     "sourceLetters": 3900,
     "residualLetters": 120,
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
@@ -761,8 +765,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-dg279umk\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-dg279umk\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-dx2nx0hc\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-dx2nx0hc\\assembly.json"
    }
   },
   {
@@ -816,7 +820,7 @@
      }
     ]
    },
-   "elapsedMs": 7032,
+   "elapsedMs": 5587,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -1129,6 +1133,8 @@
    "removal": {
     "requested": 26,
     "residueRatio": 0.0,
+    "tableRatio": 0.0,
+    "nonTableRatio": 0.0,
     "sourceLetters": 3164,
     "residualLetters": 0,
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
@@ -1142,8 +1148,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-z07itfk9\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-z07itfk9\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-y30_ds5l\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-y30_ds5l\\assembly.json"
    }
   },
   {
@@ -1197,7 +1203,7 @@
      }
     ]
    },
-   "elapsedMs": 13525,
+   "elapsedMs": 4623,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1487,6 +1493,8 @@
    "removal": {
     "requested": 27,
     "residueRatio": 0.0,
+    "tableRatio": 0.0,
+    "nonTableRatio": 0.0,
     "sourceLetters": 2329,
     "residualLetters": 0,
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
@@ -1500,8 +1508,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-sf_rrbd4\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-sf_rrbd4\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-f0vjbfdj\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-f0vjbfdj\\assembly.json"
    }
   },
   {
@@ -1563,7 +1571,7 @@
      }
     ]
    },
-   "elapsedMs": 10391,
+   "elapsedMs": 4368,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1788,6 +1796,8 @@
    "removal": {
     "requested": 19,
     "residueRatio": 0.0,
+    "tableRatio": 0.0,
+    "nonTableRatio": 0.0,
     "sourceLetters": 1061,
     "residualLetters": 0,
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
@@ -1801,8 +1811,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-wbtx7dh0\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-wbtx7dh0\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-n2oozs19\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-n2oozs19\\assembly.json"
    }
   }
  ]
