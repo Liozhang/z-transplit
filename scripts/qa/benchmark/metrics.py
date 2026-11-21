@@ -1195,6 +1195,100 @@ def layout_metrics(source_pdf: str, translated_pdf: str, assembly: dict) -> dict
     return result
 
 
+def _fill_rects_with_color(page) -> list[tuple[Box, tuple[float, float, float]]]:
+    """一页里所有填充矩形，连同填充色。坐标翻成 PDF 用户空间。"""
+    height = page.rect.height
+    out: list[tuple[Box, tuple[float, float, float]]] = []
+    for drawing in page.get_drawings():
+        fill = drawing.get("fill")
+        if fill is None:
+            continue
+        if not all(isinstance(c, (int, float)) for c in fill[:3]):
+            continue
+        out.append((flip_y(list(drawing["rect"]), height), tuple(fill[:3])))
+    return out
+
+
+def mask_punch(source_pdf: str, translated_pdf: str, assembly: dict) -> dict:
+    """遮罩打穿非白背景的程度。
+
+    `Paragraph.backgroundColor` 从加进来那天起就没有生产方，遮罩一律涂白。后果
+    已量出：横版幻灯片 5 个遮罩打穿一块 12030 平方磅的浅蓝横幅，attention-reading
+    17 个遮罩打穿 6952 平方磅的表格表头斑马纹。产品侧补上生产方（backgroundFill
+    从内容流取矩形填充）之后，遮罩改用段落所在区域的真实背景色，这一项该归零。
+
+    判据是「遮罩压在某个非白填充区域上，且两者颜色不同」。遮罩用了正确的背景色
+    时颜色一致，不算打穿；遮罩仍是白色而区域有色才算。
+
+    认遮罩的判据照抄 _mask_ownership：矩形有三成以上面积压在某个段落框上。原文
+    自带的白色填充（图框底色、表头底色）压不到段落框上，不会混进来。区别只在这
+    里要连颜色一起记——所以自己提一遍，不复用 extract_translated_spans。
+    """
+    fitz = _fitz()
+
+    # 源 PDF 的非白填充。三分量都大于 0.98 算白，跳过。
+    source_fills: dict[int, list[tuple[Box, tuple[float, float, float]]]] = {}
+    src = fitz.open(source_pdf)
+    try:
+        for page in src:
+            fills = [
+                (box, color)
+                for box, color in _fill_rects_with_color(page)
+                if not all(c > 0.98 for c in color)
+            ]
+            source_fills[page.number + 1] = fills
+    finally:
+        src.close()
+
+    pages = {p.get("pageNumber"): p for p in assembly.get("pages", [])}
+    doc = fitz.open(translated_pdf)
+    punched_masks = 0
+    punched_area = 0.0
+    colors: set[str] = set()
+    try:
+        for page in doc:
+            number = page.number + 1
+            fills = source_fills.get(number) or []
+            paragraph = pages.get(number)
+            if not fills or not paragraph:
+                continue
+            boxes = [
+                Box(p.get("x0", 0), p.get("y0", 0), p.get("x1", 0), p.get("y1", 0))
+                for p in paragraph.get("paragraphs", [])
+            ]
+            for mask_box, mask_color in _fill_rects_with_color(page):
+                area = mask_box.area()
+                if area <= 0:
+                    continue
+                best = max((mask_box.intersect(b) for b in boxes), default=0.0)
+                if best / area < 0.3:
+                    continue  # 不是遮罩，是原文自带的填充
+                for fill_box, fill_color in fills:
+                    overlap = mask_box.intersect(fill_box)
+                    if overlap <= 0.01:
+                        continue
+                    # 颜色相同就不算打穿：遮罩用的正是这块区域的背景色。容差
+                    # 取 0.02，容纳 PDF 里 0.933 与 0.9333 这类表示差。
+                    if all(abs(a - b) <= 0.02 for a, b in zip(mask_color, fill_color)):
+                        continue
+                    punched_masks += 1
+                    punched_area += overlap
+                    colors.add(
+                        f"遮罩({mask_color[0]:.2f},{mask_color[1]:.2f},{mask_color[2]:.2f})"
+                        f"压背景({fill_color[0]:.2f},{fill_color[1]:.2f},{fill_color[2]:.2f})"
+                    )
+                    break
+    finally:
+        doc.close()
+
+    return {
+        "fills": sum(len(v) for v in source_fills.values()),
+        "punchedMasks": punched_masks,
+        "punchedArea": round(punched_area, 1),
+        "colors": sorted(colors),
+    }
+
+
 def outside_pixel_diff(
     source_pdf: str,
     translated_pdf: str,
@@ -2008,6 +2102,86 @@ def selftest() -> int:
             "不盖遮罩时原文残留接近 1",
             residue["residueRatio"] > 0.95,
             f"got {residue}",
+        )
+
+        # ── 遮罩打穿（mask_punch）──
+        # 合成一对 PDF：原文一块浅蓝背景，译文一个遮罩压在段落框上。三个变体分别
+        # 对应"白色遮罩打穿彩色背景"、"遮罩用了背景色所以不打穿"、"没有彩色背景"。
+        punch_assembly = {
+            "pages": [
+                {
+                    "pageNumber": 1,
+                    "width": 600,
+                    "height": 800,
+                    "paragraphs": [
+                        {"text": "p", "x0": 50, "y0": 300, "x1": 280, "y1": 400, "size": 10}
+                    ],
+                    "images": [],
+                    "tables": [],
+                }
+            ]
+        }
+        # pymupdf 左上原点：用户空间 y 300–400 是 pymupdf y 400–500。浅蓝背景取
+        # 用户空间 y 290–410，比段落框大一圈，遮罩外扩 1 磅也还在里面。
+        pale_blue = (0.933, 0.949, 0.973)
+
+        def punch_pair(mask_color):
+            """造一对原文/译文 PDF，返回译文路径。"""
+            src = os.path.join(tmp, f"punch-src-{mask_color and 'a' or 'b'}.pdf")
+            dst = os.path.join(tmp, f"punch-out-{mask_color and 'a' or 'b'}.pdf")
+            doc = fitz.open()
+            page = doc.new_page(width=600, height=800)
+            page.draw_rect(fitz.Rect(40, 390, 290, 510), color=None, fill=pale_blue)
+            page.insert_text((50, 410), "source line", fontsize=10)
+            doc.save(src)
+            doc.close()
+            doc = fitz.open(src)
+            page = doc[0]
+            page.draw_rect(
+                fitz.Rect(49, 399, 281, 501),
+                color=None,
+                fill=mask_color if mask_color else (1, 1, 1),
+            )
+            page.insert_text((50, 410), "合成译文内容", fontsize=10, fontname="china-s")
+            doc.save(dst)
+            doc.close()
+            return src, dst
+
+        src_a, dst_a = punch_pair(None)
+        punch_a = mask_punch(src_a, dst_a, punch_assembly)
+        failures += not _check(
+            "白色遮罩压彩色背景被抓到",
+            punch_a["punchedMasks"] == 1 and punch_a["punchedArea"] > 100,
+            f"got {punch_a}",
+        )
+
+        src_b, dst_b = punch_pair(pale_blue)
+        punch_b = mask_punch(src_b, dst_b, punch_assembly)
+        failures += not _check(
+            "遮罩用了背景色就不算打穿",
+            punch_b["punchedMasks"] == 0,
+            f"got {punch_b}",
+        )
+
+        # 没有彩色背景时一个都不报。
+        src_c = os.path.join(tmp, "punch-src-c.pdf")
+        dst_c = os.path.join(tmp, "punch-out-c.pdf")
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=800)
+        page.insert_text((50, 410), "source line", fontsize=10)
+        doc.save(src_c)
+        doc.close()
+        doc = fitz.open(src_c)
+        page = doc[0]
+        page.draw_rect(fitz.Rect(49, 399, 281, 501), color=None, fill=(1, 1, 1))
+        page.insert_text((50, 410), "合成译文内容", fontsize=10, fontname="china-s")
+        doc.save(dst_c)
+        doc.close()
+        punch_c = mask_punch(src_c, dst_c, punch_assembly)
+        failures += not _check(
+            "没有彩色背景时一个都不报",
+            punch_c["punchedMasks"] == 0 and punch_c["fills"] == 0,
+            f"got {punch_c}",
         )
 
     print(f"\n{'FAILED' if failures else 'OK'}  {failures} 项失败")

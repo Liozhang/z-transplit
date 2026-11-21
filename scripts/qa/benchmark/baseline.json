@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-21 13:52:43",
+ "generatedAt": "2026-11-21 19:09:20",
  "results": [
   {
    "fixture": "reading-brain",
@@ -31,7 +31,13 @@
     "mask": {
      "total": 18,
      "intrusionIntoParagraph": 0,
-     "intrusionIntoRegion": 0
+     "intrusionIntoRegion": 0,
+     "punch": {
+      "fills": 0,
+      "punchedMasks": 0,
+      "punchedArea": 0.0,
+      "colors": []
+     }
     },
     "unassignedSpans": 0,
     "perPage": [
@@ -53,7 +59,7 @@
      }
     ]
    },
-   "elapsedMs": 5113,
+   "elapsedMs": 4371,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -283,8 +289,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-nezw4fbx\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-nezw4fbx\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b6bcp0c2\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-b6bcp0c2\\assembly.json"
    }
   },
   {
@@ -317,7 +323,13 @@
     "mask": {
      "total": 41,
      "intrusionIntoParagraph": 0,
-     "intrusionIntoRegion": 0
+     "intrusionIntoRegion": 0,
+     "punch": {
+      "fills": 80,
+      "punchedMasks": 0,
+      "punchedArea": 0.0,
+      "colors": []
+     }
     },
     "unassignedSpans": 0,
     "perPage": [
@@ -339,7 +351,7 @@
      }
     ]
    },
-   "elapsedMs": 7146,
+   "elapsedMs": 5710,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -685,8 +697,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-za41e9p1\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-za41e9p1\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-if5qe89o\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-if5qe89o\\assembly.json"
    }
   },
   {
@@ -719,7 +731,13 @@
     "mask": {
      "total": 30,
      "intrusionIntoParagraph": 0,
-     "intrusionIntoRegion": 0
+     "intrusionIntoRegion": 0,
+     "punch": {
+      "fills": 1,
+      "punchedMasks": 0,
+      "punchedArea": 0.0,
+      "colors": []
+     }
     },
     "unassignedSpans": 0,
     "perPage": [
@@ -733,7 +751,7 @@
      }
     ]
    },
-   "elapsedMs": 6346,
+   "elapsedMs": 5228,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -1035,8 +1053,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a0au2kgc\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a0au2kgc\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-4pvzlz6v\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-4pvzlz6v\\assembly.json"
    }
   },
   {
@@ -1069,7 +1087,13 @@
     "mask": {
      "total": 28,
      "intrusionIntoParagraph": 0,
-     "intrusionIntoRegion": 0
+     "intrusionIntoRegion": 0,
+     "punch": {
+      "fills": 6,
+      "punchedMasks": 0,
+      "punchedArea": 0.0,
+      "colors": []
+     }
     },
     "unassignedSpans": 0,
     "perPage": [
@@ -1083,7 +1107,7 @@
      }
     ]
    },
-   "elapsedMs": 5408,
+   "elapsedMs": 4153,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1362,8 +1386,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a5fm2s32\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-a5fm2s32\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2rh44o5q\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-2rh44o5q\\assembly.json"
    }
   },
   {
@@ -1394,9 +1418,15 @@
      "below06Ratio": 0.0
     },
     "mask": {
-     "total": 20,
+     "total": 18,
      "intrusionIntoParagraph": 0,
-     "intrusionIntoRegion": 0
+     "intrusionIntoRegion": 0,
+     "punch": {
+      "fills": 12,
+      "punchedMasks": 0,
+      "punchedArea": 0.0,
+      "colors": []
+     }
     },
     "unassignedSpans": 0,
     "perPage": [
@@ -1406,7 +1436,7 @@
       "translated": 17,
       "untranslated": 0,
       "meanIou": 0.6897526247984131,
-      "masks": 18
+      "masks": 16
      },
      {
       "page": 2,
@@ -1418,7 +1448,7 @@
      }
     ]
    },
-   "elapsedMs": 4615,
+   "elapsedMs": 3916,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1608,7 +1638,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 2225809,
-    "insideChangedRatio": 0.43891035136794204,
+    "insideChangedRatio": 0.43873023808035994,
     "outsideSamples": []
    },
    "residue": {
@@ -1625,8 +1655,8 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-q3qcv_f6\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-q3qcv_f6\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-bcj3wvee\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-bcj3wvee\\assembly.json"
    }
   }
  ]

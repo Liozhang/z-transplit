@@ -653,6 +653,7 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
     }
 
     layout = metrics.layout_metrics(str(fixture_pdf), str(out_pdf), assembly)
+    layout["mask"]["punch"] = metrics.mask_punch(str(fixture_pdf), str(out_pdf), assembly)
     pixel = metrics.outside_pixel_diff(str(fixture_pdf), str(out_pdf), assembly)
     residue = metrics.source_residue(str(fixture_pdf), str(out_pdf), key.get("sourceScript", "latin"))
 
@@ -705,6 +706,8 @@ WATCHED: list[tuple[str, str, str]] = [
     ("layout.fontSize.p10", "ratio", "higher"),
     ("layout.mask.intrusionIntoParagraph", "count", "lower"),
     ("layout.mask.intrusionIntoRegion", "count", "lower"),
+    # 遮罩打穿非白背景的个数。产品侧补上背景色采样之后它该归零；不改则一直绿。
+    ("layout.mask.punch.punchedMasks", "count", "lower"),
     ("layout.unassignedSpans", "count", "lower"),
     ("pixel.outsideDiffRatio", "ratio", "lower"),
     ("residue.residueRatio", "ratio", "lower"),
@@ -829,6 +832,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "字号低于 0.6",
         "遮罩侵入段",
         "遮罩侵图区",
+        "遮罩打穿",
         "框外像素差异",
         "原文残留",
         "渲染溢出",
@@ -853,6 +857,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             fmt(layout.get("fontSize", {}).get("below06Ratio")),
             str(layout.get("mask", {}).get("intrusionIntoParagraph", "")),
             str(layout.get("mask", {}).get("intrusionIntoRegion", "")),
+            str(layout.get("mask", {}).get("punch", {}).get("punchedMasks", "")),
             fmt(pixel.get("outsideDiffRatio"), 5),
             fmt(result.get("residue", {}).get("residueRatio")),
             str(result.get("stats", {}).get("overflowed", "")),
