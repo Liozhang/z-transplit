@@ -110,6 +110,55 @@ def flip_y(raw: list[float], page_height: float) -> Box:
     return Box(min(x0, x1), page_height - max(y0, y1), max(x0, x1), page_height - min(y0, y1))
 
 
+def display_box(page, raw_bbox: list[float]) -> Box:
+    """把 pymupdf 从页面提出的框换算成**显示空间**（左下原点）。
+
+    为什么需要它：pymupdf 的 `get_text` 与 `get_drawings` 报的是**去旋转后**的
+    坐标——它们套用了 `page.derotation_matrix`，把 /Rotate 抹掉。所以拿到的框
+    落在 MediaBox 原始空间里，原点仍在上左。而装配层的段落框来自解析器，报的是
+    **显示空间**（已应用 /Rotate），原点左下。未旋转页上两个空间重合，旋转页上
+    差一个旋转变换——不调和的话，旋转页的每一个版面指标都会塌成 0，而且看不出
+    是为什么。
+
+    两步：先用**原始** MediaBox 高度做 y 翻转（得到原始空间、左下原点），再施加
+    旋转的逆变换（原始空间 → 显示空间）。
+
+    rot0 时两步合起来就是一次普通翻转，与原先的
+    `flip_y(bbox, page.rect.height)` 完全等价——所以未旋转页上的任何数字一个都
+    不会变，这一点由自检里一条专门的断言照住（拿真实旋转 PDF 量出的坐标）。
+
+    逆变换的推导见 src/core/pdf/translation/LayoutPreservingRenderer.ts 的
+    `applyRotation`（那是显示 → 原始的方向，这里是它的逆），以及
+    tests/node/rotation-transform.spec.ts 里用真实旋转 PDF 量出的数字。
+    """
+    raw_height = page.mediabox.height
+    raw_width = page.mediabox.width
+    box = flip_y(raw_bbox, raw_height)
+    rot = ((int(page.rotation or 0) % 360) + 360) % 360
+    if rot == 0:
+        return box
+    corners = [
+        (box.x0, box.y0),
+        (box.x1, box.y0),
+        (box.x0, box.y1),
+        (box.x1, box.y1),
+    ]
+    # 原始 → 显示，逐角变换后取 min/max（与 applyRotation 同构，方向相反）。
+    transformed = []
+    for x, y in corners:
+        if rot == 90:
+            transformed.append((y, raw_width - x))
+        elif rot == 180:
+            transformed.append((raw_width - x, raw_height - y))
+        elif rot == 270:
+            transformed.append((raw_height - y, x))
+        else:
+            transformed.append((x, y))
+    xs = [c[0] for c in transformed]
+    ys = [c[1] for c in transformed]
+    return Box(min(xs), min(ys), max(xs), max(ys))
+
+
 def odl_box(raw) -> Box | None:
     """OpenDataLoader 的 [左, 下, 右, 上] → Box。顺序颠倒的输入自动交换。"""
     if not isinstance(raw, (list, tuple)) or len(raw) < 4:
@@ -786,7 +835,6 @@ def figure_text(key: dict, assembly: dict, source_pdf: str) -> dict:
     doc = fitz.open(source_pdf)
     try:
         for page in doc:
-            height = page.rect.height
             spans: list[tuple[float, Box]] = []
             for block in page.get_text("dict").get("blocks", []):
                 for line in block.get("lines", []):
@@ -795,14 +843,14 @@ def figure_text(key: dict, assembly: dict, source_pdf: str) -> dict:
                         if not text.strip():
                             continue
                         spans.append(
-                            (float(span.get("size", 0.0)), flip_y(span["bbox"], height))
+                            (float(span.get("size", 0.0)), display_box(page, span["bbox"]))
                         )
             if not spans:
                 continue
             usable = True
             median = median_font_size(spans)
-            rects = [flip_y(list(d["rect"]), height) for d in page.get_drawings()]
-            clusters = vector_clusters(rects, height * FIGURE_CLUSTER_GAP_RATIO)
+            rects = [display_box(page, list(d["rect"])) for d in page.get_drawings()]
+            clusters = vector_clusters(rects, page.mediabox.height * FIGURE_CLUSTER_GAP_RATIO)
             hits = figure_text_span_boxes(spans, clusters, median)
             detected += len(hits)
 
@@ -975,8 +1023,15 @@ def extract_translated_spans(pdf_path: str) -> tuple[list[list[TranslatedSpan]],
     词跟着一起收——它们是同一次绘制出来的，位置属于同一个块。
 
     返回 (每页译文 span 列表, 每页白色矩形列表, 每页旋转角)。所有框都翻成
-    PDF 用户空间。旋转页直接报错：叠加渲染器对旋转页本就拒绝，安静地算出一
-    堆错数字比报错难查得多。
+    PDF 用户空间。
+
+    旋转角如实回报，不再拒绝。这道护栏存在的原因是叠加渲染器当年对旋转页整体
+    报错，一份带着 /Rotate 的译文 PDF 意味着有没预料到的东西混进来了。渲染端
+    现在支持旋转页（第三批批次 8），旋转夹具也进了基准，于是这里改为照常度量。
+
+    为什么旋转不影响度量：pymupdf 的 get_text 与 page.rect 报的都是**显示空间**
+    （已应用 /Rotate），而装配层的段落框来自解析器、同样是显示空间。两边同在
+    显示空间、同为左下原点，flip_y 用显示高度换算即可，无需感知旋转。
     """
     fitz = _fitz()
     doc = fitz.open(pdf_path)
@@ -987,13 +1042,6 @@ def extract_translated_spans(pdf_path: str) -> tuple[list[list[TranslatedSpan]],
         for page in doc:
             rotation = int(page.rotation or 0)
             rotations.append(rotation)
-            if rotation != 0:
-                raise RuntimeError(
-                    f"译文 PDF 第 {page.number + 1} 页旋转 {rotation} 度。度量假定"
-                    "未旋转页面；叠加渲染路径对旋转页本就拒绝，出现这个值说明"
-                    "有夹具带着 /Rotate 进来了，先补旋转页的处理再谈度量。"
-                )
-            height = page.rect.height
             spans: list[TranslatedSpan] = []
             data = page.get_text("dict")
             for block in data.get("blocks", []):
@@ -1007,7 +1055,7 @@ def extract_translated_spans(pdf_path: str) -> tuple[list[list[TranslatedSpan]],
                             continue
                         spans.append(
                             TranslatedSpan(
-                                box=flip_y(span["bbox"], height),
+                                box=display_box(page, span["bbox"]),
                                 size=float(span.get("size", 0.0)),
                                 text=text,
                                 color=int(span.get("color", 0)),
@@ -1023,7 +1071,7 @@ def extract_translated_spans(pdf_path: str) -> tuple[list[list[TranslatedSpan]],
                     continue
                 if not all(isinstance(c, (int, float)) and c > 0.98 for c in fill[:3]):
                     continue
-                masks.append(flip_y(list(drawing["rect"]), height))
+                masks.append(display_box(page, list(drawing["rect"])))
             pages_masks.append(masks)
     finally:
         doc.close()
@@ -1289,8 +1337,7 @@ def layout_metrics(
 
 
 def _fill_rects_with_color(page) -> list[tuple[Box, tuple[float, float, float]]]:
-    """一页里所有填充矩形，连同填充色。坐标翻成 PDF 用户空间。"""
-    height = page.rect.height
+    """一页里所有填充矩形，连同填充色。坐标翻成显示空间（见 display_box）。"""
     out: list[tuple[Box, tuple[float, float, float]]] = []
     for drawing in page.get_drawings():
         fill = drawing.get("fill")
@@ -1298,7 +1345,7 @@ def _fill_rects_with_color(page) -> list[tuple[Box, tuple[float, float, float]]]
             continue
         if not all(isinstance(c, (int, float)) for c in fill[:3]):
             continue
-        out.append((flip_y(list(drawing["rect"]), height), tuple(fill[:3])))
+        out.append((display_box(page, list(drawing["rect"])), tuple(fill[:3])))
     return out
 
 
@@ -1541,8 +1588,54 @@ def source_residue(source_pdf: str, translated_pdf: str, source_script: str = "l
 # ---------------------------------------------------------------------------
 
 
-def removal_effect(source_pdf: str, cleaned_pdf: str | None, rects_path: str) -> dict:
-    """原文删除器的实际效果：区域给了多少，删完还剩多少原文。
+def _residual_lines_by_region(
+    pdf_path: str,
+    table_boxes_by_page: dict[int, list[Box]],
+) -> tuple[int, int]:
+    """删完的 PDF 里源语言字母数，按落在表格区内 / 区外分开数。
+
+    为什么要把表格单独拆出来：表格是产品**有意**不译、不删、不遮罩的
+    （odlToAssembly 里那段注释写明"用户已确认的偏好"——遮罩会切断表格线、
+    合并单元格会错位、短数据值译了反而脱离上下文）。所以删完的 PDF 里剩下的
+    表格原文是**预期结果**，不是缺陷。
+
+    而不拆开的话，`residueRatio` 一个数把两种完全不同的情形混在一起：
+      接近 1  → 删除器对该篇一个字符都没删掉（批 7 修的那种，是真问题）；
+      零头    → 剩下的全是表格原文（预期）。
+    attention-reading 实测 0.031，逐页核对后 24 个残留词全部来自页 1 那张表格。
+    拆开之后这个数字自己会说话，不必每次人工去核对。
+    """
+    fitz = _fitz()
+    inside = 0
+    outside = 0
+    doc = fitz.open(pdf_path)
+    try:
+        for page in doc:
+            boxes = table_boxes_by_page.get(page.number + 1) or []
+            for block in page.get_text("dict")["blocks"]:
+                for line in block.get("lines", []):
+                    text = "".join(span.get("text", "") for span in line.get("spans", []))
+                    n = sum(1 for c in text if ("a" <= c <= "z") or ("A" <= c <= "Z"))
+                    if n == 0:
+                        continue
+                    box = display_box(page, line["bbox"])
+                    cx, cy = box.center()
+                    if any(b.x0 <= cx <= b.x1 and b.y0 <= cy <= b.y1 for b in boxes):
+                        inside += n
+                    else:
+                        outside += n
+    finally:
+        doc.close()
+    return inside, outside
+
+
+def removal_effect(
+    source_pdf: str,
+    cleaned_pdf: str | None,
+    rects_path: str,
+    assembly: dict | None = None,
+) -> dict:
+    """原文删除器的实际效果：区域给了多少，删完还剩多少原文，剩下的在哪。
 
     为什么单立一项：`source_residue` 量的是**译文 PDF** 的原文残留，而译文 PDF
     在无头路径上从不调用删除器（删除只在真机上跑，第一次真机抽查给出残留率
@@ -1553,9 +1646,13 @@ def removal_effect(source_pdf: str, cleaned_pdf: str | None, rects_path: str) ->
     PDF 还剩多少源语言字母。它**不改变译文 PDF 的产出路径**（渲染仍用未删的
     源），所以不影响任何既有版面指标。
 
-    两个数字：
-      requested  区域文件里的矩形数（去掉注释行）。为 0 说明没有段落被要求删。
-      residueRatio  删完的 PDF 里源语言字母占比。0 表示删干净了。
+    四个数字：
+      requested        区域文件里的矩形数（去掉注释行）。为 0 说明没有段落被要求删。
+      residueRatio     删完的 PDF 里源语言字母占比。0 表示删干净了。
+      tableRatio       其中落在表格区内的部分。表格是产品有意不译不删的，这部分
+                      是预期残留，不是缺陷。
+      nonTableRatio    其中落在表格区外的部分。**这一项才是"该删没删"的量**：它
+                      接近 1 说明删除器对该篇基本没删掉东西。
 
     cleaned_pdf 为 None（jar 缺失或跑失败）时报缺不报 0：0 会被读成"删得干净"，
     而事实是"没测"。
@@ -1582,10 +1679,29 @@ def removal_effect(source_pdf: str, cleaned_pdf: str | None, rects_path: str) ->
         }
 
     measured = source_residue(source_pdf, cleaned_pdf, "latin")
+    total_source = measured["sourceLetters"] or 0
+
+    table_boxes: dict[int, list[Box]] = {}
+    for page in (assembly or {}).get("pages", []):
+        boxes = []
+        for table in page.get("tables", []):
+            box = Box(
+                table.get("x0", 0),
+                table.get("y0", 0),
+                table.get("x1", 0),
+                table.get("y1", 0),
+            )
+            if box.x1 > box.x0 and box.y1 > box.y0:
+                boxes.append(box)
+        table_boxes[page.get("pageNumber", 0)] = boxes
+
+    inside, outside = _residual_lines_by_region(cleaned_pdf, table_boxes)
     return {
         "requested": requested,
         "residueRatio": measured["residueRatio"],
-        "sourceLetters": measured["sourceLetters"],
+        "tableRatio": inside / total_source if total_source else 0.0,
+        "nonTableRatio": outside / total_source if total_source else 0.0,
+        "sourceLetters": total_source,
         "residualLetters": measured["residualLetters"],
         "note": (
             "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文"
@@ -1758,6 +1874,42 @@ def selftest() -> int:
     failures += not _check(
         "odl_box 顺序颠倒自动交换",
         odl_box([100, 200, 50, 100]) == Box(50, 100, 100, 200),
+    )
+
+    # ── 显示空间换算（display_box）──
+    # pymupdf 的 get_text 与 get_drawings 报的是**去旋转后**的坐标，装配层的段落
+    # 框报的是**显示空间**。未旋转页上两个空间重合，旋转页上差一个旋转变换。
+    # 不调和的话旋转页的每一个版面指标都会塌成 0，而且看不出是为什么。
+    #
+    # 两条断言，一条保不回归、一条保真值：
+    #   1. rot0 上与旧的 flip_y(bbox, page.rect.height) 逐字节等价——所以未旋转
+    #      页上的任何数字一个都不会变（否则基线会无缘无故动）；
+    #   2. rot90 上把真实旋转 PDF 量到的去旋转坐标换算成显示空间后，与解析器报
+    #      的框重合。
+    class _FakePage:
+        """只提供 display_box 用到的三个属性。"""
+
+        def __init__(self, rotation: int, w: float, h: float):
+            self.rotation = rotation
+            self.mediabox = type("R", (), {"width": w, "height": h})()
+
+    unrotated = _FakePage(0, 594.96, 841.92)
+    got_unrotated = display_box(unrotated, [10, 20, 110, 70])
+    failures += not _check(
+        "rot0 上 display_box 与 flip_y 等价",
+        got_unrotated == flip_y([10, 20, 110, 70], 841.92),
+        f"got {got_unrotated}",
+    )
+    # reading-brain-rot90.pdf 的标题段：pymupdf 从去旋转页面报 [73.5, 69.3,
+    # 257.7, 90.4]（原始空间、上左原点），解析器报显示空间
+    # [751.561, 337.255, 772.599, 521.46]。换算后必须落到后者。
+    rotated = _FakePage(90, 594.96, 841.92)
+    got_rotated = display_box(rotated, [73.5, 69.3, 257.7, 90.4])
+    failures += not _check(
+        "rot90 上 display_box 把去旋转坐标换算成显示空间",
+        abs(got_rotated.x0 - 751.561) < 0.5 and abs(got_rotated.y0 - 337.255) < 0.5
+        and abs(got_rotated.x1 - 772.599) < 0.5 and abs(got_rotated.y1 - 521.46) < 0.5,
+        f"got {got_rotated}",
     )
 
     # ── 文本相似度 ──
@@ -2354,6 +2506,57 @@ def selftest() -> int:
             unreadable_effect["requested"] is None
             and unreadable_effect["residueRatio"] is None,
             f"got {unreadable_effect}",
+        )
+
+        # 残留按表格区内 / 区外拆分。合成一份带表格区的装配：全部残留词都画在
+        # 表格框里，于是 tableRatio 该等于 residueRatio、nonTableRatio 该为 0。
+        # 拆不开的话，"有意保留的表格原文"与"该删没删"会混在一个数里，每次都得
+        # 人工核对才能判断是哪一种。
+        table_src = os.path.join(tmp, "table-src.pdf")
+        table_assembly = {
+            "pages": [
+                {
+                    "pageNumber": 1,
+                    "tables": [{"x0": 100, "y0": 600, "x1": 400, "y1": 700}],
+                    "paragraphs": [],
+                }
+            ]
+        }
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        # pymupdf 的 y 是上左原点；表格框 600–700（PDF 用户空间）对应 92–192。
+        page.insert_text((120, 120), "TABLE HEADER CELL", fontsize=10, fontname="helv")
+        doc.save(table_src)
+        doc.close()
+        table_effect = removal_effect(table_src, table_src, empty_rects, table_assembly)
+        failures += not _check(
+            "表格区内的残留计入 tableRatio，不计入 nonTableRatio",
+            table_effect["nonTableRatio"] == 0.0
+            and abs(table_effect["tableRatio"] - table_effect["residueRatio"]) < 1e-9
+            and table_effect["residueRatio"] > 0.9,
+            f"got {table_effect}",
+        )
+        # 同一个 PDF、同一个表格框，但残留词画在框外：该反过来。
+        outside_src = os.path.join(tmp, "outside-src.pdf")
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((120, 400), "BODY TEXT NOT IN TABLE", fontsize=10, fontname="helv")
+        doc.save(outside_src)
+        doc.close()
+        outside_effect = removal_effect(outside_src, outside_src, empty_rects, table_assembly)
+        failures += not _check(
+            "表格区外的残留计入 nonTableRatio，不计入 tableRatio",
+            outside_effect["tableRatio"] == 0.0 and outside_effect["nonTableRatio"] > 0.9,
+            f"got {outside_effect}",
+        )
+        # 不传 assembly 时表格框为空，全部残留算表外——宁可多报"该删没删"，
+        # 不可把真的没删掉的那部分归给"有意保留"。
+        no_assembly_effect = removal_effect(table_src, table_src, empty_rects, None)
+        failures += not _check(
+            "没有装配信息时全部残留算表外（方向安全）",
+            no_assembly_effect["tableRatio"] == 0.0
+            and no_assembly_effect["nonTableRatio"] > 0.9,
+            f"got {no_assembly_effect}",
         )
 
         # ── 遮罩打穿（mask_punch）──
