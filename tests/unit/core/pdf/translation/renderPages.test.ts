@@ -2,9 +2,11 @@
  * renderOverlayTranslated 的 renderPages 选项（页码范围翻译的渲染端契约）。
  *
  * 两条硬约束：
- *   1. 未列出的页面整页跳过——包括旋转检查。旋转页（扫描件、横版插图页）
- *      在范围外时不得让整次翻译失败；
+ *   1. 未列出的页面整页跳过——范围外的页面（含旋转页）不得让整次翻译失败；
  *   2. 输出 PDF 的页数与页序不变：范围外的页面保持原样留在文档里。
+ *
+ * 范围外的旋转页曾被单独跳过（早于旋转支持），现在旋转页本身也能渲染，见本文件
+ * 里"旋转页在范围内时照常渲染"一条与 tests/node/rotation-*.spec.ts。
  */
 import { describe, expect, it } from "vitest";
 import { PDFDocument, degrees, StandardFonts } from "pdf-lib";
@@ -62,13 +64,25 @@ describe("renderOverlayTranslated — renderPages（页码范围）", () => {
     expect(out.getPage(1).getRotation().angle).toBe(90);
   });
 
-  it("未传 renderPages 时维持原行为：旋转页报错", async () => {
+  it("旋转页在范围内时照常渲染，不再报错", async () => {
+    // 这一条原本断言的是"旋转页报错"——渲染端当年对 /Rotate 非 0 的页整体拒绝，
+    // 理由是"正确的变换需要一份真实的旋转 PDF 来验证，而我们没有"。那份夹具
+    // 后来补上了（scripts/qa/fixtures/reading-brain-rot*.pdf），实测发现变换的
+    // 90° 与 270° 两种情形写反了，修好之后拒绝随之解除。详见
+    // tests/node/rotation-transform.spec.ts 与 rotation-render.spec.ts。
+    //
+    // 现在守的是新行为：范围内的旋转页照常画，页数与旋转角都不变。
     const source = await twoPageSourceWithRotatedSecond();
-    await expect(
-      renderOverlayTranslated(source, [assembly("a"), assembly("b")], [["甲"], ["乙"]], {
-        targetLanguage: "zh-CN",
-      }),
-    ).rejects.toThrow();
+    const result = await renderOverlayTranslated(
+      source,
+      [assembly("a"), assembly("b")],
+      [["甲"], ["乙"]],
+      { targetLanguage: "zh-CN" },
+    );
+    const out = await PDFDocument.load(result.bytes);
+    expect(out.getPageCount()).toBe(2);
+    expect(out.getPage(1).getRotation().angle).toBe(90);
+    expect(result.stats.paragraphsRendered).toBe(2);
   });
 
   it("空译文集的页面不盖章也不打遮罩（范围外页面逐字保留）", async () => {
