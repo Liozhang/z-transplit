@@ -702,7 +702,7 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
     # 旁路测量，所以不影响任何既有版面指标。
     cleaned = clean_with_remover(fixture_pdf, rects_path, workdir)
     removal = metrics.removal_effect(
-        str(fixture_pdf), str(cleaned) if cleaned else None, rects_path
+        str(fixture_pdf), str(cleaned) if cleaned else None, rects_path, assembly
     )
 
     return {
@@ -751,10 +751,11 @@ WATCHED: list[tuple[str, str, str]] = [
     # 不改变译文 PDF 的产出路径。涨起来说明删除器对该篇删不动了——批 7 修的
     # 正是"退出码 0 但一个字符都没删"那种情形。
     #
-    # 注意它不为 0 不必然是缺陷：attention-reading 的 0.031 全部来自那张从未
-    # 被翻译的表格（表格在装配层没有对应段落，既不译也不删），属第三批批次 8
-    # 的题目。所以这一项设的是绝对底线而不是"必须为 0"。
-    ("removal.residueRatio", "ratio", "lower"),
+    # 盯的是 nonTableRatio 而不是 residueRatio：表格是产品有意不译不删的
+    # （odlToAssembly 的注释写明是用户已确认的偏好），那部分残留是预期结果。
+    # attention-reading 的 residueRatio 0.031 全部落在表格区内，nonTableRatio
+    # 为 0。混在一个数里就看不出这个区分，每次都得人工核对一遍。
+    ("removal.nonTableRatio", "ratio", "lower"),
     ("parse.heading.agreement", "ratio", "higher"),
     ("parse.readingOrder.tau", "ratio", "higher"),
     ("layout.biou", "ratio", "higher"),
@@ -901,7 +902,7 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
         "静默右溢",
         "非数字页段",
         "删除区域数",
-        "删除后残留",
+        "删除后残留 表内/表外",
         "框外像素差异",
         "原文残留",
         "渲染溢出 纵/横",
@@ -934,7 +935,14 @@ def render_report(results: list[dict], regressions: list[dict], floors: list[dic
             # 既不译也不删），那是第三批批次 8 的题目；若某篇残留接近 1，说明删除
             # 器对该篇一个字符都没删掉——那正是批 7 修的情形。
             str(removal.get("requested", "")),
-            fmt(removal.get("residueRatio"), 3) if removal.get("residueRatio") is not None else "未测",
+            # 删除后残留拆成两个数：表格区内 / 区外。表格是产品有意不译不删的，
+            # 区内那部分是预期残留；区外那部分才是"该删没删"。见 metrics
+            # .removal_effect 的说明。
+            (
+                f"{fmt(removal.get('tableRatio'), 3)}/{fmt(removal.get('nonTableRatio'), 3)}"
+                if removal.get("residueRatio") is not None
+                else "未测"
+            ),
             fmt(layout.get("biou")),
             fmt(layout.get("boxPrecision")),
             str(layout.get("utb", "")),
@@ -1358,6 +1366,19 @@ def main() -> int:
             return 2
         baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
         baseline_by_name = {r["fixture"]: r for r in baseline.get("results", [])}
+        # 一篇都没跑成时不许报"通过"。没有可比对象不等于没有回归——实测过一次：
+        # 度量库改坏之后五篇全抛 NameError，ok_results 为空，回归列表自然是空的，
+        # 门禁于是打印"通过"。那是整套基准最难发现的一种坏法：绿得刺眼，而它其实
+        # 什么都没量。宁可错杀，不可放过。
+        if not ok_results:
+            print(f"\n门禁失败：{len(results)} 篇夹具全部失败，没有可比的数字。")
+            for result in results:
+                print(f"  {result['fixture']}: {result.get('error', '未知错误')}")
+            return 1
+        missing = [r["fixture"] for r in results if "error" in r]
+        if missing:
+            # 部分失败照常比，但要把缺的几篇点出来——少比几篇也是少量了几篇。
+            print(f"\n注意：{len(missing)} 篇夹具失败，未参与比较：{', '.join(missing)}")
         for result in ok_results:
             base = baseline_by_name.get(result["fixture"])
             if not base:
