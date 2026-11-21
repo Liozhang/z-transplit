@@ -20,7 +20,7 @@
  */
 
 import type { AssemblyResult } from "./translationIR";
-import { clampParagraph } from "./LayoutPreservingRenderer";
+import { applyRotation, clampParagraph } from "./LayoutPreservingRenderer";
 
 export interface RemovalRect {
   /** 1-based page index (matches the remover CLI's rects file). */
@@ -55,6 +55,8 @@ export function buildRemovalRects(
   assemblies: AssemblyResult[],
   translatedSets: string[][],
   pageSizes?: RemovalPageSize[],
+  /** 每页的 /Rotate（度），与 assemblies 逐位对齐。缺省或 0 表示不旋转。 */
+  rotations?: number[],
 ): RemovalRect[] {
   const rects: RemovalRect[] = [];
   for (let i = 0; i < assemblies.length; i++) {
@@ -62,6 +64,7 @@ export function buildRemovalRects(
     const translated = translatedSets[i] ?? [];
     const page = i + 1;
     const size = pageSizes?.[i];
+    const rotation = rotations?.[i] ?? 0;
     for (let j = 0; j < assembly.paragraphs.length && j < translated.length; j++) {
       const p = assembly.paragraphs[j];
       if (!(p.x1 > p.x0 && p.y1 > p.y0)) continue;
@@ -75,7 +78,13 @@ export function buildRemovalRects(
       if (!text && !coveredByScreenshot) continue;
       if (text && !text.trim()) continue;
 
-      const cp = size ? clampParagraph(p, size.width, size.height) : p;
+      // 旋转页要把框变换回 MediaBox 原始空间：删除器解析的是内容流，画在原始
+      // 空间；而段落框来自解析器，报的是显示空间。顺序必须是先变换再裁剪——
+      // 反过来的话，一个显示空间里合法的框会被原始空间的页宽页高切掉。
+      const rotated = rotation
+        ? applyRotation(p, rotation, size?.width ?? 0, size?.height ?? 0)
+        : p;
+      const cp = size ? clampParagraph(rotated, size.width, size.height) : rotated;
       if (!(cp.x1 > cp.x0 && cp.y1 > cp.y0)) continue;
       rects.push({
         page,

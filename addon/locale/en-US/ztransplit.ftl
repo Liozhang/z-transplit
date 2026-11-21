@@ -255,7 +255,6 @@ sidecar-error-pref-write = The recognition environment is ready, but writing the
 err-reader-pdf-timeout = The reader's pdf.js did not become ready within 15 s.
 
 ## Layout preserving renderer (LayoutPreservingRenderer.ts)
-render-error-rotated-page = Rotated pages are not supported yet (/Rotate { $angle }°). Straighten the PDF before translating.
 
 ## Dictionary card lookup chain (src/core/translation/dictionaryCard.ts)
 dictionary-error-all-failed = Dictionary lookup failed: neither the dictionary nor the configured translation engines returned a result ({ $error }).

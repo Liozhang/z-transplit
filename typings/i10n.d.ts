@@ -385,7 +385,6 @@ export type FluentMessageId =
   | 'readiness-reason-engine-plugin'
   | 'readiness-reason-engine-url'
   | 'readiness-reason-unknown'
-  | 'render-error-rotated-page'
   | 'scan-error-disabled'
   | 'scan-error-rotated-skipped'
   | 'scan-error-sidecar-unconfigured'

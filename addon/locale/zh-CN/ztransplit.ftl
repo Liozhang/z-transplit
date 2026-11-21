@@ -249,7 +249,6 @@ sidecar-error-pref-write = 识别环境装好了，但命令写入设置失败�
 err-reader-pdf-timeout = 阅读器的 pdf.js 未在 15 秒内就绪。
 
 ## 版式保留渲染器（LayoutPreservingRenderer.ts）
-render-error-rotated-page = 暂不支持旋转页面（/Rotate { $angle }°）。请先将 PDF 转正再翻译。
 
 ## 词典卡片查询链（src/core/translation/dictionaryCard.ts）
 dictionary-error-all-failed = 词典查询失败：词典与可用的翻译引擎都没有返回结果（{ $error }）。

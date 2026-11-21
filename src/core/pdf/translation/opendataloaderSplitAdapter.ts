@@ -59,7 +59,7 @@ import { parsePdfWithOpenDataLoader } from "../backendSelector";
 import { PdfParseError } from "../PdfParseError";
 import { ZTransplitCancelledError as TranslationCancelledError } from "../CancelledError";
 import { odlAnalysisToAssembly } from "./odlToAssembly";
-import { collectFillRects } from "./backgroundFill";
+import { collectFillRects, collectPageRotations } from "./backgroundFill";
 import type { FormulaBlock } from "./odlToAssembly";
 import type { PdfDocumentAnalysis } from "../PdfIR";
 import { emptyAnalysisFromProbe, probePdfPages } from "../scan/pdfPageProbe";
@@ -431,12 +431,18 @@ export async function translateAndSplitWithOpenDataLoader(
   // 遮罩配色：从原文 PDF 的内容流取矩形填充，段落带上 backgroundColor 之后
   // 遮罩不再一律涂白，彩色标注框与表格斑马纹不会被打穿。采样失败只当没有
   // 背景信息（遮罩退回白色，即此前行为），不影响管线其余部分。
+  //
+  // 同一份字节顺手读出每页 /Rotate：解析器报的段落框是显示空间坐标，删除器
+  // 画在原始空间，旋转页上删除区域必须先变换回去。读不出来按"没有旋转"处理
+  // ——那是绝大多数文档的常态，不该让一个可选信息让整次翻译失败。
   let backgroundFills: Awaited<ReturnType<typeof collectFillRects>> = [];
+  let pageRotations: number[] = [];
   try {
     const IOUtils = (globalThis as any).IOUtils;
     if (IOUtils?.read) {
       const sourceBytes = realmLocalCopy(await IOUtils.read(inputPath));
       backgroundFills = await collectFillRects(sourceBytes);
+      pageRotations = await collectPageRotations(sourceBytes);
     }
   } catch (e) {
     safeDebug("[Z-Transplit] opendataloaderSplitAdapter: background-fill sampling skipped: " + e);
@@ -757,7 +763,7 @@ export async function translateAndSplitWithOpenDataLoader(
         // 页面尺寸一并传入：删除端要用它把 OpenDataLoader 的越界框裁回纸面，
         // 否则一个 x=635 的框会被原样写进区域文件。
         const rectsContent = serializeRemovalRects(
-          buildRemovalRects(assemblies, translatedSets, pageSizes),
+          buildRemovalRects(assemblies, translatedSets, pageSizes, pageRotations),
         );
         const removal = await removeOriginalText(inputPath, rectsContent, opts.signal);
         // 退出码 0 不等于删掉了东西。删除器按设计只处理页面内容流（第 0 层），

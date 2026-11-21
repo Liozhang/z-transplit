@@ -650,3 +650,38 @@ export async function sampleBackgroundFills(
     return pickBackgroundColor(fills, q);
   });
 }
+
+/**
+ * 读每页的 /Rotate（度），与页序一一对应。
+ *
+ * 为什么需要它：解析器报的段落框是**显示空间**的坐标（已应用 /Rotate），而删除器
+ * 解析的是内容流、画在**原始空间**。旋转页上两者不一致，删除区域必须先变换回去
+ * 再交给删除器，否则删的是别处——或者哪儿都没删。批 8 之前 `buildRemovalRects`
+ * 压根不知道旋转这回事。
+ *
+ * /Rotate 只在 PDF 里有，解析器的 JSON 不带它，所以只能从源 PDF 读。这里与
+ * `collectFillRects` 一样走 pdf-lib 载入，是因为装配层已经在为背景填充加载同一
+ * 份字节了——单开一个轻量解析器（正则扫 /Rotate）反而更脆。
+ *
+ * 读不出来时返回空数组而不是抛错：调用方按"没有旋转"处理，那是旋转页之外的
+ * 全部文档的常态，为一个可选信息让整次翻译失败是反的。
+ */
+export async function collectPageRotations(pdfBytes: Uint8Array): Promise<number[]> {
+  let doc;
+  try {
+    doc = await PDFDocument.load(pdfBytes, { updateMetadata: false });
+  } catch {
+    return [];
+  }
+  try {
+    return doc.getPages().map((page) => {
+      try {
+        return page.getRotation().angle;
+      } catch {
+        return 0;
+      }
+    });
+  } catch {
+    return [];
+  }
+}
