@@ -132,7 +132,8 @@ function apply(m: Matrix, x: number, y: number): { x: number; y: number } {
  * 分词，那一页就当没有背景色——不会静默给出错颜色。
  */
 async function inflateZlib(data: Uint8Array): Promise<Uint8Array> {
-  if (data.length < 6) throw new Error("zlib 流太短");
+  // 长度下限：2 字节 zlib 头加 4 字节校验和，再少就连头尾都不完整。
+  if (data.length < 6) throw new Error("zlib stream too short");
   const raw = data.subarray(2, data.length - 4);
   // Blob + Response 的组合在 Zotero 7 的 Firefox 与 Node 18+ 里都有，而且避开
   // 了 ReadableStream 读写端在不同 TS lib 配置下的签名分歧。
