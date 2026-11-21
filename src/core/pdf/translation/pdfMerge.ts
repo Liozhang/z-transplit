@@ -22,7 +22,13 @@ import { PDFDocument } from "pdf-lib";
  * the white-page counterpart of the overlay path's docTitle, so both render
  * paths produce the same document metadata.
  *
- * Empty input → an empty (zero-page) PDF, so callers don't need a special case.
+ * Empty input is NOT a zero-page PDF, whatever it looks like: `PDFDocument.create()`
+ * reports 0 pages, but the saved bytes load back as ONE blank page (a pdf-lib
+ * round-trip quirk). Callers therefore must not rely on "empty in, empty out" —
+ * `opendataloaderSplitAdapter` guards with an explicit
+ * `pageBytes.length === 0` throw before calling here. A test pins this
+ * round-trip so the next person does not "simplify" that guard away on the
+ * strength of this comment.
  */
 export async function mergePageBytes(
   pageBytesList: Uint8Array[],
