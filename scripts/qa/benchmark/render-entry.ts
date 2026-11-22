@@ -336,6 +336,12 @@ async function render(config: RenderConfig): Promise<void> {
   // 与产品实际删的不是同一份。
   const sourceDoc = await PDFDocument.load(sourceBytes);
   const rotations = sourceDoc.getPages().map((p) => p.getRotation().angle);
+  // 删除区域裁剪用的页面尺寸同样从源 PDF 读真实 MediaBox。早先这里传 undefined
+  // （等于不裁剪），于是无头路径量的删除区域比产品实际删的宽——产品那侧用的是
+  // 装配层估的页面尺寸，横版文档上会估窄（landscape-slides 估成 739.56 宽，
+  // 真实 841.92），右边约 30 磅的原文删不掉。无头因为不裁剪而看不见这个缺陷。
+  // 现在两侧都按真实 MediaBox 裁剪，量到的才是产品实际会删的那一份。
+  const pageSizes = sourceDoc.getPages().map((p) => p.getSize());
   renderOverlayTranslated(sourceBytes, assemblies, input.translations ?? [], {
     targetLanguage: config.targetLanguage ?? "zh-CN",
     docTitle: config.docTitle ?? "Z-Transplit benchmark",
@@ -351,11 +357,12 @@ async function render(config: RenderConfig): Promise<void> {
       if (config.outStats) writeJson(config.outStats, result.stats);
       if (config.outRects) {
         // 删除区域清单走产品自己的函数生成：度量要量的正是"适配器打算删哪些
-        // 区域"，不是度量自己猜一份。旋转已在上面读好。
+        // 区域"，不是度量自己猜一份。旋转与页面尺寸都在上面从源 PDF 读好，
+        // 与 opendataloaderSplitAdapter 传的参数保持一致。
         const rects = buildRemovalRects(
           assemblies,
           input.translations ?? [],
-          undefined,
+          pageSizes,
           rotations,
         );
         fs.mkdirSync(path.dirname(config.outRects), { recursive: true });

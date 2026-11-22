@@ -42,6 +42,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1068,6 +1069,11 @@ def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
         if boot.returncode != 0:
             raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
 
+    # 点火前先拍快照：库里此刻有哪些译文附件、各自改到什么时间。没有这一份，
+    # 轮询分不清"这一轮新产出的"与"往轮次留下的"，第二篇以后的夹具就会拿上一篇
+    # 的产出当结论（three-column 实测踩中：报"页数不一致：原文 1，译文 2"）。
+    before = snapshot_translated_attachments(launcher)
+
     steps = [
         ["send", "installPdf", str(fixture_pdf)],
         ["send", "pipelineStart", "{}"],
@@ -1085,29 +1091,52 @@ def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
         print(f"  {step[1]}: {result.stdout.strip()[:200]}")
 
 
-    # 轮询译文附件，直到出现或超时。全新 profile 的第一次流水线要做一堆一次性
-    # 的事（解析器 jar、字体解析、阅读器开关、译文附件落盘），实测比"跑第二遍"
+    # 轮询译文附件，直到出现**这一轮新的**或超时。全新 profile 的第一次流水线要做
+    # 一堆一次性的事（解析器 jar、字体解析、阅读器开关、译文附件落盘），实测比"跑第二遍"
     # 慢一个量级，300 秒不够——第一版就是 300 秒，轮询空手而归，而译文在放弃之后
     # 几十秒才落地，失败信息指向"没有产出"，其实是等得不够久。
+    #
+    # 只判"库里有译文附件"是不够的：跑第二篇夹具时，上一篇的译文还躺在库里，轮询
+    # 第一眼就看见它、立刻收工，于是拿上一篇的产出当本篇的结论。three-column 就
+    # 是这样报了一次"页数不一致：原文 1，译文 2"——报得对，但病根在挑文件，不在
+    # 流水线。所以轮询只认快照之后新出现的条目，或者文件确实被改写过的条目。
     deadline = time.time() + REAL_MACHINE_TIMEOUT_S
     translated_path = None
+    fresh_stamp = ""
     waited = 0
     while time.time() < deadline:
         result = run(["node", str(launcher), "send", "translated"])
-        items = translated_items(result.stdout)
-        if items:
-            translated_path = items[-1].get("filePath")
+        fresh = fresh_translated_attachment(translated_items(result.stdout), before)
+        if fresh:
+            translated_path = fresh.get("filePath")
+            fresh_stamp = translated_attachment_stamp(translated_path)
             break
         waited += 1
         if waited % 6 == 1:
-            print(f"  等译文附件……已等 {waited * 5} 秒", flush=True)
+            print(f"  等新译文附件……已等 {waited * 5} 秒", flush=True)
         time.sleep(5)
     if not translated_path or not Path(translated_path).exists():
         raise RuntimeError(
-            f"等了 {REAL_MACHINE_TIMEOUT_S} 秒仍没有译文附件。先手工确认流水线能跑通："
+            f"等了 {REAL_MACHINE_TIMEOUT_S} 秒仍没有新的译文附件。先手工确认流水线能跑通："
             "node scripts/qa/real-machine.mjs send translated"
         )
+    print(f"  本轮译文附件（修改于 {fresh_stamp}）：{translated_path}")
     return measure_real_machine(name, fixture_pdf, translated_path)
+
+
+def load_real_machine_rows(path: Path) -> list[dict]:
+    """读回历次真机抽查累积下来的行。文件不在或读坏了就当没有，不因此丢掉本轮结果。
+
+    真机抽查一次只跑一篇，而它的价值在五篇并排看。早先每跑一篇就整份重写，
+    五篇跑完只剩最后一篇——恰恰把最有信息量的对比弄丢了。所以改成按夹具名累积，
+    同一夹具重跑就覆盖旧行。
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    return rows if isinstance(rows, list) else []
 
 
 def translated_items(stdout: str) -> list[dict]:
@@ -1142,6 +1171,76 @@ def find_translated_attachment(launcher: Path) -> tuple[str, str] | None:
         return None
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(Path(file_path).stat().st_mtime))
     return file_path, stamp
+
+
+def translated_attachment_stamp(file_path: str) -> str:
+    """附件文件的本地修改时间，读不到时给一句实话而不是编一个时间。"""
+    try:
+        mtime = Path(file_path).stat().st_mtime
+    except OSError:
+        return "读取不到"
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+
+
+def snapshot_from_items(items: list[dict]) -> dict:
+    """给一批译文附件条目拍快照：条目 id → 文件修改时间。
+
+    用来把"这一轮新产出的附件"与"往轮次留下的旧附件"分开。items 按条目 id 升序，
+    新导入的一轮 id 最大，所以正常情况下新条目直接靠"快照里没有这个 id"认出来；
+    万一某一轮改写了同一条目（id 不变而文件被重写），修改时间这一路还能认出来。
+    """
+    snapshot: dict = {}
+    for item in items:
+        file_path = item.get("filePath")
+        if not file_path:
+            continue
+        try:
+            snapshot[item.get("id")] = Path(file_path).stat().st_mtime
+        except OSError:
+            # 文件不在了：记 None。之后任何同名产出都算新的——宁可多重跑一次度量，
+            # 也不要把一份已经消失的文件当成有效基线。
+            snapshot[item.get("id")] = None
+    return snapshot
+
+
+def snapshot_translated_attachments(launcher: Path) -> dict:
+    """查一次库，把当前的译文附件拍成快照。"""
+    result = run(["node", str(launcher), "send", "translated"])
+    return snapshot_from_items(translated_items(result.stdout))
+
+
+def fresh_translated_attachment(items: list[dict], before: dict) -> dict | None:
+    """从一批条目里挑出快照之后新出现的译文附件，没有则 None。
+
+    认新不认旧：条目 id 不在快照里，或者文件修改时间晚于快照记下的那个。
+    两条都不满足的条目是往轮次的遗留产物——three-column 那次"页数不一致：原文 1，
+    译文 2"就是误拿了这么一份。挑的时候取 id 最大的那个：items 按 id 升序，id 最大
+    的是最后导入的，也就是这一轮最可能刚写出来的那份。
+    """
+    chosen: dict | None = None
+    if isinstance(items, str):  # 调用点传错了：把回包原文当成了条目数组
+        raise TypeError(
+            "fresh_translated_attachment 要的是条目数组，不是回包字符串；"
+            "先过一遍 translated_items()"
+        )
+    for item in items:
+        key = item.get("id")
+        file_path = item.get("filePath")
+        if not file_path or not Path(file_path).exists():
+            continue
+        if key not in before:
+            chosen = item
+            continue
+        previous = before[key]
+        if previous is None:
+            chosen = item
+            continue
+        try:
+            if Path(file_path).stat().st_mtime > previous:
+                chosen = item
+        except OSError:
+            continue
+    return chosen
 
 
 def measure_real_machine(name: str, fixture_pdf: Path, translated_path: str) -> dict:
@@ -1226,6 +1325,122 @@ def ocr_stage() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def harness_selftest() -> int:
+    """真机挑附件那一小段逻辑的自检。
+
+    为什么单为它开一个入口：`fresh_translated_attachment` 判错一次不抛异常、不报错，
+    只是安静地拿一篇旧产出当新结论——three-column 实测就这么报过一次"页数不一致"。
+    这种错在报告上看起来像被测对象的问题，所以挑文件的判据本身必须有守卫。
+
+    全部用真实临时文件，不 mock 文件系统：这里的判据一半建立在 mtime 上，mock 掉
+     stat 就等于把要测的东西测没了。
+    """
+    failures = 0
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        nonlocal failures
+        if ok:
+            print(f"  ok   {name}")
+        else:
+            failures += 1
+            print(f"  FAIL {name}" + (f" — {detail}" if detail else ""))
+
+    workdir = Path(tempfile.mkdtemp(prefix="zt-bench-selftest-"))
+    try:
+        old = workdir / "old.pdf"
+        old.write_bytes(b"old")
+        new = workdir / "new.pdf"
+        new.write_bytes(b"new")
+        old_mtime = old.stat().st_mtime
+
+        # 往轮次留下的条目：id 在快照里，文件没动过。必须不认。
+        stale = [{"id": 3, "filePath": str(old)}]
+        before = snapshot_from_items(stale)
+        check(
+            "快照记下既有条目的 id 与修改时间",
+            set(before) == {3} and abs(before[3] - old_mtime) < 1e-9,
+            f"got {before}",
+        )
+        check(
+            "文件未改动的旧条目不认（防拿上一篇产出当本篇结论）",
+            fresh_translated_attachment(stale, before) is None,
+        )
+
+        # 这一轮新导入的条目：id 不在快照里。必须认。
+        with_new = stale + [{"id": 12, "filePath": str(new)}]
+        picked = fresh_translated_attachment(with_new, before)
+        check(
+            "快照里没有的新条目被认出",
+            picked is not None and picked.get("id") == 12,
+            f"got {picked}",
+        )
+
+        # 同一批里有多条新条目时取 id 最大的：items 按 id 升序，id 最大的是最后
+        # 导入的那份，也就是这一轮最可能刚写出来的。
+        with_two_new = with_new + [{"id": 15, "filePath": str(workdir / "newer.pdf")}]
+        (workdir / "newer.pdf").write_bytes(b"newer")
+        picked_two = fresh_translated_attachment(with_two_new, before)
+        check(
+            "多条新条目时取 id 最大的",
+            picked_two is not None and picked_two.get("id") == 15,
+            f"got {picked_two}",
+        )
+
+        # 同一条目被改写（id 不变、文件变了）：靠 mtime 认。
+        time.sleep(0.05)
+        old.write_bytes(b"rewritten")
+        picked_rewritten = fresh_translated_attachment(stale, before)
+        check(
+            "同一条目文件被改写后靠修改时间认出",
+            picked_rewritten is not None and picked_rewritten.get("id") == 3,
+            f"got {picked_rewritten}",
+        )
+
+        # 快照里记的是 None（当时文件不存在）：之后出现即认。
+        before_missing = snapshot_from_items([{"id": 7, "filePath": str(workdir / "gone.pdf")}])
+        check("文件不存在时快照记 None", before_missing == {7: None}, f"got {before_missing}")
+        (workdir / "gone.pdf").write_bytes(b"back")
+        picked_back = fresh_translated_attachment(
+            [{"id": 7, "filePath": str(workdir / "gone.pdf")}], before_missing
+        )
+        check("快照记 None 的条目重新出现后被认出", picked_back is not None, f"got {picked_back}")
+
+        # 条目指向的文件不在：跳过，不当成候选。
+        check(
+            "文件不存在的条目被跳过",
+            fresh_translated_attachment([{"id": 99, "filePath": str(workdir / "nope.pdf")}], before)
+            is None,
+        )
+        # 没有 filePath 字段的条目：跳过，不抛 KeyError。
+        check("缺 filePath 的条目被跳过", fresh_translated_attachment([{"id": 1}], before) is None)
+        # 空列表：None。
+        check("空列表返回 None", fresh_translated_attachment([], before) is None)
+
+        # 累积读回：文件不在、内容是坏的 JSON、结构不对，都当没有，不炸。
+        check(
+            "real-machine.json 不存在时当没有行",
+            load_real_machine_rows(workdir / "missing.json") == [],
+        )
+        broken = workdir / "broken.json"
+        broken.write_text("{ 不是 json", encoding="utf-8")
+        check("内容是坏的 JSON 时当没有行", load_real_machine_rows(broken) == [])
+        wrong_shape = workdir / "wrong.json"
+        wrong_shape.write_text(json.dumps({"rows": "not-a-list"}), encoding="utf-8")
+        check("rows 不是数组时当没有行", load_real_machine_rows(wrong_shape) == [])
+        good = workdir / "good.json"
+        good.write_text(json.dumps({"rows": [{"fixture": "a"}]}), encoding="utf-8")
+        check(
+            "正常的文件读回原行",
+            load_real_machine_rows(good) == [{"fixture": "a"}],
+            f"got {load_real_machine_rows(good)}",
+        )
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+    print(f"\n真机挑附件自检：{'全部通过' if failures == 0 else f'{failures} 条失败'}")
+    return 1 if failures else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="z-transplit 版面保留翻译的评测编排")
     parser.add_argument("--regen-keys", action="store_true", help="从夹具 HTML 重新生成答案键")
@@ -1240,11 +1455,15 @@ def main() -> int:
         help="真机抽查不重点火流水线，直接度量库里已有的译文附件（省掉每次约十分钟的阅读器初始化）",
     )
     parser.add_argument("--ocr", action="store_true", help="扫描件层指标")
+    parser.add_argument("--selftest", action="store_true", help="跑真机挑附件那段逻辑的自检后退出")
     parser.add_argument("--keep-workdir", default="", help="保留中间产物到指定目录（排障用）")
     args = parser.parse_args()
 
     if args.regen_keys:
         return regen_keys()
+
+    if args.selftest:
+        return harness_selftest()
 
     if args.ocr:
         print(json.dumps(ocr_stage(), ensure_ascii=False, indent=1))
@@ -1295,27 +1514,27 @@ def main() -> int:
             else:
                 print("  无头结果不存在（先跑一次不带 --real-machine 的同名夹具）")
         OUT_DIR.mkdir(parents=True, exist_ok=True)
+        rows = load_real_machine_rows(OUT_DIR / "real-machine.json")
+        by_fixture = {row.get("fixture"): row for row in rows}
+        for real, headless in report_rows:
+            by_fixture[real["fixture"]] = {
+                "fixture": real["fixture"],
+                "translatedPdf": real["translatedPdf"],
+                "layout": real["layout"],
+                "pixel": real["pixel"],
+                "residue": real["residue"],
+                "headless": headless,
+            }
+        # 按夹具在清单里的顺序排，同一批跑多少篇、分多少次跑，读出来的顺序都一样。
+        order = [f["name"] for f in FIXTURES]
+        merged = sorted(
+            by_fixture.values(), key=lambda row: order.index(row["fixture"]) if row["fixture"] in order else len(order)
+        )
         (OUT_DIR / "real-machine.json").write_text(
-            json.dumps(
-                {
-                    "rows": [
-                        {
-                            "fixture": real["fixture"],
-                            "translatedPdf": real["translatedPdf"],
-                            "layout": real["layout"],
-                            "pixel": real["pixel"],
-                            "residue": real["residue"],
-                            "headless": headless,
-                        }
-                        for real, headless in report_rows
-                    ]
-                },
-                ensure_ascii=False,
-                indent=1,
-            ),
+            json.dumps({"rows": merged}, ensure_ascii=False, indent=1),
             encoding="utf-8",
         )
-        print(f"\n真机抽查结果：{OUT_DIR / 'real-machine.json'}")
+        print(f"\n真机抽查结果：{OUT_DIR / 'real-machine.json'}（累计 {len(merged)} 篇）")
         return 0
 
     if args.names:
