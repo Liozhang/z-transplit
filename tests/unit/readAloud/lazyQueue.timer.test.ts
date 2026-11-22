@@ -74,12 +74,12 @@ describe("LazyTranslateQueue poll timer ownership", () => {
 
   it("stops the poll when every placeholder has disconnected", () => {
     const clearInterval = vi.fn();
-    const setInterval = vi.fn(() => 42);
+    const setInterval = vi.fn((_poll: () => void) => 42);
     const queue = makeQueue(new Map([["1", { text: "a", placeholder: makeEl(false) }]]), {
       timerWindow: { setInterval, clearInterval },
     });
     queue.start();
-    const poll = setInterval.mock.calls[0][0] as () => void;
+    const poll = setInterval.mock.calls[0][0];
     poll();
     expect(clearInterval).toHaveBeenCalledWith(42);
     expect(queue.stats().total).toBe(1);
@@ -92,7 +92,7 @@ describe("LazyTranslateQueue poll timer ownership", () => {
       timerWindow: { setInterval, clearInterval },
     });
     queue.start();
-    const poll = setInterval.mock.calls[0][0] as () => void;
+    const poll = setInterval.mock.calls[0][0];
     poll();
     poll();
     expect(clearInterval).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe("LazyTranslateQueue poll timer ownership", () => {
 
   it("clears the interval on timerWindow in stop()", () => {
     const clearInterval = vi.fn();
-    const setInterval = vi.fn(() => 42);
+    const setInterval = vi.fn((_poll: () => void) => 42);
     const queue = makeQueue(new Map([["1", { text: "a", placeholder: makeEl(true) }]]), {
       timerWindow: { setInterval, clearInterval },
     });

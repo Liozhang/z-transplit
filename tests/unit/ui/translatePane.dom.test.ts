@@ -743,6 +743,10 @@ describe("B16 划词翻译：持久段落缓存（与 PDF 管线 / 双语对照�
       "zh-CN",
       "persistent paragraph",
     );
+    // cacheKey 对空文本返回 null。这里原文非空，所以键必然存在；先把它断言出来，
+    // 后面的 key 才收窄成 string——Map.get 只收 string，不肯接 string | null。
+    // 写成真检查而不是 as string：那是运行时守卫，不是骗类型检查器。
+    if (!key) throw new Error("cacheKey 对非空原文返回了 null");
     const hits = await getCachedTranslations([key]);
     expect(hits.get(key)).toBe("已缓存译文");
   });
@@ -761,6 +765,8 @@ describe("B16 划词翻译：持久段落缓存（与 PDF 管线 / 双语对照�
       "zh-CN",
       "repeat me",
     );
+    // 同上：非空原文的键必然存在，先断言再往下用，让 diskKey 收窄成 string。
+    if (!diskKey) throw new Error("cacheKey 对非空原文返回了 null");
     let onDisk: string | undefined;
     for (let waited = 0; waited < 2000; waited += 50) {
       onDisk = (await getCachedTranslations([diskKey])).get(diskKey);

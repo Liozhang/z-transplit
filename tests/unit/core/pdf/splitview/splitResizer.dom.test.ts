@@ -56,7 +56,10 @@ function makeHarness(): Harness {
   stubWidth(mainHbox, HBOX_WIDTH);
 
   const timers: Array<() => void> = [];
-  const win = window as Window & { runTimers: () => void };
+  // `runTimers` 是这条测试自己挂在 window 上的，DOM 的类型里当然没有它。两次断言：
+  // 先 as unknown 绕开"两种类型不相交"的误报，再断言到带 runTimers 的形状，好让下面
+  // 的 win.runTimers = ... 过类型检查。直接一层 as 会被 TS2352 拦住。
+  const win = window as unknown as Window & { runTimers: () => void };
   // Replace the timer the handler uses so the resume callback can be driven
   // synchronously. setTimeout lives on the window, which is also the event
   // target the mousemove/mouseup listeners are attached to.

@@ -104,14 +104,14 @@ function makeFakeFile() {
     isExecutable(this: any) {
       return fs.isExecutable(this.path);
     },
-    get leafName(this: any): string {
+    get leafName(): string {
       const parts = this.path.split(/[\\/]+/).filter(Boolean);
       return parts.length > 0 ? parts[parts.length - 1] : "";
     },
     QueryInterface(this: any) {
       return this;
     },
-    get directoryEntries(this: any) {
+    get directoryEntries() {
       const self = this;
       const names = fs.childNames(self.path);
       let index = 0;

@@ -37,9 +37,22 @@ export interface RegisteredPane {
   onDestroy?: (ctx: any) => void;
 }
 
+/**
+ * pdf.js 选区区间在 `_selectionRanges` 里的真实形状：除 `text` 外还带
+ * `position`（页码加矩形列表），Zotero 的 PDF 批注位置也是这一套。
+ *
+ * 早先这里只声明了 `{ text: string }`，于是"弹窗未触发时回落选区区间上的位置"
+ * 那条测试想给 position 就过不了类型检查——不是测试写错了，是 mock 少建模了
+ * 一个产品真在读的字段（`sentenceContext` 的 `SelectionPositionLike`）。
+ */
+export interface SelectionRangeStub {
+  text: string;
+  position?: { pageIndex: number; rects?: number[][] };
+}
+
 export interface ReaderSelectionStub {
   tabID: number;
-  selectionRanges?: Array<{ text: string }>;
+  selectionRanges?: SelectionRangeStub[];
   /** Attachment itemID the reader runs on (translatePane parent/attachment matching). */
   itemID?: number;
   /**
