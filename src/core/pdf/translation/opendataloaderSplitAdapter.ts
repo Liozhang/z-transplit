@@ -59,7 +59,7 @@ import { parsePdfWithOpenDataLoader } from "../backendSelector";
 import { PdfParseError } from "../PdfParseError";
 import { ZTransplitCancelledError as TranslationCancelledError } from "../CancelledError";
 import { odlAnalysisToAssembly } from "./odlToAssembly";
-import { collectFillRects, collectPageRotations } from "./backgroundFill";
+import { collectFillRects, collectPageRotations, collectPageSizes } from "./backgroundFill";
 import type { FormulaBlock } from "./odlToAssembly";
 import type { PdfDocumentAnalysis } from "../PdfIR";
 import { emptyAnalysisFromProbe, probePdfPages } from "../scan/pdfPageProbe";
@@ -437,12 +437,18 @@ export async function translateAndSplitWithOpenDataLoader(
   // ——那是绝大多数文档的常态，不该让一个可选信息让整次翻译失败。
   let backgroundFills: Awaited<ReturnType<typeof collectFillRects>> = [];
   let pageRotations: number[] = [];
+  // 删除区域裁剪用的真实页面尺寸。**不是** base.pageSizes——那个是从内容范围
+  // 估出来的（适配器 JSON 不带 MediaBox），只该喂白页兜底渲染。拿它裁剪删除区域
+  // 会把段落框切短：横版 A4 实测被估成 739.56 × 792（真实 841.92 × 594.96），
+  // 于是每段右边约 30 磅的原文删不掉，译文里留下一串英文残片。
+  let realPageSizes: Array<{ width: number; height: number }> = [];
   try {
     const IOUtils = (globalThis as any).IOUtils;
     if (IOUtils?.read) {
       const sourceBytes = realmLocalCopy(await IOUtils.read(inputPath));
       backgroundFills = await collectFillRects(sourceBytes);
       pageRotations = await collectPageRotations(sourceBytes);
+      realPageSizes = await collectPageSizes(sourceBytes);
     }
   } catch (e) {
     safeDebug("[Z-Transplit] opendataloaderSplitAdapter: background-fill sampling skipped: " + e);
@@ -763,7 +769,12 @@ export async function translateAndSplitWithOpenDataLoader(
         // 页面尺寸一并传入：删除端要用它把 OpenDataLoader 的越界框裁回纸面，
         // 否则一个 x=635 的框会被原样写进区域文件。
         const rectsContent = serializeRemovalRects(
-          buildRemovalRects(assemblies, translatedSets, pageSizes, pageRotations),
+          buildRemovalRects(
+            assemblies,
+            translatedSets,
+            realPageSizes.length > 0 ? realPageSizes : undefined,
+            pageRotations,
+          ),
         );
         const removal = await removeOriginalText(inputPath, rectsContent, opts.signal);
         // 退出码 0 不等于删掉了东西。删除器按设计只处理页面内容流（第 0 层），

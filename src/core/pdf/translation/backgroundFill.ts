@@ -685,3 +685,43 @@ export async function collectPageRotations(pdfBytes: Uint8Array): Promise<number
     return [];
   }
 }
+
+/**
+ * 逐页读 MediaBox 的原始宽高（未施加 /Rotate 的尺寸），与页序一一对应。
+ *
+ * 为什么需要它：删除区域要按页面裁剪，而装配层给的 `pageSizes` 是**从内容范围
+ * 估出来的**（OpenDataLoader 的 JSON 不带 MediaBox，适配器只能用内容的左右上下
+ * 界反推，再往标准纸号上靠）。那个估值的适用场合只有白页兜底渲染——它自己的注释
+ * 写明了这一点。可删除区域也拿它裁剪，估矮估窄就会把段落框切掉一截：横版 A4
+ * （841.92 × 594.96）实测被估成 739.56 × 792，于是每段右边约 30 磅的原文永远删
+ * 不掉，译文 PDF 里留下一串英文残片（landscape-slides 实测 24 个字母）。
+ *
+ * 取的是**未旋转**尺寸，与删除器的坐标系一致：删除器解析的是内容流，画在原始
+ * 空间；`buildRemovalRects` 也是先把显示空间的框用 applyRotation 变换回原始空间
+ * 再裁剪。两者必须用同一套宽高，否则旋转页上会切错方向。
+ *
+ * 读不出来时返回空数组而不是抛错，与 collectPageRotations 同一契约：调用方按
+ * "没有尺寸"处理（跳过裁剪），那是绝大多数文档的常态。
+ */
+export async function collectPageSizes(
+  pdfBytes: Uint8Array,
+): Promise<Array<{ width: number; height: number }>> {
+  let doc;
+  try {
+    doc = await PDFDocument.load(pdfBytes, { updateMetadata: false });
+  } catch {
+    return [];
+  }
+  try {
+    return doc.getPages().map((page) => {
+      try {
+        const size = page.getSize();
+        return { width: size.width, height: size.height };
+      } catch {
+        return { width: 0, height: 0 };
+      }
+    });
+  } catch {
+    return [];
+  }
+}
