@@ -25,6 +25,7 @@ pymupdf 的 span bbox 与 drawings rect 是左上原点 y 向下，必须先翻�
 from __future__ import annotations
 
 import argparse
+import copy
 import difflib
 import math
 import sys
@@ -860,11 +861,18 @@ def figure_text(key: dict, assembly: dict, source_pdf: str) -> dict:
             # `Wk 1 Wk 3 Wk 5 Wk 6` 是 4 个跨度并成一段，段落中心落在 Wk 3 与
             # Wk 5 之间的空档里，按中心判会把这段整个漏掉——而它恰恰是最显眼
             # 的一处图内文字。
+            #
+            # 只数真会送翻译的段：装配层的 keepOriginal 标了"保留原文"的段不算。
+            # 批 3 定下"图内文字只翻放得下的"之后，坐标轴刻度这类放不下中文的段
+            # 不再译、不遮罩、不删原文——它们当然也不再是"被当正文处理"。
             paragraph = pages.get(page.number + 1)
             if not paragraph or not hits:
                 continue
+            keep = paragraph.get("keepOriginal") or []
             count = 0
-            for para in paragraph.get("paragraphs", []):
+            for index, para in enumerate(paragraph.get("paragraphs", [])):
+                if index < len(keep) and keep[index]:
+                    continue
                 box = Box(para.get("x0", 0), para.get("y0", 0), para.get("x1", 0), para.get("y1", 0))
                 overlaps = any(box.intersect(h) > 0 for h in hits)
                 if overlaps:
@@ -1213,7 +1221,12 @@ def layout_metrics(
     overflow_counts = {"right": 0, "bottom": 0, "top": 0}
     max_overflow = {"right": 0.0, "bottom": 0.0, "top": 0.0}
     untranslated_total = 0
-    untranslated_reasons = {"noText": 0, "empty": 0}
+    # 第三类原因是有意为之：装配层的 keepOriginal 标了"保留原文"的段（窄框放不下
+    # 汉字的、纯数字串的，见 translationScope）。批 3 定下"图内文字只翻放得下的"
+    # 之后，坐标轴刻度这类段不再译——它们在输出 PDF 里确实没有译文，但这不是缺陷。
+    # 不分开的话，一次有意改动会让 utb 从 0 涨到十几，把"该译没译"这个真正的缺陷
+    # 信号埋进去。
+    untranslated_reasons = {"noText": 0, "empty": 0, "keptOriginal": 0}
     mask_total = 0
     intrusion_into_paragraph = 0
     intrusion_into_region = 0
@@ -1233,12 +1246,17 @@ def layout_metrics(
         for position, paragraph in enumerate(paragraphs):
             own = assigned.get(position, [])
             source_text = paragraph.get("text", "")
+            keep = page.get("keepOriginal") or []
+            kept_original = position < len(keep) and bool(keep[position])
             if not source_text.strip():
                 untranslated_reasons["empty"] += 1
                 continue
             if not own:
                 page_untranslated += 1
-                untranslated_reasons["noText"] += 1
+                if kept_original:
+                    untranslated_reasons["keptOriginal"] += 1
+                else:
+                    untranslated_reasons["noText"] += 1
                 continue
             target = Box(paragraph["x0"], paragraph["y0"], paragraph["x1"], paragraph["y1"])
             union_box = own[0].box
@@ -2370,6 +2388,27 @@ def selftest() -> int:
             "只译一段时 UTB 为 1",
             layout["utb"] == 1,
             f"got {layout['utb']}",
+        )
+        # 这一条钉原因拆分。批 3 定下"图内文字只翻放得下的"之后，坐标轴刻度这类段
+        # 不再译，utb 会涨——那是决定的结果。分开计数之后，"该译没译"（noText）才
+        # 是缺陷信号；混在一起的话一次有意改动就能把真缺陷埋掉。
+        failures += not _check(
+            "没标 keepOriginal 时未翻译块记在 noText 上",
+            layout["utbReasons"]["noText"] == 1
+            and layout["utbReasons"]["keptOriginal"] == 0,
+            f"got {layout['utbReasons']}",
+        )
+        # 同一个装配，把该段标成"保留原文"：utb 总数不变（输出里确实没有译文），
+        # 但原因换成 keptOriginal，noText 归零。
+        kept_assembly = copy.deepcopy(assembly)
+        kept_assembly["pages"][0]["keepOriginal"] = [False, True]
+        kept_layout = layout_metrics(source_path, translated_path, kept_assembly)
+        failures += not _check(
+            "标了 keepOriginal 后未翻译块记在 keptOriginal 上，noText 归零",
+            kept_layout["utb"] == 1
+            and kept_layout["utbReasons"]["keptOriginal"] == 1
+            and kept_layout["utbReasons"]["noText"] == 0,
+            f"got {kept_layout['utbReasons']}",
         )
         failures += not _check(
             "译文铺满左框时交并比高",

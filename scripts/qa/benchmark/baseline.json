@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-22 02:32:03",
+ "generatedAt": "2026-11-22 16:48:48",
  "results": [
   {
    "fixture": "reading-brain",
@@ -11,7 +11,8 @@
     "utb": 0,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 0
     },
     "overflow": {
      "right": 0,
@@ -60,7 +61,7 @@
      }
     ]
    },
-   "elapsedMs": 4629,
+   "elapsedMs": 4248,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -323,30 +324,31 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-lydk26kq\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-lydk26kq\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-0i7mg9tb\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-0i7mg9tb\\assembly.json"
    }
   },
   {
    "fixture": "attention-reading",
    "layout": {
-    "biou": 0.7725932010123899,
-    "biouSamples": 38,
-    "boxRecall": 0.8167296975529695,
-    "boxPrecision": 0.939004456522736,
-    "utb": 0,
+    "biou": 0.7973266221434202,
+    "biouSamples": 35,
+    "boxRecall": 0.8134906393391391,
+    "boxPrecision": 0.9739681443621825,
+    "utb": 3,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 3
     },
     "overflow": {
-     "right": 3,
+     "right": 0,
      "bottom": 0,
      "top": 0,
      "silentRight": 0
     },
     "maxOverflow": {
-     "right": 6.00001147460938,
+     "right": 0.0,
      "bottom": 0.0,
      "top": 0.0
     },
@@ -356,7 +358,7 @@
      "below06Ratio": 0.0
     },
     "mask": {
-     "total": 41,
+     "total": 38,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0,
      "punch": {
@@ -371,10 +373,10 @@
      {
       "page": 1,
       "paragraphs": 26,
-      "translated": 26,
-      "untranslated": 0,
-      "meanIou": 0.75613024965055,
-      "masks": 28
+      "translated": 23,
+      "untranslated": 3,
+      "meanIou": 0.7916207229331822,
+      "masks": 25
      },
      {
       "page": 2,
@@ -386,7 +388,7 @@
      }
     ]
    },
-   "elapsedMs": 6060,
+   "elapsedMs": 5765,
    "parse": {
     "spanMarked": 2,
     "formula": {
@@ -703,9 +705,9 @@
     "figureText": {
      "truth": 15,
      "detected": 15,
-     "paragraphs": 7,
+     "paragraphs": 4,
      "byPage": {
-      "1": 5,
+      "1": 2,
       "2": 2
      },
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
@@ -738,7 +740,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 1748321,
-    "insideChangedRatio": 0.4198823867859641,
+    "insideChangedRatio": 0.41983857754309006,
     "outsideSamples": []
    },
    "residue": {
@@ -748,7 +750,7 @@
     "sourceScript": "latin"
    },
    "removal": {
-    "requested": 38,
+    "requested": 35,
     "residueRatio": 0.03076923076923077,
     "tableRatio": 0.03076923076923077,
     "nonTableRatio": 0.0,
@@ -757,16 +759,16 @@
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
    },
    "stats": {
-    "paragraphsRendered": 38,
+    "paragraphsRendered": 35,
     "formulasRendered": 1,
     "overflowed": 0,
-    "overflowedRight": 3,
+    "overflowedRight": 0,
     "imagesRendered": 1,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-dx2nx0hc\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-dx2nx0hc\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-rllixysj\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-rllixysj\\assembly.json"
    }
   },
   {
@@ -779,7 +781,8 @@
     "utb": 0,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 0
     },
     "overflow": {
      "right": 0,
@@ -820,7 +823,7 @@
      }
     ]
    },
-   "elapsedMs": 5587,
+   "elapsedMs": 5313,
    "parse": {
     "spanMarked": 25,
     "formula": {
@@ -1148,40 +1151,41 @@
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-y30_ds5l\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-y30_ds5l\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-28y8v9xt\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-28y8v9xt\\assembly.json"
    }
   },
   {
    "fixture": "three-column",
    "layout": {
-    "biou": 0.7590797654502588,
-    "biouSamples": 27,
-    "boxRecall": 0.8137356847401407,
-    "boxPrecision": 0.9260539689426849,
-    "utb": 0,
+    "biou": 0.7934628221301652,
+    "biouSamples": 24,
+    "boxRecall": 0.8086479785910408,
+    "boxPrecision": 0.9754235532193106,
+    "utb": 3,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 3
     },
     "overflow": {
-     "right": 3,
+     "right": 0,
      "bottom": 0,
      "top": 0,
      "silentRight": 0
     },
     "maxOverflow": {
-     "right": 6.0,
+     "right": 0.0,
      "bottom": 0.0,
      "top": 0.0
     },
     "fontSize": {
-     "median": 0.7812089604676243,
+     "median": 0.8234671316273678,
      "p10": 0.7057785356523177,
      "below06Ratio": 0.0
     },
     "mask": {
-     "total": 28,
+     "total": 25,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0,
      "punch": {
@@ -1196,14 +1200,14 @@
      {
       "page": 1,
       "paragraphs": 27,
-      "translated": 27,
-      "untranslated": 0,
-      "meanIou": 0.7590797654502588,
-      "masks": 28
+      "translated": 24,
+      "untranslated": 3,
+      "meanIou": 0.7934628221301652,
+      "masks": 25
      }
     ]
    },
-   "elapsedMs": 4623,
+   "elapsedMs": 4336,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1454,9 +1458,9 @@
     "figureText": {
      "truth": 9,
      "detected": 9,
-     "paragraphs": 5,
+     "paragraphs": 2,
      "byPage": {
-      "1": 5
+      "1": 2
      },
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     },
@@ -1481,7 +1485,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 861791,
-    "insideChangedRatio": 0.4389960050236597,
+    "insideChangedRatio": 0.4388762478543507,
     "outsideSamples": []
    },
    "residue": {
@@ -1491,7 +1495,7 @@
     "sourceScript": "latin"
    },
    "removal": {
-    "requested": 27,
+    "requested": 24,
     "residueRatio": 0.0,
     "tableRatio": 0.0,
     "nonTableRatio": 0.0,
@@ -1500,48 +1504,49 @@
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
    },
    "stats": {
-    "paragraphsRendered": 27,
+    "paragraphsRendered": 24,
     "formulasRendered": 0,
     "overflowed": 0,
-    "overflowedRight": 3,
+    "overflowedRight": 0,
     "imagesRendered": 0,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-f0vjbfdj\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-f0vjbfdj\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-834ovh3r\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-834ovh3r\\assembly.json"
    }
   },
   {
    "fixture": "landscape-slides",
    "layout": {
-    "biou": 0.7047969499636575,
-    "biouSamples": 19,
-    "boxRecall": 0.7719917377730381,
-    "boxPrecision": 0.898663429481673,
-    "utb": 0,
+    "biou": 0.7433631308289042,
+    "biouSamples": 15,
+    "boxRecall": 0.7659241462441992,
+    "boxPrecision": 0.9620182439914219,
+    "utb": 4,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 4
     },
     "overflow": {
-     "right": 4,
+     "right": 0,
      "bottom": 0,
      "top": 1,
      "silentRight": 0
     },
     "maxOverflow": {
-     "right": 5.746006591796885,
+     "right": 0.0,
      "bottom": 0.0,
      "top": 1.190860778808542
     },
     "fontSize": {
-     "median": 0.7726239095551689,
-     "p10": 0.7037037037037037,
+     "median": 0.7777777777777778,
+     "p10": 0.7666666666666667,
      "below06Ratio": 0.0
     },
     "mask": {
-     "total": 18,
+     "total": 14,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0,
      "punch": {
@@ -1556,10 +1561,10 @@
      {
       "page": 1,
       "paragraphs": 17,
-      "translated": 17,
-      "untranslated": 0,
-      "meanIou": 0.6897526247984131,
-      "masks": 16
+      "translated": 13,
+      "untranslated": 4,
+      "meanIou": 0.7296230411305458,
+      "masks": 12
      },
      {
       "page": 2,
@@ -1571,7 +1576,7 @@
      }
     ]
    },
-   "elapsedMs": 4368,
+   "elapsedMs": 4139,
    "parse": {
     "spanMarked": 0,
     "formula": {
@@ -1750,9 +1755,9 @@
     "figureText": {
      "truth": 12,
      "detected": 12,
-     "paragraphs": 6,
+     "paragraphs": 2,
      "byPage": {
-      "1": 6
+      "1": 2
      },
      "note": "图内文字按「字号小于该页中位字号的 0.8 倍且落在矢量路径簇内」检出；figureTextFilter 依赖的 --inspect 在五篇夹具上返回 0，排除从未生效"
     },
@@ -1784,7 +1789,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 2225809,
-    "insideChangedRatio": 0.43873023808035994,
+    "insideChangedRatio": 0.4383700115051957,
     "outsideSamples": []
    },
    "residue": {
@@ -1794,7 +1799,7 @@
     "sourceScript": "latin"
    },
    "removal": {
-    "requested": 19,
+    "requested": 15,
     "residueRatio": 0.0,
     "tableRatio": 0.0,
     "nonTableRatio": 0.0,
@@ -1803,16 +1808,16 @@
     "note": "旁路测量：用装配层产出的同一份区域文件跑删除器，再量删完 PDF 的原文残留。不影响译文 PDF 的产出路径"
    },
    "stats": {
-    "paragraphsRendered": 19,
+    "paragraphsRendered": 15,
     "formulasRendered": 0,
     "overflowed": 0,
-    "overflowedRight": 4,
+    "overflowedRight": 0,
     "imagesRendered": 0,
     "imagesDropped": 0
    },
    "artifacts": {
-    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-n2oozs19\\translated.pdf",
-    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-n2oozs19\\assembly.json"
+    "translatedPdf": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-qil5l_x6\\translated.pdf",
+    "assembly": "C:\\Users\\ZHHlo\\AppData\\Local\\Temp\\zt-bench-qil5l_x6\\assembly.json"
    }
   }
  ]

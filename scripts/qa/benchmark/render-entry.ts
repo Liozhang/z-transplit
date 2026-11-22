@@ -98,6 +98,12 @@ interface AssemblyPageJson {
       | "backgroundColor"
     > & { text: string }
   >;
+  /**
+   * 逐段"保留原文、不送翻译"，与 paragraphs 同位。装配层按 translationScope 的
+   * 判据算出来（窄框放不下汉字的、纯数字串的），无头路径的合成译文与度量端的
+   * 图内文字项都照它走。
+   */
+  keepOriginal: boolean[];
   images: Array<{ x0: number; y0: number; x1: number; y1: number }>;
   tables: Array<{ x0: number; y0: number; x1: number; y1: number; rows: number; cols: number }>;
 }
@@ -212,7 +218,12 @@ async function assemble(config: RenderConfig): Promise<void> {
   } catch (e) {
     process.stderr.write(`background-fill sampling skipped: ${e}\n`);
   }
-  const built = odlAnalysisToAssembly(analysis, { backgroundFills });
+  // 目标语言一并传进装配层：它决定哪些段落不送翻译（窄框放不下汉字的、纯数字
+  // 串的，见 translationScope）。不传就照产品那样按中文目标算。
+  const built = odlAnalysisToAssembly(analysis, {
+    backgroundFills,
+    targetLanguage: config.targetLanguage ?? "zh-CN",
+  });
 
   // 页面尺寸一律读原文 PDF。解析器的 JSON 不带 MediaBox，适配器只能猜一个
   // 标准尺寸——猜的是 612×792（Letter），而 A4 夹具实际是 594.96×841.92。
@@ -253,6 +264,10 @@ async function assemble(config: RenderConfig): Promise<void> {
         ...(p.sourceFontSize !== undefined ? { sourceFontSize: p.sourceFontSize } : {}),
         ...(p.backgroundColor ? { backgroundColor: p.backgroundColor } : {}),
       })),
+      // 逐段"保留原文、不送翻译"的标注原样带出。无头路径的合成译文要照它留空，
+      // 度量端的图内文字项也要照它只数真会送翻译的段——不照做，量到的就不是产品
+      // 实际会做的事。
+      keepOriginal: assembly.keepOriginal ?? assembly.paragraphs.map(() => false),
       images,
       tables,
     });

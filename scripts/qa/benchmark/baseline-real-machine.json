@@ -1,10 +1,10 @@
 {
- "commit": "7f73d59",
- "generatedAt": "2026-11-22 13:27:23",
+ "commit": "3095d7b",
+ "generatedAt": "2026-11-22 16:51:05",
  "results": [
   {
    "fixture": "reading-brain",
-   "translatedPdf": "D:\\zt-qa\\data\\storage\\ALHQ9PT3\\Translated_qa-sample.pdf",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\PKYH3NX8\\Translated_qa-sample.pdf",
    "layout": {
     "biou": 0.7174624513193619,
     "biouSamples": 18,
@@ -13,7 +13,8 @@
     "utb": 0,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 0
     },
     "overflow": {
      "right": 0,
@@ -60,7 +61,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 2052687,
-    "insideChangedRatio": 0.415136377546415,
+    "insideChangedRatio": 0.41545780981337116,
     "outsideSamples": []
    },
    "residue": {
@@ -70,52 +71,53 @@
     "sourceScript": "latin"
    },
    "provenance": {
-    "commit": "7f73d59",
-    "generatedAt": "2026-11-22 13:26:25"
+    "commit": "3095d7b",
+    "generatedAt": "2026-11-22 16:50:04"
    }
   },
   {
    "fixture": "attention-reading",
-   "translatedPdf": "D:\\zt-qa\\data\\storage\\UVLNUYDU\\Translated_qa-sample.pdf",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\ENVL8IGI\\Translated_qa-sample.pdf",
    "layout": {
-    "biou": 0.7209907105761968,
-    "biouSamples": 37,
-    "boxRecall": 0.7512974976743703,
-    "boxPrecision": 0.9473077328200713,
-    "utb": 1,
+    "biou": 0.7384664260679886,
+    "biouSamples": 35,
+    "boxRecall": 0.7508257213861841,
+    "boxPrecision": 0.974126151326976,
+    "utb": 3,
     "utbReasons": {
-     "noText": 1,
-     "empty": 0
+     "noText": 0,
+     "empty": 0,
+     "keptOriginal": 3
     },
     "overflow": {
-     "right": 2,
+     "right": 0,
      "bottom": 0,
      "top": 0,
-     "silentRight": 2
+     "silentRight": 0
     },
     "maxOverflow": {
-     "right": 6.00001147460938,
+     "right": 0.0,
      "bottom": 0.0,
      "top": 0.0
     },
     "fontSize": {
      "median": 0.8294873174190575,
      "p10": 0.6247654641099539,
-     "below06Ratio": 0.08411214953271028
+     "below06Ratio": 0.08571428571428572
     },
     "mask": {
      "total": 2,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0
     },
-    "unassignedSpans": 1,
+    "unassignedSpans": 0,
     "perPage": [
      {
       "page": 1,
       "paragraphs": 26,
-      "translated": 25,
-      "untranslated": 1,
-      "meanIou": 0.7167914920915824,
+      "translated": 23,
+      "untranslated": 3,
+      "meanIou": 0.7430198227543426,
       "masks": 1
      },
      {
@@ -132,7 +134,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 1748321,
-    "insideChangedRatio": 0.4287172507655665,
+    "insideChangedRatio": 0.4282105238563232,
     "outsideSamples": []
    },
    "residue": {
@@ -142,52 +144,53 @@
     "sourceScript": "latin"
    },
    "provenance": {
-    "commit": "7f73d59",
-    "generatedAt": "2026-11-22 13:26:42"
+    "commit": "3095d7b",
+    "generatedAt": "2026-11-22 16:50:23"
    }
   },
   {
    "fixture": "three-column",
-   "translatedPdf": "D:\\zt-qa\\data\\storage\\WD2BQYQM\\Translated_qa-sample.pdf",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\HJ3H6NA6\\Translated_qa-sample.pdf",
    "layout": {
-    "biou": 0.7101275838576738,
-    "biouSamples": 26,
-    "boxRecall": 0.747783311154493,
-    "boxPrecision": 0.9370662961247864,
-    "utb": 1,
+    "biou": 0.7347089420408003,
+    "biouSamples": 24,
+    "boxRecall": 0.7468069303373025,
+    "boxPrecision": 0.9753228555317817,
+    "utb": 3,
     "utbReasons": {
-     "noText": 1,
-     "empty": 0
+     "noText": 0,
+     "empty": 0,
+     "keptOriginal": 3
     },
     "overflow": {
-     "right": 2,
+     "right": 0,
      "bottom": 0,
      "top": 0,
-     "silentRight": 2
+     "silentRight": 0
     },
     "maxOverflow": {
-     "right": 6.0,
+     "right": 0.0,
      "bottom": 0.0,
      "top": 0.0
     },
     "fontSize": {
      "median": 0.8234671316273678,
      "p10": 0.6498949902408466,
-     "below06Ratio": 0.05063291139240506
+     "below06Ratio": 0.05194805194805195
     },
     "mask": {
      "total": 1,
      "intrusionIntoParagraph": 0,
      "intrusionIntoRegion": 0
     },
-    "unassignedSpans": 1,
+    "unassignedSpans": 0,
     "perPage": [
      {
       "page": 1,
       "paragraphs": 27,
-      "translated": 26,
-      "untranslated": 1,
-      "meanIou": 0.7101275838576738,
+      "translated": 24,
+      "untranslated": 3,
+      "meanIou": 0.7347089420408003,
       "masks": 1
      }
     ]
@@ -196,7 +199,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 861791,
-    "insideChangedRatio": 0.45096558056126196,
+    "insideChangedRatio": 0.45003823017327943,
     "outsideSamples": []
    },
    "residue": {
@@ -206,38 +209,39 @@
     "sourceScript": "latin"
    },
    "provenance": {
-    "commit": "7f73d59",
-    "generatedAt": "2026-11-22 13:26:54"
+    "commit": "3095d7b",
+    "generatedAt": "2026-11-22 16:50:35"
    }
   },
   {
    "fixture": "landscape-slides",
-   "translatedPdf": "D:\\zt-qa\\data\\storage\\BZBT5EJ5\\Translated_qa-sample.pdf",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\D4FL3R56\\Translated_qa-sample.pdf",
    "layout": {
-    "biou": 0.7111099359934059,
-    "biouSamples": 19,
-    "boxRecall": 0.8331801360190667,
-    "boxPrecision": 0.8664385323071396,
-    "utb": 0,
+    "biou": 0.7657527123145889,
+    "biouSamples": 15,
+    "boxRecall": 0.7886951316140676,
+    "boxPrecision": 0.96250219908318,
+    "utb": 4,
     "utbReasons": {
      "noText": 0,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 4
     },
     "overflow": {
-     "right": 5,
+     "right": 0,
      "bottom": 0,
      "top": 1,
-     "silentRight": 5
+     "silentRight": 0
     },
     "maxOverflow": {
-     "right": 7.496006591796885,
+     "right": 0.0,
      "bottom": 0.0,
      "top": 1.190860778808542
     },
     "fontSize": {
-     "median": 0.7307070662922663,
-     "p10": 0.5555555555555556,
-     "below06Ratio": 0.32142857142857145
+     "median": 0.7777777777777778,
+     "p10": 0.6,
+     "below06Ratio": 0.05
     },
     "mask": {
      "total": 1,
@@ -249,9 +253,9 @@
      {
       "page": 1,
       "paragraphs": 17,
-      "translated": 17,
-      "untranslated": 0,
-      "meanIou": 0.7035187331633143,
+      "translated": 13,
+      "untranslated": 4,
+      "meanIou": 0.7642323357400357,
       "masks": 1
      },
      {
@@ -268,7 +272,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 2225809,
-    "insideChangedRatio": 0.45644382854685334,
+    "insideChangedRatio": 0.45575645742893794,
     "outsideSamples": []
    },
    "residue": {
@@ -278,13 +282,13 @@
     "sourceScript": "latin"
    },
    "provenance": {
-    "commit": "7f73d59",
-    "generatedAt": "2026-11-22 13:27:05"
+    "commit": "3095d7b",
+    "generatedAt": "2026-11-22 16:50:46"
    }
   },
   {
    "fixture": "formula-dense",
-   "translatedPdf": "D:\\zt-qa\\data\\storage\\RRK6HNTE\\Translated_qa-sample.pdf",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\6WQ4WZEX\\Translated_qa-sample.pdf",
    "layout": {
     "biou": 0.7294304038137949,
     "biouSamples": 22,
@@ -293,7 +297,8 @@
     "utb": 4,
     "utbReasons": {
      "noText": 4,
-     "empty": 0
+     "empty": 0,
+     "keptOriginal": 0
     },
     "overflow": {
      "right": 0,
@@ -332,7 +337,7 @@
     "outsideDiffRatio": 0.0,
     "outsideDiff": 0,
     "outsideTotal": 476303,
-    "insideChangedRatio": 0.40481597968727073,
+    "insideChangedRatio": 0.40512698645605394,
     "outsideSamples": []
    },
    "residue": {
@@ -342,8 +347,8 @@
     "sourceScript": "latin"
    },
    "provenance": {
-    "commit": "7f73d59",
-    "generatedAt": "2026-11-22 13:27:23"
+    "commit": "3095d7b",
+    "generatedAt": "2026-11-22 16:51:05"
    }
   }
  ]

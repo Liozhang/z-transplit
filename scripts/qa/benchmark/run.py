@@ -637,9 +637,19 @@ def run_fixture(name: str, ratio: float, keep_workdir: Path | None = None) -> di
     # 3. 合成译文：逐页逐段，与装配段落严格对齐
     # 译文按段落下标与装配严格对齐。文本在装配视图里是单独一个 texts 数组，
     # 与 paragraphs 同位——渲染器的契约就是 paragraphs[i] 与 texts[i] 描述同一段。
+    #
+    # 装配层标了 keepOriginal 的段留空，与产品一致：产品那边把这些段的送译文本
+    # 清空（translateParagraphs 对空串直通、不计失败），渲染端与删除区域都按空
+    # 译文跳过。不照做，无头量到的就不是产品实际会做的事。
     translations = [
         [
-            synthetic_translation(paragraph["text"], page["pageNumber"] * 1000 + index, ratio)
+            (
+                ""
+                if index < len(page.get("keepOriginal") or []) and page["keepOriginal"][index]
+                else synthetic_translation(
+                    paragraph["text"], page["pageNumber"] * 1000 + index, ratio
+                )
+            )
             for index, paragraph in enumerate(page["paragraphs"])
         ]
         for page in assembly["pages"]
@@ -783,6 +793,11 @@ WATCHED: list[tuple[str, str, str]] = [
     ("layout.boxRecall", "ratio", "higher"),
     ("layout.boxPrecision", "ratio", "higher"),
     ("layout.utb", "count", "lower"),
+    # 未翻译块里"该译没译"的那部分，把有意保留原文的段剔掉。批 3 定下"图内文字只
+    # 翻放得下的"之后，坐标轴刻度这类段不再译，utb 会涨——那是决定的结果，不是缺陷。
+    # 只盯 utb 会把这两类混成一个数：一次有意改动之后，真正的"该译没译"回归就埋
+    # 在里面看不出来了。所以加这一项，让门禁只对缺陷那部分敏感。
+    ("layout.utbReasons.noText", "count", "lower"),
     ("layout.overflow.right", "count", "lower"),
     ("layout.overflow.bottom", "count", "lower"),
     ("layout.overflow.top", "count", "lower"),
