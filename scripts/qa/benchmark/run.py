@@ -1095,29 +1095,64 @@ def qa_zotero_running() -> bool:
     return any(token.strip().isdigit() for token in result.stdout.split())
 
 
+def zotero_log_path() -> Path:
+    """QA 实例的 stdout 日志路径（real-machine.mjs 启动时打开的同一个文件）。"""
+    return Path(os.environ.get("QA_ROOT", r"D:\zt-qa")) / "zotero-stdout.log"
+
+
+def zotero_log_size() -> int:
+    """日志当前的字节数，用作"只读这一次之后写进来的内容"的刻度。
+
+    用字节数而不是行数：行数会在别的进程并发写日志时错位，字节偏移不会。
+    """
+    path = zotero_log_path()
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def zotero_log_after(mark: int) -> str:
+    """读刻度之后写进来的日志内容。读不出来当空字符串，不让日志问题冒充产品问题。"""
+    path = zotero_log_path()
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(mark)
+            return handle.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def ensure_qa_instance(launcher: Path) -> None:
+    """确认有一个活着的 QA 实例，没有就 boot 一个。
+
+    复用不是偷懒：boot 每次都用一份全新 profile，而全新 profile 第一次开阅读器要
+    反复重试「PDFViewerApplication not ready in reader iframe」，实测多花十分钟以上，
+    全花在和版面无关的一次性初始化上。要从头来就手工 shoot 再跑。
+    """
+    if qa_zotero_running():
+        print("  复用已在运行的 QA 实例（要重来先 node scripts/qa/real-machine.mjs shoot）")
+        return
+    print("  启动真机（boot）……")
+    boot = run(["node", str(launcher), "boot"])
+    if boot.returncode != 0:
+        raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
+
+
 def run_real_machine_pipeline(launcher: Path, fixture_pdf: Path, steps: list[list[str]]) -> str:
     """真机跑一趟流水线，返回**这一轮**新产出的译文附件路径。
 
     三段共用的东西抽在这里，因为已经有三个调用方（整篇点火、页码范围点火、遮罩
     回落点火），各自抄一遍就等于各自过期一遍：
 
-    1. **已有 QA 实例就复用，没有才 boot。** 复用不是偷懒：boot 每次都用一份全新
-       profile，而全新 profile 第一次开阅读器要反复重试「PDFViewerApplication not
-       ready in reader iframe」，实测多花十分钟以上，全花在和版面无关的一次性初始化
-       上。要从头来就手工 shoot 再跑。
+    1. 先确认有一个活着的 QA 实例（见 ensure_qa_instance）；
     2. **点火前先拍快照。** 库里此刻有哪些译文附件、各自改到什么时间。没有这一份，
        轮询分不清"这一轮新产出的"与"往轮次留下的"，第二篇以后的夹具就会拿上一篇
        的产出当结论（three-column 实测踩中：报"页数不一致：原文 1，译文 2"——报得
        对，但病根在挑文件，不在流水线）。
     3. **只认快照之后新出现的条目**，或者文件确实被改写过的条目。
     """
-    if qa_zotero_running():
-        print("  复用已在运行的 QA 实例（要重来先 node scripts/qa/real-machine.mjs shoot）")
-    else:
-        print("  启动真机（boot）……")
-        boot = run(["node", str(launcher), "boot"])
-        if boot.returncode != 0:
-            raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
+    ensure_qa_instance(launcher)
 
     before = snapshot_translated_attachments(launcher)
     for step in steps:
@@ -1297,6 +1332,155 @@ def real_machine_pages_check(name: str, range_spec: str) -> dict:
         "range": range_spec,
         "pages": pages,
         "translatedPdf": translated_path,
+        "checks": [{"label": label, "passed": passed, "detail": detail} for label, passed, detail in checks],
+        "ok": ok,
+    }
+
+
+def real_machine_scan_check(name: str) -> dict:
+    """扫描页 OCR 路由的真机抽查。
+
+    无头路径绕过了 `decideScanRouting`，所以"这篇是扫描件、该走识别"这件事只能
+    在真机上确认。路由规则本身是纯函数、有单测；这里验的是编排：一份纯图片的
+    PDF（`scanned-sample.pdf`，两页、文本层为空、每页一张图）送进真机，必须
+    **不在解析阶段死掉**，而是走到识别阶段，并且把失败说得可操作。
+
+    本机装不了识别环境（PaddleOCR 推理跑不通），所以这一轮的终态必然是"识别环境
+    未就绪"。这正好是可断言的：产品此时该报的是"去设置里装识别环境"，而不是
+    "解析没提取到文本"——后者会把人指向一个已经尽力了的解析器。这正是适配器注释
+    里点名要避免的那件事。
+
+    判据全部读 QA 实例的日志（产品自己的诊断输出），不重新实现任何产品逻辑：
+      1. 解析跑完了：ODL 的 JVM 正常退出，纯扫描件没有让流水线死在解析阶段；
+      2. 流水线确实失败了，且失败消息是识别环境那条（按界面语言取对应文案）；
+      3. 没有产出译文附件——识别一页都没成，不该假装成功交一份东西。
+
+    跑法：
+        python scripts/qa/benchmark/run.py --real-machine-scan scanned-sample
+    """
+    launcher = ROOT / "scripts" / "qa" / "real-machine.mjs"
+    fixture_pdf = FIXTURE_DIR / f"{name}.pdf"
+    if not fixture_pdf.exists():
+        raise RuntimeError(f"夹具不存在：{fixture_pdf}")
+    print(f"扫描页 OCR 路由真机抽查 {name}")
+
+    ensure_qa_instance(launcher)
+    before = snapshot_translated_attachments(launcher)
+    log_mark = zotero_log_size()
+    for step in [
+        ["send", "installPdf", str(fixture_pdf)],
+        ["send", "pipelineStart", "{}"],
+    ]:
+        timeout = "600000" if step[1] in ("installPdf", "pipelineStart") else None
+        result = run(
+            ["node", str(launcher), *step],
+            **({"env": {**os.environ, "QA_CMD_TIMEOUT": timeout}} if timeout else {}),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"真机命令 {step[1]} 失败\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
+        print(f"  {step[1]}: {result.stdout.strip()[:200]}")
+
+    # 分两段等：先等"点着了"（解析器被拉起），再等结论。分开是因为两者失败的
+    # 原因完全不同——点不着是测试台的状态问题，结论不对才是产品问题。
+    #
+    # 点不着是实测出来的：同一实例上跑过一次**失败收场**的流水线之后，doCommand
+    # 就不再触发 handler——菜单项还在、条目也选中了、popupshowing 那行日志照旧
+    # 出现，就是命令后面没有任何动静。重启 QA 实例即恢复。所以这一个现象必须单独
+    # 报，不能混进"产品没走扫描路由"里。
+    menu_ready = False
+    fired = False
+    conclusion = ""
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        time.sleep(5)
+        text = zotero_log_after(log_mark)
+        if "findSplitTabForItem" in text:
+            menu_ready = True
+        if not fired and ("spawning JVM" in text or "tryOpenDataLoader" in text):
+            fired = True
+        if "itemTreeMenu pipeline failed" in text or "itemTreeMenu pipeline done" in text:
+            conclusion = text
+            break
+        # 菜单就绪却迟迟拉不起解析器：命令没触发，别再等下去。
+        if menu_ready and not fired and time.time() > deadline - 210:
+            break
+    if not conclusion:
+        conclusion = zotero_log_after(log_mark)
+
+    checks: list[tuple[str, bool, str]] = []
+    checks.append(
+        (
+            "流水线点着了（解析器被拉起）",
+            fired,
+            "解析器已启动"
+            if fired
+            else "菜单就绪但命令没有触发——QA 实例的状态问题，"
+            "先 node scripts/qa/real-machine.mjs shoot 再 boot 重跑",
+        )
+    )
+    if not fired:
+        for label, passed, detail in checks:
+            print(f"  {'ok  ' if passed else 'FAIL'} {label}（{detail}）")
+        print("扫描页 OCR 路由真机抽查未通过（没点着火，结论不代表产品行为）")
+        return {
+            "fixture": name,
+            "checks": [
+                {"label": label, "passed": passed, "detail": detail}
+                for label, passed, detail in checks
+            ],
+            "ok": False,
+        }
+
+    # 1. 解析阶段没死：ODL 的 JVM 正常退出。纯扫描件上 ODL 产出的是零段而不是抛错，
+    #    这条日志是"解析跑完了"最直接的证据。
+    jvm_ok = "JVM exited: code=0" in conclusion
+    checks.append(
+        (
+            "解析阶段跑完了（纯扫描件没有让流水线死在解析）",
+            jvm_ok,
+            "JVM exited: code=0" if jvm_ok else "日志里没有 JVM 正常退出的记录",
+        )
+    )
+    # 2. 失败在识别阶段，且说的是识别环境。文案按界面语言取：QA 默认 en-US，
+    #    中文界面是另一套。都不匹配时把实际消息原样打出来，换语言时一眼看得出。
+    scan_messages = (
+        "Scanned pages need recognition, but the recognition environment is not ready",
+        "检测到需要识别的扫描页，但识别环境尚未就绪",
+    )
+    failure_line = next(
+        (
+            line
+            for line in conclusion.splitlines()
+            if "itemTreeMenu pipeline failed" in line
+        ),
+        "",
+    )
+    hit = next((m for m in scan_messages if m in failure_line), "")
+    checks.append(
+        (
+            "失败报的是识别环境未就绪，不是解析没提取到文本",
+            bool(hit),
+            f"命中文案 {hit[:40]!r}" if hit else f"实际消息：{failure_line[-220:]}",
+        )
+    )
+    # 3. 一页都没认出来，不该产出译文附件。再给一小段时间，避免 races。
+    time.sleep(10)
+    result = run(["node", str(launcher), "send", "translated"])
+    fresh = fresh_translated_attachment(translated_items(result.stdout), before)
+    checks.append(
+        (
+            "识别一页都没成时没有产出译文附件（不假装成功）",
+            fresh is None,
+            f"多出了 {fresh}" if fresh else "没有新附件",
+        )
+    )
+
+    ok = all(passed for _, passed, _ in checks)
+    for label, passed, detail in checks:
+        print(f"  {'ok  ' if passed else 'FAIL'} {label}（{detail}）")
+    print("扫描页 OCR 路由真机抽查" + ("通过" if ok else "未通过"))
+    return {
+        "fixture": name,
         "checks": [{"label": label, "passed": passed, "detail": detail} for label, passed, detail in checks],
         "ok": ok,
     }
@@ -2102,6 +2286,11 @@ def main() -> int:
         action="store_true",
         help="删除无效时回落遮罩的真机抽查：验证原文仍在文本层且被白色遮罩盖住。配 form-text 夹具",
     )
+    parser.add_argument(
+        "--real-machine-scan",
+        action="store_true",
+        help="扫描页 OCR 路由的真机抽查：验证纯扫描件不在解析阶段死掉、失败报的是识别环境。配 scanned-sample 夹具",
+    )
     parser.add_argument("--range", default="", help="页码范围，例如 2 或 1-2 或 1,3")
     parser.add_argument("--keep-workdir", default="", help="保留中间产物到指定目录（排障用）")
     args = parser.parse_args()
@@ -2168,6 +2357,28 @@ def main() -> int:
             print(f"\n删除无效回落遮罩真机抽查失败：{failures} 篇未通过")
             return 1
         print("\n删除无效回落遮罩真机抽查通过")
+        return 0
+
+    if args.real_machine_scan:
+        if not args.names:
+            parser.error("--real-machine-scan 需要指定夹具名，例如 --real-machine-scan scanned-sample")
+        failures = 0
+        for name in args.names:
+            try:
+                report = real_machine_scan_check(name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  {name} 失败：{type(exc).__name__}: {exc}")
+                if os.environ.get("BENCH_TRACEBACK"):
+                    import traceback
+
+                    traceback.print_exc()
+                return 1
+            if not report["ok"]:
+                failures += 1
+        if failures:
+            print(f"\n扫描页 OCR 路由真机抽查失败：{failures} 篇未通过")
+            return 1
+        print("\n扫描页 OCR 路由真机抽查通过")
         return 0
 
     if args.ocr:

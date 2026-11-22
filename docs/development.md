@@ -803,10 +803,11 @@ colored callouts / code blocks / striped table rows aren't punched through"。
 `src/core/pdf/translation/opendataloaderSplitAdapter.ts`，因此不覆盖：译文附件创建、
 进度汇总、白页兜底合并模式，**以及扫描页与劣质文本层页的 OCR 路由**（这条第三批
 批次 6 补上，见该节的度量）。页面范围选择原本也在这份清单里，已由
-`--real-machine-pages` 补上（见下面"页码范围真机抽查"）。公式截图的取图路径也不等价—
-—无头用 pymupdf 渲染同一块区域，真机是借阅读器的活 pdf.js 实例；截图内容等价，
-取图路径不等价。这几块只能靠 `--real-machine` 抽查确认，那也是它存在的唯一目的：
-不是每批都跑，是回答「无头路径可不可信」。
+`--real-machine-pages` 补上（见下面"页码范围真机抽查"）；OCR 路由也由
+`--real-machine-scan` 补上了路由那一段（识别本身本机跑不了，见该节）。公式截图的
+取图路径也不等价——无头用 pymupdf 渲染同一块区域，真机是借阅读器的活 pdf.js 实例；
+截图内容等价，取图路径不等价。这几块只能靠 `--real-machine` 抽查确认，那也是它存在
+的唯一目的：不是每批都跑，是回答「无头路径可不可信」。
 
 
 **原文删除曾是这里唯一"真机测得、无头从来没测过"的一环，第三批批次 7 补上了旁路
@@ -1525,6 +1526,40 @@ opendataloaderSplitAdapter: original-text removal removed nothing (...) — fall
 
 这三条断言连同两个负控（没有遮罩、遮罩画了而译文没画）都进了 `run.py --selftest`，
 用 PyMuPDF 现场合成 PDF，不依赖真机。
+
+#### 扫描页 OCR 路由也补上了，白页兜底诚实地留白
+
+**扫描页路由**（`--real-machine-scan scanned-sample`）。无头路径绕过
+`decideScanRouting`，所以"这篇是扫描件、该走识别"只能真机确认。路由规则本身是纯
+函数、有单测；这里验的是编排：一份纯图片的 PDF（`scanned-sample.pdf`，两页、文本层
+为空、每页一张图）送进真机，必须**不在解析阶段死掉**，而是走到识别阶段，并且把失败
+说得可操作。
+
+本机装不了识别环境（PaddleOCR 推理跑不通），所以终态必然是"识别环境未就绪"——这
+正好是可断言的：产品此时该报"去设置里装识别环境"，而不是"解析没提取到文本"，后者
+会把人指向一个已经尽力了的解析器。四条判据（前一条是前置闸口）：
+
+| 判据 | 实测 |
+|---|---|
+| 流水线点着了（解析器被拉起） | 解析器已启动 |
+| 解析阶段跑完了 | `JVM exited: code=0` |
+| 失败报的是识别环境未就绪 | 命中 `scan-error-sidecar-unconfigured` |
+| 一页都没认出来时没有产出译文附件 | 没有新附件 |
+
+**测试台的一个坑，记下来免得重复踩**：同一实例上跑过一次**失败收场**的流水线之后，
+`doCommand()` 就不再触发 handler——菜单项还在、条目也选中了、`popupshowing` 那行日志
+照旧出现，就是命令后面没有任何动静，窗口枚举也只有两个。重启 QA 实例即恢复。所以
+检查把"点着了"单列一条：点不着是测试台状态问题，结论不代表产品行为，混在一起就会
+把一次重启能解决的事记成产品缺陷。
+
+**白页兜底没有做真机覆盖，这是有意的。** 那条分支（`if (sourcePdfBytes) … else …`）
+只在 `IOUtils.read(inputPath)` 失败或插件作用域里没有 `IOUtils` 时进入，健康宿主上
+永远不走；要覆盖它就得先把宿主持续弄坏，而那正好是它要防的情况。它也不是一块没测
+的代码：分支里用到的两块都有单测——`collectPageSizes`（真实 MediaBox、旋转页不交换
+宽高）在 `tests/node/probes-and-clamps.spec.ts`，`mergePageBytes` 在
+`tests/node/table-and-merge.spec.ts`。真正没覆盖的只有那二十行编排本身，而为它搭一套
+能驱动整个适配器的 Node 环境要桩掉 ODL 解析、引擎就绪、偏好、本地化、字体与阅读器
+探针——成本远高于它出错时的后果。记在这里，下一个动这条分支的人知道风险在哪儿。
 
 ### 真机门禁（`baseline-real-machine.json`）
 
