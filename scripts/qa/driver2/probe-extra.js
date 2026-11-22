@@ -553,7 +553,7 @@ function parseOpts(arg) {
    *
    * 附带回报每个附件的磁盘路径：评测基准要把真机产出的译文 PDF 取出来做版
    * 面度量，没有路径就只能去数据目录里翻。路径是 Zotero 自己解析出来的，
-   * 比在存储目录里按文件名猜可靠。
+   * 比在存储目录里猜文件名可靠。
    */
   PROBE_CMDS.translated = async function () {
     const s = new Zotero.Search();

@@ -1139,10 +1139,36 @@ def ensure_qa_instance(launcher: Path) -> None:
         raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
 
 
+def wait_for_pipeline_started(log_mark: int, timeout: float = 180.0) -> bool:
+    """等流水线真的起步（解析器被拉起），没起步就早点儿说清楚。
+
+    为什么先等这一步再等译文附件：命令没触发时，等译文附件会一直等到超时——实测
+    白等 500 秒以上，而失败信息指向"没有产出"，看起来像产品没干活。真机实例跑过
+    一次失败收场的流水线之后，菜单的 command 路由会失效（元素、监听、文档位置全都
+    活着，只有 command 事件到不了，见文档"扫描页 OCR 路由也补上了"那一节），这时
+    每一轮都会这样白等。所以先确认起步，再等产出。
+
+    判据用日志里"解析器被拉起"这两行：`tryOpenDataLoader` 或 `spawning JVM`。出现
+    任意一条就算起步；流水线结论行（成功或失败）也算——它跑过了才会结论。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        text = zotero_log_after(log_mark)
+        if (
+            "tryOpenDataLoader" in text
+            or "spawning JVM" in text
+            or "itemTreeMenu pipeline failed" in text
+            or "itemTreeMenu pipeline done" in text
+        ):
+            return True
+        time.sleep(3)
+    return False
+
+
 def run_real_machine_pipeline(launcher: Path, fixture_pdf: Path, steps: list[list[str]]) -> str:
     """真机跑一趟流水线，返回**这一轮**新产出的译文附件路径。
 
-    三段共用的东西抽在这里，因为已经有三个调用方（整篇点火、页码范围点火、遮罩
+    四段共用的东西抽在这里，因为已经有三个调用方（整篇点火、页码范围点火、遮罩
     回落点火），各自抄一遍就等于各自过期一遍：
 
     1. 先确认有一个活着的 QA 实例（见 ensure_qa_instance）；
@@ -1150,10 +1176,13 @@ def run_real_machine_pipeline(launcher: Path, fixture_pdf: Path, steps: list[lis
        轮询分不清"这一轮新产出的"与"往轮次留下的"，第二篇以后的夹具就会拿上一篇
        的产出当结论（three-column 实测踩中：报"页数不一致：原文 1，译文 2"——报得
        对，但病根在挑文件，不在流水线）。
-    3. **只认快照之后新出现的条目**，或者文件确实被改写过的条目。
+    3. **先确认流水线起步了**，再等译文附件（见 wait_for_pipeline_started）；
+    4. **只认快照之后新出现的条目**，或者文件确实被改写过的条目。
     """
     ensure_qa_instance(launcher)
 
+    # 日志刻度要在发命令之前拍：判据是"这一轮写进来的日志"，不是日志里有没有这行。
+    log_mark = zotero_log_size()
     before = snapshot_translated_attachments(launcher)
     for step in steps:
         # 慢命令单独给超时：全新 profile 第一次导入附件要做索引与缩略图，
@@ -1170,6 +1199,14 @@ def run_real_machine_pipeline(launcher: Path, fixture_pdf: Path, steps: list[lis
         if result.returncode != 0:
             raise RuntimeError(f"真机命令 {step[1]} 失败\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
         print(f"  {step[1]}: {result.stdout.strip()[:200]}")
+
+    if not wait_for_pipeline_started(log_mark):
+        raise RuntimeError(
+            "流水线没有起步：菜单命令没有触发（解析器始终没被拉起）。这是 QA 实例的"
+            "状态问题，不是产品问题——同一实例上跑过一次失败收场的流水线之后，菜单的"
+            " command 路由会失效。先 node scripts/qa/real-machine.mjs shoot 再 boot "
+            "重跑。"
+        )
 
     # 轮询要等得够久：全新 profile 的第一次流水线要做一堆一次性的事（解析器 jar、
     # 字体解析、阅读器开关、译文附件落盘），实测比"跑第二遍"慢一个量级，300 秒不够。
@@ -1387,25 +1424,8 @@ def real_machine_scan_check(name: str) -> dict:
     # 就不再触发 handler——菜单项还在、条目也选中了、popupshowing 那行日志照旧
     # 出现，就是命令后面没有任何动静。重启 QA 实例即恢复。所以这一个现象必须单独
     # 报，不能混进"产品没走扫描路由"里。
-    menu_ready = False
-    fired = False
-    conclusion = ""
-    deadline = time.time() + 300
-    while time.time() < deadline:
-        time.sleep(5)
-        text = zotero_log_after(log_mark)
-        if "findSplitTabForItem" in text:
-            menu_ready = True
-        if not fired and ("spawning JVM" in text or "tryOpenDataLoader" in text):
-            fired = True
-        if "itemTreeMenu pipeline failed" in text or "itemTreeMenu pipeline done" in text:
-            conclusion = text
-            break
-        # 菜单就绪却迟迟拉不起解析器：命令没触发，别再等下去。
-        if menu_ready and not fired and time.time() > deadline - 210:
-            break
-    if not conclusion:
-        conclusion = zotero_log_after(log_mark)
+    fired = wait_for_pipeline_started(log_mark)
+    conclusion = zotero_log_after(log_mark)
 
     checks: list[tuple[str, bool, str]] = []
     checks.append(
@@ -1430,6 +1450,18 @@ def real_machine_scan_check(name: str) -> dict:
             ],
             "ok": False,
         }
+
+    # 起步只说明解析器被拉起了，结论要另外等：识别环境没装上时流水线还要跑一会儿
+    # 才报错。等到出现结论行（成功或失败都算）为止。
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        conclusion = zotero_log_after(log_mark)
+        if (
+            "itemTreeMenu pipeline failed" in conclusion
+            or "itemTreeMenu pipeline done" in conclusion
+        ):
+            break
+        time.sleep(5)
 
     # 1. 解析阶段没死：ODL 的 JVM 正常退出。纯扫描件上 ODL 产出的是零段而不是抛错，
     #    这条日志是"解析跑完了"最直接的证据。
