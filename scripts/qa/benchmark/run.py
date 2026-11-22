@@ -1095,6 +1095,56 @@ def qa_zotero_running() -> bool:
     return any(token.strip().isdigit() for token in result.stdout.split())
 
 
+def run_real_machine_pipeline(launcher: Path, fixture_pdf: Path, steps: list[list[str]]) -> str:
+    """真机跑一趟流水线，返回**这一轮**新产出的译文附件路径。
+
+    三段共用的东西抽在这里，因为已经有三个调用方（整篇点火、页码范围点火、遮罩
+    回落点火），各自抄一遍就等于各自过期一遍：
+
+    1. **已有 QA 实例就复用，没有才 boot。** 复用不是偷懒：boot 每次都用一份全新
+       profile，而全新 profile 第一次开阅读器要反复重试「PDFViewerApplication not
+       ready in reader iframe」，实测多花十分钟以上，全花在和版面无关的一次性初始化
+       上。要从头来就手工 shoot 再跑。
+    2. **点火前先拍快照。** 库里此刻有哪些译文附件、各自改到什么时间。没有这一份，
+       轮询分不清"这一轮新产出的"与"往轮次留下的"，第二篇以后的夹具就会拿上一篇
+       的产出当结论（three-column 实测踩中：报"页数不一致：原文 1，译文 2"——报得
+       对，但病根在挑文件，不在流水线）。
+    3. **只认快照之后新出现的条目**，或者文件确实被改写过的条目。
+    """
+    if qa_zotero_running():
+        print("  复用已在运行的 QA 实例（要重来先 node scripts/qa/real-machine.mjs shoot）")
+    else:
+        print("  启动真机（boot）……")
+        boot = run(["node", str(launcher), "boot"])
+        if boot.returncode != 0:
+            raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
+
+    before = snapshot_translated_attachments(launcher)
+    for step in steps:
+        # 慢命令单独给超时：全新 profile 第一次导入附件要做索引与缩略图，
+        # 默认 180 秒不够。QA_CMD_TIMEOUT 是启动器认的环境变量，单位毫秒。
+        timeout = (
+            "600000"
+            if step[1] in ("installPdf", "pipelineStart", "pipelineStartPages")
+            else None
+        )
+        result = run(
+            ["node", str(launcher), *step],
+            **({"env": {**os.environ, "QA_CMD_TIMEOUT": timeout}} if timeout else {}),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"真机命令 {step[1]} 失败\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
+        print(f"  {step[1]}: {result.stdout.strip()[:200]}")
+
+    # 轮询要等得够久：全新 profile 的第一次流水线要做一堆一次性的事（解析器 jar、
+    # 字体解析、阅读器开关、译文附件落盘），实测比"跑第二遍"慢一个量级，300 秒不够。
+    # 第一版就是 300 秒，轮询空手而归，而译文在放弃之后几十秒才落地——失败信息指向
+    # "没有产出"，其实是等得不够久。
+    translated_path = wait_for_fresh_attachment(launcher, before)
+    print(f"  本轮译文附件（修改于 {translated_attachment_stamp(translated_path)}）：{translated_path}")
+    return translated_path
+
+
 def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
     """点火真机流水线，取出译文附件，用同一套版面指标度量。
 
@@ -1104,7 +1154,6 @@ def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
     复用已有产出就够了。复用时打印文件的修改时间，避免拿一份来路不明的旧文件
     得出一个看起来新鲜的结论。
     """
-    qa_root = Path(os.environ.get("QA_ROOT", r"D:\zt-qa"))
     launcher = ROOT / "scripts" / "qa" / "real-machine.mjs"
     fixture_pdf = FIXTURE_DIR / f"{name}.pdf"
 
@@ -1117,51 +1166,11 @@ def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
             return measure_real_machine(name, fixture_pdf, found[0])
         print("  库里没有译文附件，改为正常点火流水线")
 
-    # 已有 QA 实例就复用，没有才 boot。复用不是偷懒：boot 每次都用一份全新
-    # profile，而全新 profile 第一次开阅读器要反复重试
-    # 「PDFViewerApplication not ready in reader iframe」，实测多花十分钟以上，
-    # 全花在和版面无关的一次性初始化上。要从头来就手工 shoot 再跑。
-    if qa_zotero_running():
-        print("  复用已在运行的 QA 实例（要重来先 node scripts/qa/real-machine.mjs shoot）")
-    else:
-        print("  启动真机（boot）……")
-        boot = run(["node", str(launcher), "boot"])
-        if boot.returncode != 0:
-            raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
-
-    # 点火前先拍快照：库里此刻有哪些译文附件、各自改到什么时间。没有这一份，
-    # 轮询分不清"这一轮新产出的"与"往轮次留下的"，第二篇以后的夹具就会拿上一篇
-    # 的产出当结论（three-column 实测踩中：报"页数不一致：原文 1，译文 2"）。
-    before = snapshot_translated_attachments(launcher)
-
-    steps = [
-        ["send", "installPdf", str(fixture_pdf)],
-        ["send", "pipelineStart", "{}"],
-    ]
-    for step in steps:
-        # 慢命令单独给超时：全新 profile 第一次导入附件要做索引与缩略图，
-        # 默认 180 秒不够。QA_CMD_TIMEOUT 是启动器认的环境变量，单位毫秒。
-        timeout = "600000" if step[1] in ("installPdf", "pipelineStart") else None
-        result = run(
-            ["node", str(launcher), *step],
-            **({"env": {**os.environ, "QA_CMD_TIMEOUT": timeout}} if timeout else {}),
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"真机命令 {step[1]} 失败\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
-        print(f"  {step[1]}: {result.stdout.strip()[:200]}")
-
-
-    # 轮询译文附件，直到出现**这一轮新的**或超时。全新 profile 的第一次流水线要做
-    # 一堆一次性的事（解析器 jar、字体解析、阅读器开关、译文附件落盘），实测比"跑第二遍"
-    # 慢一个量级，300 秒不够——第一版就是 300 秒，轮询空手而归，而译文在放弃之后
-    # 几十秒才落地，失败信息指向"没有产出"，其实是等得不够久。
-    #
-    # 只判"库里有译文附件"是不够的：跑第二篇夹具时，上一篇的译文还躺在库里，轮询
-    # 第一眼就看见它、立刻收工，于是拿上一篇的产出当本篇的结论。three-column 就
-    # 是这样报了一次"页数不一致：原文 1，译文 2"——报得对，但病根在挑文件，不在
-    # 流水线。所以轮询只认快照之后新出现的条目，或者文件确实被改写过的条目。
-    translated_path = wait_for_fresh_attachment(launcher, before)
-    print(f"  本轮译文附件（修改于 {translated_attachment_stamp(translated_path)}）：{translated_path}")
+    translated_path = run_real_machine_pipeline(
+        launcher,
+        fixture_pdf,
+        [["send", "installPdf", str(fixture_pdf)], ["send", "pipelineStart", "{}"]],
+    )
     return measure_real_machine(name, fixture_pdf, translated_path)
 
 
@@ -1206,7 +1215,6 @@ def real_machine_pages_check(name: str, range_spec: str) -> dict:
     跑法：
         python scripts/qa/benchmark/run.py --real-machine-pages reading-brain --range 2
     """
-    qa_root = Path(os.environ.get("QA_ROOT", r"D:\zt-qa"))
     launcher = ROOT / "scripts" / "qa" / "real-machine.mjs"
     fixture_pdf = FIXTURE_DIR / f"{name}.pdf"
     if not fixture_pdf.exists():
@@ -1218,31 +1226,14 @@ def real_machine_pages_check(name: str, range_spec: str) -> dict:
         raise RuntimeError(f"页码范围不合法：{range_spec!r}（parsePageRangeSpec 返回 null）")
     print(f"页码范围真机抽查 {name}，范围 {range_spec} → 第 {pages} 页")
 
-    if qa_zotero_running():
-        print("  复用已在运行的 QA 实例（要重来先 node scripts/qa/real-machine.mjs shoot）")
-    else:
-        print("  启动真机（boot）……")
-        boot = run(["node", str(launcher), "boot"])
-        if boot.returncode != 0:
-            raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
-
-    before = snapshot_translated_attachments(launcher)
-    steps = [
-        ["send", "installPdf", str(fixture_pdf)],
-        ["send", "pipelineStartPages", json.dumps({"range": range_spec})],
-    ]
-    for step in steps:
-        timeout = "600000" if step[1] in ("installPdf", "pipelineStartPages") else None
-        result = run(
-            ["node", str(launcher), *step],
-            **({"env": {**os.environ, "QA_CMD_TIMEOUT": timeout}} if timeout else {}),
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"真机命令 {step[1]} 失败\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
-        print(f"  {step[1]}: {result.stdout.strip()[:200]}")
-
-    translated_path = wait_for_fresh_attachment(launcher, before)
-    print(f"  本轮译文附件（修改于 {translated_attachment_stamp(translated_path)}）：{translated_path}")
+    translated_path = run_real_machine_pipeline(
+        launcher,
+        fixture_pdf,
+        [
+            ["send", "installPdf", str(fixture_pdf)],
+            ["send", "pipelineStartPages", json.dumps({"range": range_spec})],
+        ],
+    )
 
     fitz = metrics.fitz_module()
     source_doc = fitz.open(str(fixture_pdf))
@@ -1306,6 +1297,139 @@ def real_machine_pages_check(name: str, range_spec: str) -> dict:
         "range": range_spec,
         "pages": pages,
         "translatedPdf": translated_path,
+        "checks": [{"label": label, "passed": passed, "detail": detail} for label, passed, detail in checks],
+        "ok": ok,
+    }
+
+
+def mask_fallback_checks(source_doc, translated_doc) -> list[tuple[str, bool, str]]:
+    """删除无效回落遮罩的三条结构断言（纯函数，吃两份已打开的 PDF）。
+
+    1. 原文每一行仍出现在译文 PDF 的文本层里——删除确实没发生；
+    2. 译文 PDF 里每一页原文都被一个白色填充路径盖住；
+    3. 译文里有中文——真的翻了，不是遮住了事。
+    第 1、2 条合起来才是"回落遮罩"：原文还在，但被盖住了。只查第 2 条，遮罩画在
+    空白处也会通过。
+
+    坐标只用 PyMuPDF 自己报的一套：`get_text` 的 span bbox 与 `get_drawings` 的
+    rect 都是左上原点、y 向下，所以可以直接比，不必换算。
+    """
+    checks: list[tuple[str, bool, str]] = []
+
+    source_lines: list[str] = []
+    for page in source_doc:
+        for block in page.get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                text = " ".join(span["text"] for span in line.get("spans", [])).strip()
+                if text:
+                    source_lines.append(" ".join(text.split()))
+    translated_text = "".join(page.get_text() for page in translated_doc)
+    normalized = " ".join(translated_text.split())
+    missing = [line for line in source_lines if line not in normalized]
+    checks.append(
+        (
+            "原文每一行都还在译文 PDF 的文本层里（删除确实没发生）",
+            not missing,
+            f"原文 {len(source_lines)} 行，缺失 {len(missing)} 行"
+            + (f"（如 {missing[0][:40]!r}）" if missing else ""),
+        )
+    )
+
+    # 遮罩要盖住的是"原文在哪儿"，所以包围盒取自**原文**文档的文本行，不是译文文档
+    # 里的全部 span：译文自己也会画字，把它算进去，遮罩就永远盖不住（合成数据上一版
+    # 就这么误报过）。逐页比，页数不一致时只比重合的那几页。
+    #
+    # 纵向要收掉一份余量再比：PyMuPDF 的 span bbox 含字体 ascent/descent，比产品的
+    # 段落框高出一截（form-text 实测 span 顶比遮罩顶高 2.2 磅、底低 0.6 磅，字号 22
+    # 磅）。直接拿 span bbox 比，遮罩明明盖住了文字也会判没盖住。取每个 span 的中间
+    # 七成：既去掉这份余量，又仍然抓得住"遮罩只盖了文字中段"这类真问题。
+    white_total = 0
+    uncovered: list[int] = []
+    for index in range(min(source_doc.page_count, translated_doc.page_count)):
+        boxes = []
+        for block in source_doc[index].get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    if not span["text"].strip():
+                        continue
+                    x0, y0, x1, y1 = span["bbox"]
+                    pad = (y1 - y0) * 0.15
+                    boxes.append((x0, y0 + pad, x1, y1 - pad))
+        rects = [
+            tuple(drawing["rect"])
+            for drawing in translated_doc[index].get_drawings()
+            if drawing.get("fill")
+            and all(abs(channel - 1.0) < 0.02 for channel in drawing["fill"])
+        ]
+        white_total += len(rects)
+        if not boxes:
+            continue
+        x0 = min(box[0] for box in boxes)
+        y0 = min(box[1] for box in boxes)
+        x1 = max(box[2] for box in boxes)
+        y1 = max(box[3] for box in boxes)
+        covered = any(
+            rect[0] <= x0 + 1
+            and rect[1] <= y0 + 1
+            and rect[2] >= x1 - 1
+            and rect[3] >= y1 - 1
+            for rect in rects
+        )
+        if not covered:
+            uncovered.append(index + 1)
+    checks.append(
+        (
+            "每一页原文都被白色填充路径盖住（回落遮罩）",
+            not uncovered,
+            f"白色填充路径共 {white_total} 个，没盖住的页：{uncovered or '无'}",
+        )
+    )
+
+    cjk = sum(1 for c in translated_text if "\u4e00" <= c <= "\u9fff")
+    checks.append(("译文里有中文（真的翻了，不是遮住了事）", cjk > 0, f"汉字 {cjk} 个"))
+    return checks
+
+
+def real_machine_mask_check(name: str) -> dict:
+    """删除无效时回落遮罩的真机抽查。
+
+    第三批批次 7 修的是"删除器报告成功而什么都没删"，修法是管线多问一句
+    `isRemovalEffective`，答不上就把这次删除当作没发生、回落遮罩。那条编排此前
+    没有覆盖：没有一份"删除器必然无效"的夹具就点不到它。`scripts/qa/fixtures/
+    form-text.pdf` 就是为点它造的——页面内容流只有一个 `/Fm0 Do`，全部文字在表单
+    （Form XObject）里，删除器按设计只处理页面内容流，于是必然 `opsRemoved=0`。
+
+    跑法：
+        python scripts/qa/benchmark/run.py --real-machine-mask form-text
+    """
+    launcher = ROOT / "scripts" / "qa" / "real-machine.mjs"
+    fixture_pdf = FIXTURE_DIR / f"{name}.pdf"
+    if not fixture_pdf.exists():
+        raise RuntimeError(f"夹具不存在：{fixture_pdf}")
+    print(f"删除无效回落遮罩真机抽查 {name}")
+
+    translated_path = run_real_machine_pipeline(
+        launcher,
+        fixture_pdf,
+        [["send", "installPdf", str(fixture_pdf)], ["send", "pipelineStart", "{}"]],
+    )
+
+    fitz = metrics.fitz_module()
+    source_doc = fitz.open(str(fixture_pdf))
+    translated_doc = fitz.open(translated_path)
+    try:
+        checks = mask_fallback_checks(source_doc, translated_doc)
+    finally:
+        source_doc.close()
+        translated_doc.close()
+
+    ok = all(passed for _, passed, _ in checks)
+    for label, passed, detail in checks:
+        print(f"  {'ok  ' if passed else 'FAIL'} {label}（{detail}）")
+    print("删除无效回落遮罩真机抽查" + ("通过" if ok else "未通过"))
+    return {
+        "fixture": name,
+        "translated": translated_path,
         "checks": [{"label": label, "passed": passed, "detail": detail} for label, passed, detail in checks],
         "ok": ok,
     }
@@ -1868,6 +1992,74 @@ def harness_selftest() -> int:
             parse_page_range("3,1,2,1") == [1, 2, 3],
             f"got {parse_page_range('3,1,2,1')}",
         )
+
+        # ── 删除无效回落遮罩的三条断言 ──
+        # 这三条判的是"原文还在、但被白遮罩盖住"。合成三份 PDF：完整回落、没有遮罩、
+        # 没有译文。后两种是负控——只看正例会不知道它是不是见什么都报；而"没有译文"
+        # 这一种尤其要挡：遮罩画好了、译文没画，前两条全过，读者看到的却是白茫茫一片。
+        try:
+            fitz = metrics.fitz_module()
+        except Exception as exc:  # pragma: no cover - 环境相关
+            print(f"  skip 遮罩回落断言（pymupdf 不可用：{exc}）")
+        else:
+            src_path = workdir / "mask-src.pdf"
+            doc = fitz.open()
+            page = doc.new_page(width=612, height=792)
+            page.insert_text((72, 100), "Alpha line one", fontsize=12)
+            page.insert_text((72, 130), "Beta line two", fontsize=12)
+            doc.save(str(src_path))
+            doc.close()
+
+            def build_mask_dst(mask: bool, cjk: bool) -> Path:
+                path = workdir / f"mask-dst-{int(mask)}-{int(cjk)}.pdf"
+                doc = fitz.open()
+                page = doc.new_page(width=612, height=792)
+                page.insert_text((72, 100), "Alpha line one", fontsize=12)
+                page.insert_text((72, 130), "Beta line two", fontsize=12)
+                if mask:
+                    page.draw_rect(fitz.Rect(60, 80, 400, 150), color=None, fill=(1, 1, 1))
+                if cjk:
+                    page.insert_text((72, 300), "中文译文测试", fontname="china-s", fontsize=12)
+                doc.save(str(path))
+                doc.close()
+                return path
+
+            def mask_results(mask: bool, cjk: bool) -> dict:
+                doc = fitz.open(str(build_mask_dst(mask, cjk)))
+                try:
+                    return {
+                        label: passed
+                        for label, passed, _ in mask_fallback_checks(src_doc, doc)
+                    }
+                finally:
+                    doc.close()
+
+            src_doc = fitz.open(str(src_path))
+            try:
+                good = mask_results(True, True)
+                check(
+                    "完整回落时三条断言全过",
+                    all(good.values()),
+                    f"got {good}",
+                )
+                for label, mask, cjk, expected in [
+                    (
+                        "没有遮罩时报出来（第三批批次 7 之前的缺陷）",
+                        False,
+                        True,
+                        "每一页原文都被白色填充路径盖住（回落遮罩）",
+                    ),
+                    (
+                        "遮罩画了而译文没画时也报出来",
+                        True,
+                        False,
+                        "译文里有中文（真的翻了，不是遮住了事）",
+                    ),
+                ]:
+                    got = mask_results(mask, cjk)
+                    check(label, got.get(expected) is False, f"got {got}")
+            finally:
+                src_doc.close()
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -1904,6 +2096,11 @@ def main() -> int:
         "--real-machine-pages",
         action="store_true",
         help="页码范围运行的真机抽查：只译指定页，验证范围外页面原样保留。与 --range 搭配",
+    )
+    parser.add_argument(
+        "--real-machine-mask",
+        action="store_true",
+        help="删除无效时回落遮罩的真机抽查：验证原文仍在文本层且被白色遮罩盖住。配 form-text 夹具",
     )
     parser.add_argument("--range", default="", help="页码范围，例如 2 或 1-2 或 1,3")
     parser.add_argument("--keep-workdir", default="", help="保留中间产物到指定目录（排障用）")
@@ -1948,6 +2145,29 @@ def main() -> int:
             print(f"\n页码范围真机抽查失败：{failures} 篇未通过")
             return 1
         print("\n页码范围真机抽查通过")
+        return 0
+
+    if args.real_machine_mask:
+        # 删除无效回落遮罩也是单独一条路：它验的是"原文还在但被盖住"，不是版面指标。
+        if not args.names:
+            parser.error("--real-machine-mask 需要指定夹具名，例如 --real-machine-mask form-text")
+        failures = 0
+        for name in args.names:
+            try:
+                report = real_machine_mask_check(name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  {name} 失败：{type(exc).__name__}: {exc}")
+                if os.environ.get("BENCH_TRACEBACK"):
+                    import traceback
+
+                    traceback.print_exc()
+                return 1
+            if not report["ok"]:
+                failures += 1
+        if failures:
+            print(f"\n删除无效回落遮罩真机抽查失败：{failures} 篇未通过")
+            return 1
+        print("\n删除无效回落遮罩真机抽查通过")
         return 0
 
     if args.ocr:
