@@ -1552,6 +1552,19 @@ opendataloaderSplitAdapter: original-text removal removed nothing (...) — fall
 检查把"点着了"单列一条：点不着是测试台状态问题，结论不代表产品行为，混在一起就会
 把一次重启能解决的事记成产品缺陷。
 
+顺着它修掉了一个真的探针缺陷：三处关标签页都按 `id.startsWith("tab-")` 写，而
+`Zotero_Tabs._tabs` 是**对象**数组（每项有 `id` 与 `type`），于是每次都在第一次迭代
+抛 `TypeError` 被 `catch` 吞掉——一个标签页都没关，而 catch 里那行日志看着像无害的
+噪声。代码注释写的是"否则菜单 handler 看不到 PDF"，那个意图从未实现过。已改成按
+`tab.id` 取。
+
+但修完标签页，退化照旧，所以它不是根因。日志里能看到的线索是：失败收场时产品的
+错误提示框与 Zotero 自己的 GMP（Widevine）插件安装提示框撞在一起——
+`alertDialog → openWindowPrompt → onUninstiling → clearDefaultPrefs` 抛
+`addon.getResourceURI is not a function`。没有证据说这就是卡住的原因，只是目前最显眼
+的一条线索；要接着查，从"跑完一次失败收场的流水线之后主线程卡在哪个嵌套事件循环里"
+下手。在查清之前，处置办法就是重启实例。
+
 **白页兜底没有做真机覆盖，这是有意的。** 那条分支（`if (sourcePdfBytes) … else …`）
 只在 `IOUtils.read(inputPath)` 失败或插件作用域里没有 `IOUtils` 时进入，健康宿主上
 永远不走；要覆盖它就得先把宿主持续弄坏，而那正好是它要防的情况。它也不是一块没测

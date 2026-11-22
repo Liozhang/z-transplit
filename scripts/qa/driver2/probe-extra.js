@@ -380,9 +380,12 @@ function parseOpts(arg) {
       title: "QA pipeline PDF",
     });
 
+    // _tabs 是对象数组（每项有 id 与 type）。按 id.startsWith 写会在第一次迭代就抛
+    // TypeError，被 catch 吞掉之后一个标签页都没关——后果见 probe.js 里同一处的注释。
     try {
-      for (const id of Zotero_Tabs._tabs.slice()) {
-        if (id.startsWith("tab-")) Zotero_Tabs.close(id);
+      for (const tab of Zotero_Tabs._tabs.slice()) {
+        const id = tab && typeof tab.id === "string" ? tab.id : null;
+        if (id && id.startsWith("tab-")) Zotero_Tabs.close(id);
       }
       await Zotero.Promise.delay(500);
     } catch (e) {
@@ -439,9 +442,12 @@ function parseOpts(arg) {
       title: "QA pages pipeline PDF",
     });
 
+    // _tabs 是对象数组（每项有 id 与 type）。按 id.startsWith 写会在第一次迭代就抛
+    // TypeError，被 catch 吞掉之后一个标签页都没关——后果见 probe.js 里同一处的注释。
     try {
-      for (const id of Zotero_Tabs._tabs.slice()) {
-        if (typeof id === "string" && id.startsWith("tab-")) Zotero_Tabs.close(id);
+      for (const tab of Zotero_Tabs._tabs.slice()) {
+        const id = tab && typeof tab.id === "string" ? tab.id : null;
+        if (id && id.startsWith("tab-")) Zotero_Tabs.close(id);
       }
       await Zotero.Promise.delay(500);
     } catch (e) {

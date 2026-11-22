@@ -1413,9 +1413,16 @@ PROBE_CMDS.pipelineViaMenu = async function () {
 
   // Close any reader tab so the library items view is the active context and
   // the selection is ours (otherwise the menu handler sees no PDF).
+  //
+  // _tabs 是**对象**数组（每项有 id 与 type），不是 id 字符串数组。早先按
+  // `id.startsWith` 写，第一次迭代就抛 TypeError 被 catch 吞掉——于是一个标签页都
+  // 没关，而 catch 里那行日志看着像无害的噪声。后果是阅读器标签页逐轮累积，实测
+  // 累积到一定程度之后 doCommand 不再触发 handler（菜单就绪、选中也对，就是命令
+  // 后面没动静），只能重启实例。
   try {
-    for (const id of Zotero_Tabs._tabs.slice()) {
-      if (id.startsWith("tab-")) Zotero_Tabs.close(id);
+    for (const tab of Zotero_Tabs._tabs.slice()) {
+      const id = tab && typeof tab.id === "string" ? tab.id : null;
+      if (id && id.startsWith("tab-")) Zotero_Tabs.close(id);
     }
     await Zotero.Promise.delay(500);
   } catch (e) {
