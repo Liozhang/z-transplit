@@ -406,6 +406,142 @@ function parseOpts(arg) {
   };
 
   /**
+   * 页码范围流水线：走「翻译指定页」那个菜单项，只译给定的页。
+   *
+   * 为什么单开一条而不是给 pipelineStart 加参数：那条菜单项会弹一个原生输入框
+   * 问范围（registerItemTreeMenu 的 promptDialog → Services.prompt.prompt）。
+   * 探针把对话框真放出来，再用轮询器自动填值并点确定——菜单 handler、
+   * parsePageRangeSpec、opts.pages 一路都是产品自己的代码，连提示框这一跳都是
+   * 真的，不是探针代劳。
+   *
+   * 参数 { range: "2" }（也接受 "1-2"、"1,3" 这类 parsePageRangeSpec 认的写法）。
+   * 返回结构与 pipelineStart 一致，另加 accepted 与 seenWindows：前者说明范围
+   * 有没有真被送进流水线，后者是等待期间冒出过的窗口，排查"对话框没弹"时看它。
+   */
+  PROBE_CMDS.pipelineStartPages = async function (payload) {
+    // 启动器传进来的是原始字符串，必须先过 parseOpts 才是对象。
+    const opts = parseOpts(payload);
+    const range = String(opts.range || "").trim();
+    if (!range) return { error: "range required" };
+    const win = Zotero.getMainWindow();
+    const doc = win.document;
+    const dataDir = Zotero.DataDirectory.dir;
+    const pdfPath = PathUtils.join(dataDir, "qa-sample.pdf");
+    if (!(await IOUtils.exists(pdfPath))) return { skipped: "no PDF" };
+    const { ZoteroPane, Zotero_Tabs } = probeWin();
+
+    let item = new Zotero.Item("journalArticle");
+    item.setField("title", "QA pages pipeline paper " + Date.now());
+    const itemID = await item.saveTx();
+    const att = await Zotero.Attachments.importFromFile({
+      file: pdfPath,
+      parentItemID: itemID,
+      title: "QA pages pipeline PDF",
+    });
+
+    try {
+      for (const id of Zotero_Tabs._tabs.slice()) {
+        if (typeof id === "string" && id.startsWith("tab-")) Zotero_Tabs.close(id);
+      }
+      await Zotero.Promise.delay(500);
+    } catch (e) {
+      probeLog("close tabs: " + e);
+    }
+    ZoteroPane.selectItem(att.id);
+    await Zotero.Promise.delay(600);
+
+    const popup = doc.getElementById("zotero-itemmenu");
+    popup.dispatchEvent(new win.Event("popupshowing"));
+    const target = doc.getElementById("ztransplit-itemmenu-pages");
+    if (!target) return { error: "pages menu item missing" };
+
+    // 范围输入框不打断流程：让它真的弹出来（原生 nsIPromptService，产品自己
+    // 的代码），再由一个轮询器自动填值并点确定。这样菜单 handler、
+    // parsePageRangeSpec、opts.pages 一路都是产品自己的代码，连提示框这一跳
+    // 都是真的，比把 Services.prompt.prompt 换成桩更接近真实用户操作。
+    //
+    // 为什么不能打桩了事：桩装在探针作用域的 Services 上，插件读到的却是另一份
+    // （探针由 bootstrap 用 loadSubScript 载入，与插件同在 ctx 作用域链上，但
+    // Services.prompt 是惰性 getter，两次读不一定同一个对象）。与其跟惰性 getter
+    // 较劲，不如让原生对话框弹出来再点掉——顺带把"提示框到底弹不弹"这件事本身
+    // 测了：产品侧那个 inout 参数传 null 的缺陷就是这样暴露出来的。
+    //
+    // 轮询器必须在模态对话框的事件循环里还能跑：setTimeout 在嵌套事件循环中
+    // 照常触发，所以主线程卡在 promptDialog 里时也能把确定点上。
+    const trace = [];
+    let accepted = false;
+    const watchStart = Date.now();
+    const tick = () => {
+      try {
+        const en = Services.wm.getEnumerator(null);
+        while (en.hasMoreElements()) {
+          const w = en.getNext();
+          const href = String(w.location?.href || "");
+          if (w === win || !href) continue;
+          if (!/commonDialog/.test(href)) continue;
+          const d = w.document;
+          const stamp = Date.now() - watchStart;
+          if (accepted) continue;
+          // 这个宿主上的提示框是 chrome://global/content/commonDialog.xhtml：
+          // 根元素是 <window id="commonDialogWindow">，里面套一个 <dialog
+          // id="commonDialog">，输入框是 HTML <input id="loginTextbox">。
+          // acceptDialog/getButton 在里面的那个 <dialog> 上，不在 documentElement
+          // 上——早先照着 documentElement 找，两个方法都是 undefined。
+          const dlgEl = d.querySelector("dialog") || d.documentElement;
+          const box = d.getElementById("loginTextbox");
+          // 只认确定按钮：dlgtype="accept"，或 <dialog>.getButton("accept")。
+          // 不要兜底"点第一个按钮"——按钮顺序不保证，点成取消就让整条路径静默失效。
+          const acceptBtn =
+            d.querySelector('[dlgtype="accept"]') ||
+            (typeof dlgEl.getButton === "function" ? dlgEl.getButton("accept") : null);
+          const entry = {
+            at: stamp,
+            root: d.documentElement && d.documentElement.tagName,
+            hasAcceptDialogOnDialog:
+              typeof (dlgEl && dlgEl.acceptDialog) === "function",
+            textbox: box ? box.getAttribute("id") || box.tagName : null,
+            acceptButton: acceptBtn
+              ? [acceptBtn.tagName, acceptBtn.getAttribute && acceptBtn.getAttribute("id"),
+                 acceptBtn.getAttribute && acceptBtn.getAttribute("label")]
+              : null,
+          };
+          trace.push(entry);
+          if (!box || !acceptBtn) continue;
+          box.value = range;
+          try {
+            acceptBtn.click();
+            entry.clicked = true;
+            accepted = true;
+          } catch (e) {
+            entry.clicked = "失败: " + e;
+          }
+        }
+      } catch (e) {
+        trace.push({ at: Date.now() - watchStart, note: "autoanswer: " + e });
+      }
+      if (!accepted && Date.now() - watchStart < 45000) setTimeout(tick, 150);
+    };
+    setTimeout(tick, 150);
+
+    const t0 = Date.now();
+    try {
+      target.doCommand(); // 异步 handler：立刻返回，流水线在后台跑
+    } finally {
+      // 等流水线起步（菜单 handler 点完确定才继续）再收摊。
+      await Zotero.Promise.delay(12000);
+    }
+    return {
+      startedAt: t0,
+      attachmentID: att.id,
+      parentItemID: itemID,
+      range,
+      accepted,
+      trace,
+      selection: ZoteroPane.itemsView.getSelectedItems().map((i) => i.id),
+    };
+  };
+
+  /**
    * 是否已经出现译文附件（标题匹配译文命名）。与 pipelineStart 配套使用：
    * 点火后轮询它判断流水线是否真的跑完，而不是只看弹窗消失。
    *

@@ -800,12 +800,14 @@ colored callouts / code blocks / striped table rows aren't punched through"。
 本批未动。
 
 **基准不覆盖什么，说清楚免得误信。** 无头路径不走
-`src/core/pdf/translation/opendataloaderSplitAdapter.ts`，因此不覆盖：页面范围
-选择、译文附件创建、进度汇总、白页兜底合并模式，**以及扫描页与劣质文本层页的
-OCR 路由**（这条第三批批次 6 补上，见该节的度量）。公式截图的取图路径也不等价——
-无头用 pymupdf 渲染同一块区域，真机是借阅读器的活 pdf.js 实例；截图内容等价，
-取图路径不等价。这三块只能靠 `--real-machine` 抽查确认，那也是它存在的唯一目的：
+`src/core/pdf/translation/opendataloaderSplitAdapter.ts`，因此不覆盖：译文附件创建、
+进度汇总、白页兜底合并模式，**以及扫描页与劣质文本层页的 OCR 路由**（这条第三批
+批次 6 补上，见该节的度量）。页面范围选择原本也在这份清单里，已由
+`--real-machine-pages` 补上（见下面"页码范围真机抽查"）。公式截图的取图路径也不等价—
+—无头用 pymupdf 渲染同一块区域，真机是借阅读器的活 pdf.js 实例；截图内容等价，
+取图路径不等价。这几块只能靠 `--real-machine` 抽查确认，那也是它存在的唯一目的：
 不是每批都跑，是回答「无头路径可不可信」。
+
 
 **原文删除曾是这里唯一"真机测得、无头从来没测过"的一环，第三批批次 7 补上了旁路
 测量**：无头路径现在用装配层产出的同一份区域文件跑一遍删除器，再量删完的 PDF 还剩
@@ -1444,6 +1446,52 @@ MediaBox，适配器只能用内容的左右上下界反推，再往标准纸号
 `overflow.right` 减去产品自己报的 `stats.overflowedRight`，而真机测量拿不到产品
 的诊断（无头路径才传），所以在真机那一侧它恒等于 `right`，为 0 只说明"没有产品
 诊断可减"，不说明"产品没有少报"。
+
+#### 页码范围真机抽查，以及它揪出的一个真缺陷
+
+「翻译指定页」这条入口此前在真机上从未跑过：它要先弹一个原生输入框问页码范围，
+探针没有人回答，流水线就永远不启动。这一轮把它补齐了，做法不是把
+`Services.prompt.prompt` 换成桩，而是让对话框真弹出来，再用一个轮询器填值并点
+确定——菜单 handler、`parsePageRangeSpec`、`opts.pages` 一路都是产品自己的代码，
+连提示框这一跳都是真的。
+
+为什么不能打桩了事，这里有个具体的坑：桩装在探针作用域的 `Services` 上，插件
+读到的却是另一份。探针由补丁后的 `bootstrap.js` 用 `loadSubScript(url, probe)`
+载入，插件是 `loadSubScript(ztransplit.js, ctx)`，两者同在 bootstrap 的作用域链
+上，理论上该看到同一个 `Services`；但 `Services.prompt` 不是 `nsIPromptService`
+本身，而是 `Prompter.sys.mjs` 按作用域造出来的包装对象（真机栈里看得见：
+`promptDialog → Prompter.sys.mjs prompt → openPromptSync → openPrompt`），换掉
+探针那一份对插件那一份毫无影响。硬打桩不如让它真弹。
+
+顺带修掉的产品缺陷：`promptDialog`（`src/utils/dialog.ts`）给
+`nsIPromptService.prompt` 的复选框状态传了 `null`。那个参数是 `inout`，XPConnect
+对 `inout` 参数只收对象（`{ value: … }`），传 `null` 直接抛
+`NS_ERROR_XPC_NEED_OUT_OBJECT`，而 `promptDialog` 的 never-throws 契约把它吞成
+`null` 返回——表现是菜单项点了没反应，日志里只有一行 `promptDialog failed`。
+**也就是说这个功能在真机上一直是坏的**，而单元测试全绿：Node 里没有 XPConnect，
+这条规矩无从表达。修法照这个宿主自己的四处调用（`aboutProfiles.js`、
+`printPageSetup.js`、`advancedSearchPane.js`、devtools 的 `prompt.js`——全是
+`(window, title, msg, valueObj, null, checkObj)`），补的测试用一个假 prompt 服务
+把"inout 参数只收对象"这条规矩写成断言（`tests/node/dialog-prompt.spec.ts`，
+8 条），回归才拦得住。
+
+探针侧还要记一条：这个宿主的提示框是
+`chrome://global/content/commonDialog.xhtml`，根元素是
+`<window id="commonDialogWindow">`，里面套一个 `<dialog id="commonDialog">`，
+输入框是 HTML `<input id="loginTextbox">`。`acceptDialog()` / `getButton()` 在
+里面那个 `<dialog>` 上，不在 `documentElement` 上。自动应答只认
+`dlgtype="accept"` 或 `dialog.getButton("accept")`，不做"点第一个按钮"的兜底——
+按钮顺序不保证，点成取消会让整条路径静默失效（第一版就是这么错的：兜底点中了
+取消，对话框关得干干净净，流水线一个字符都没动）。
+
+四条结构断言（`run.py --real-machine-pages <夹具> --range 2`）：
+
+| 断言 | reading-brain 实测 |
+|---|---|
+| 译文页数与原文一致 | 2 = 2 |
+| 范围内页有中文译文 | 第 2 页 181 个汉字 |
+| 范围外页没有中文 | 第 1 页 0 个汉字 |
+| 范围外页原文仍在 | 第 1 页译文与原文逐字相同（拉丁字母 1444 = 1444） |
 
 ### 真机门禁（`baseline-real-machine.json`）
 

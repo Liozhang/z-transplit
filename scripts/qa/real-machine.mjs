@@ -281,13 +281,23 @@ async function waitReady(timeoutMs = 120000) {
   return false;
 }
 
+// 每条 send 都是一个新进程，cmdCounter 每次都从 100 起跑——也就是说**每条命令的
+// id 都是 101**。早先只按 id 认结果，于是一份没删干净、或并发写进来的旧结果会被
+// 当成这条命令的答复收下：实测页码范围抽查就这样收到过一次 action 为 "translated"
+// 的旧回包，pipelineStartPages 的点火结果凭空消失，看起来像流水线没启动。
+//
+// 两个补丁：
+//   1. id 加进程唯一的随机后缀，不同进程的同一条命令也不再撞号；
+//   2. 认结果时同时比 action——比号更直接，号对了但 action 不对，说明读到的根本不是
+//      这条命令的答复。
 let cmdCounter = 100;
+const processTag = Math.random().toString(36).slice(2, 8);
 async function send(action, arg) {
   if (!fs.existsSync(readyFile)) {
     log("waiting for driver ready…");
     if (!(await waitReady())) throw new Error("driver never became ready");
   }
-  const id = ++cmdCounter;
+  const id = `${++cmdCounter}-${processTag}`;
   rmIfExists(resultFile);
   fs.writeFileSync(cmdFile, JSON.stringify({ id, action, arg }), "utf8");
   const t0 = Date.now();
@@ -296,7 +306,7 @@ async function send(action, arg) {
       const raw = fs.readFileSync(resultFile, "utf8");
       try {
         const parsed = JSON.parse(raw);
-        if (parsed.id === id) return parsed;
+        if (parsed.id === id && parsed.action === action) return parsed;
       } catch {
         /* partial write */
       }

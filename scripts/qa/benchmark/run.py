@@ -1160,28 +1160,194 @@ def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
     # 第一眼就看见它、立刻收工，于是拿上一篇的产出当本篇的结论。three-column 就
     # 是这样报了一次"页数不一致：原文 1，译文 2"——报得对，但病根在挑文件，不在
     # 流水线。所以轮询只认快照之后新出现的条目，或者文件确实被改写过的条目。
+    translated_path = wait_for_fresh_attachment(launcher, before)
+    print(f"  本轮译文附件（修改于 {translated_attachment_stamp(translated_path)}）：{translated_path}")
+    return measure_real_machine(name, fixture_pdf, translated_path)
+
+
+def wait_for_fresh_attachment(launcher: Path, before: dict) -> str:
+    """等到这一轮新产出的译文附件，返回它的路径。等不到则抛错。
+
+    抽出来给页码范围那条路共用：两条路都点火一次真机流水线，都要把"这一轮新产出
+    的"与"往轮次留下的"分开。挑文件的判据本身在 fresh_translated_attachment。
+    """
     deadline = time.time() + REAL_MACHINE_TIMEOUT_S
-    translated_path = None
-    fresh_stamp = ""
     waited = 0
     while time.time() < deadline:
         result = run(["node", str(launcher), "send", "translated"])
         fresh = fresh_translated_attachment(translated_items(result.stdout), before)
         if fresh:
-            translated_path = fresh.get("filePath")
-            fresh_stamp = translated_attachment_stamp(translated_path)
-            break
+            path = fresh.get("filePath")
+            if path and Path(path).exists():
+                return path
         waited += 1
         if waited % 6 == 1:
             print(f"  等新译文附件……已等 {waited * 5} 秒", flush=True)
         time.sleep(5)
-    if not translated_path or not Path(translated_path).exists():
-        raise RuntimeError(
-            f"等了 {REAL_MACHINE_TIMEOUT_S} 秒仍没有新的译文附件。先手工确认流水线能跑通："
-            "node scripts/qa/real-machine.mjs send translated"
+    raise RuntimeError(
+        f"等了 {REAL_MACHINE_TIMEOUT_S} 秒仍没有新的译文附件。先手工确认流水线能跑通："
+        "node scripts/qa/real-machine.mjs send translated"
+    )
+
+
+def real_machine_pages_check(name: str, range_spec: str) -> dict:
+    """页码范围运行的真机抽查。
+
+    这是真机此前唯一没有覆盖的一整个用户可见模式：条目树菜单的「翻译指定页」。
+    无头路径不接 opts.pages（它整篇渲染），所以这条路只能靠真机。
+
+    断言全部是结构性的，不重新实现版面度量：
+      1. 译文 PDF 页数与原文一致（页码范围运行必须保留全部页面，只换选中页）；
+      2. 范围内的页有中文；
+      3. 范围外的页没有中文——原文一个字母都没被译；
+      4. 范围外的页原文仍在（拉丁字母数不低于原文的九成）。
+    第 3、4 条合起来才是"范围外的页原样保留"：只查没有中文，漏译也会通过。
+
+    跑法：
+        python scripts/qa/benchmark/run.py --real-machine-pages reading-brain --range 2
+    """
+    qa_root = Path(os.environ.get("QA_ROOT", r"D:\zt-qa"))
+    launcher = ROOT / "scripts" / "qa" / "real-machine.mjs"
+    fixture_pdf = FIXTURE_DIR / f"{name}.pdf"
+    if not fixture_pdf.exists():
+        raise RuntimeError(f"夹具不存在：{fixture_pdf}")
+    # 先把范围按产品自己的解析器跑一遍，把"用户输入"变成确定的页码集合。探针那头
+    # 收到的是原始字符串、由产品再解析一次——两边解析的是同一个函数，结果必须一致。
+    pages = parse_page_range(range_spec)
+    if not pages:
+        raise RuntimeError(f"页码范围不合法：{range_spec!r}（parsePageRangeSpec 返回 null）")
+    print(f"页码范围真机抽查 {name}，范围 {range_spec} → 第 {pages} 页")
+
+    if qa_zotero_running():
+        print("  复用已在运行的 QA 实例（要重来先 node scripts/qa/real-machine.mjs shoot）")
+    else:
+        print("  启动真机（boot）……")
+        boot = run(["node", str(launcher), "boot"])
+        if boot.returncode != 0:
+            raise RuntimeError(f"boot 失败\n{boot.stdout[-2000:]}\n{boot.stderr[-2000:]}")
+
+    before = snapshot_translated_attachments(launcher)
+    steps = [
+        ["send", "installPdf", str(fixture_pdf)],
+        ["send", "pipelineStartPages", json.dumps({"range": range_spec})],
+    ]
+    for step in steps:
+        timeout = "600000" if step[1] in ("installPdf", "pipelineStartPages") else None
+        result = run(
+            ["node", str(launcher), *step],
+            **({"env": {**os.environ, "QA_CMD_TIMEOUT": timeout}} if timeout else {}),
         )
-    print(f"  本轮译文附件（修改于 {fresh_stamp}）：{translated_path}")
-    return measure_real_machine(name, fixture_pdf, translated_path)
+        if result.returncode != 0:
+            raise RuntimeError(f"真机命令 {step[1]} 失败\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}")
+        print(f"  {step[1]}: {result.stdout.strip()[:200]}")
+
+    translated_path = wait_for_fresh_attachment(launcher, before)
+    print(f"  本轮译文附件（修改于 {translated_attachment_stamp(translated_path)}）：{translated_path}")
+
+    fitz = metrics.fitz_module()
+    source_doc = fitz.open(str(fixture_pdf))
+    translated_doc = fitz.open(translated_path)
+    checks: list[tuple[str, bool, str]] = []
+    try:
+        same_page_count = source_doc.page_count == translated_doc.page_count
+        checks.append(
+            (
+                "页数与原文一致",
+                same_page_count,
+                f"原文 {source_doc.page_count}，译文 {translated_doc.page_count}",
+            )
+        )
+        if not same_page_count:
+            return {"fixture": name, "range": range_spec, "pages": pages, "checks": checks, "ok": False}
+
+        for number in range(1, source_doc.page_count + 1):
+            source_page = source_doc[number - 1]
+            translated_page = translated_doc[number - 1]
+            source_text = source_page.get_text()
+            translated_text = translated_page.get_text()
+            cjk = sum(1 for c in translated_text if "\u4e00" <= c <= "\u9fff")
+            latin = sum(1 for c in translated_text if ("a" <= c <= "z") or ("A" <= c <= "Z"))
+            source_latin = sum(
+                1 for c in source_text if ("a" <= c <= "z") or ("A" <= c <= "Z")
+            )
+            in_range = number in pages
+            if in_range:
+                checks.append(
+                    (
+                        f"第 {number} 页在范围内，有中文译文",
+                        cjk > 0,
+                        f"汉字 {cjk} 个",
+                    )
+                )
+            else:
+                checks.append(
+                    (
+                        f"第 {number} 页在范围外，没有中文",
+                        cjk == 0,
+                        f"汉字 {cjk} 个",
+                    )
+                )
+                checks.append(
+                    (
+                        f"第 {number} 页在范围外，原文仍在",
+                        source_latin == 0 or latin >= source_latin * 0.9,
+                        f"原文拉丁字母 {source_latin}，译文里 {latin}",
+                    )
+                )
+    finally:
+        source_doc.close()
+        translated_doc.close()
+
+    ok = all(passed for _, passed, _ in checks)
+    for label, passed, detail in checks:
+        print(f"  {'ok  ' if passed else 'FAIL'} {label}（{detail}）")
+    return {
+        "fixture": name,
+        "range": range_spec,
+        "pages": pages,
+        "translatedPdf": translated_path,
+        "checks": [{"label": label, "passed": passed, "detail": detail} for label, passed, detail in checks],
+        "ok": ok,
+    }
+
+
+def parse_page_range(spec: str) -> list[int]:
+    """按产品自己的规则解析页码范围。
+
+    规则抄自 src/core/pdf/translation/pageRange.ts 的 parsePageRangeSpec：逗号分隔，
+    支持 `起-止` 区间，`，、` 与各类连字符都归一，空 token 一律拒绝，结果去重升序。
+    抄而不是 import：这条跑在 Python 侧，为的是把"用户输入"提前变成确定的页码集合，
+    好在点火前就拒绝不合法范围；真正的解析仍由产品在探针那头再做一次。
+    """
+    text = (spec or "").strip()
+    if not text:
+        return []
+    normalized = (
+        text.replace("，", ",")
+        .replace("、", ",")
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("－", "-")
+    )
+    pages: list[int] = []
+    for part in normalized.split(","):
+        token = part.strip()
+        if not token:
+            return []
+        span = re.match(r"^(\d+)\s*-\s*(\d+)$", token)
+        if span:
+            start, end = int(span.group(1)), int(span.group(2))
+            if start < 1 or end < start or end > 100000:
+                return []
+            pages.extend(range(start, end + 1))
+            continue
+        if not re.match(r"^\d+$", token):
+            return []
+        page = int(token)
+        if page < 1 or page > 100000:
+            return []
+        pages.append(page)
+    return sorted(set(pages))
 
 
 def load_real_machine_rows(path: Path) -> list[dict]:
@@ -1670,6 +1836,38 @@ def harness_selftest() -> int:
             not matched_none and picked_none["filePath"] == "c.pdf",
             f"got {picked_none}, matched={matched_none}",
         )
+
+        # ── 页码范围解析（Python 侧那份，抄自 pageRange.ts） ──
+        # 抄过来的规则必须与原版一致，否则点火前放行、产品那头拒绝，白等一个超时；
+        # 或者反过来，把合法范围判成不合法。这些用例覆盖原版注释点名的每一种形状。
+        for spec, want in [
+            ("2", [2]),
+            ("1-2", [1, 2]),
+            ("1,3", [1, 3]),
+            ("1-2,4", [1, 2, 4]),
+            ("2-2", [2]),
+            ("1，3", [1, 3]),      # 全角逗号
+            ("1、3", [1, 3]),      # 顿号
+            ("1–3", [1, 2, 3]),    # en dash
+            ("1—3", [1, 2, 3]),    # em dash
+            ("1－3", [1, 2, 3]),   # 全角连字符
+            (" 1 - 2 ", [1, 2]),   # 区间内空白
+            ("3-1", []),           # 起大于止
+            ("1,,3", []),          # 空 token
+            ("1,", []),            # 尾逗号
+            ("", []),
+            ("abc", []),
+            ("1-", []),
+            ("0", []),             # 页码从 1 起
+        ]:
+            got = parse_page_range(spec)
+            check(f"页码范围 {spec!r} → {want}", got == want, f"got {got}")
+        # 去重与升序：同一个页给两遍只算一次。
+        check(
+            "页码范围去重并升序",
+            parse_page_range("3,1,2,1") == [1, 2, 3],
+            f"got {parse_page_range('3,1,2,1')}",
+        )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -1702,6 +1900,12 @@ def main() -> int:
         action="store_true",
         help="跑真机并与真机基线比，判回归。要几分钟且需要一个跑着的 QA 实例，不进日常门禁",
     )
+    parser.add_argument(
+        "--real-machine-pages",
+        action="store_true",
+        help="页码范围运行的真机抽查：只译指定页，验证范围外页面原样保留。与 --range 搭配",
+    )
+    parser.add_argument("--range", default="", help="页码范围，例如 2 或 1-2 或 1,3")
     parser.add_argument("--keep-workdir", default="", help="保留中间产物到指定目录（排障用）")
     args = parser.parse_args()
 
@@ -1719,6 +1923,32 @@ def main() -> int:
             "--real-machine-gate / --write-real-machine-baseline 需要指定夹具名，"
             "例如 --real-machine-gate reading-brain landscape-slides"
         )
+
+    if args.real_machine_pages:
+        # 页码范围是单独一条路：它验的是"范围外的页原样保留"，不是版面指标，所以
+        # 不进 --real-machine 的度量流程。
+        if not args.names:
+            parser.error("--real-machine-pages 需要指定夹具名，例如 --real-machine-pages reading-brain")
+        if not args.range:
+            parser.error("--real-machine-pages 需要 --range，例如 --range 2")
+        failures = 0
+        for name in args.names:
+            try:
+                report = real_machine_pages_check(name, args.range)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  {name} 失败：{type(exc).__name__}: {exc}")
+                if os.environ.get("BENCH_TRACEBACK"):
+                    import traceback
+
+                    traceback.print_exc()
+                return 1
+            if not report["ok"]:
+                failures += 1
+        if failures:
+            print(f"\n页码范围真机抽查失败：{failures} 篇未通过")
+            return 1
+        print("\n页码范围真机抽查通过")
+        return 0
 
     if args.ocr:
         print(json.dumps(ocr_stage(), ensure_ascii=False, indent=1))
