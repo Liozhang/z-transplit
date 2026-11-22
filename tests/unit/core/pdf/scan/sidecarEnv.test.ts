@@ -394,7 +394,11 @@ describe("buildSidecarCommand", () => {
 
 describe("fastestPypiIndex", () => {
   it("并发探测全部索引，返回最快的那个", async () => {
-    host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 30);
+    // 快慢差要留够：原来写 1 对 30 毫秒，机器一忙、事件循环被堵过 30 毫秒，次序就
+    // 翻，"pip 带最快索引"那几条于是偶发失败（实测干净树上三遍里翻过一遍）。真实
+    // 网络上的索引探测差在几十到几百毫秒，250 毫秒更接近实际量级，也到来回抖动
+    // 翻不动为止。
+    host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 250);
     const index = await fastestPypiIndex();
     expect(index).toBe(`${TUNA_BASE}/simple`);
     const probes = host.httpCalls.filter((c) => c.kind === "mirror");
@@ -426,7 +430,7 @@ describe("fastestPypiIndex", () => {
 
 describe("installSidecarEnv", () => {
   it("完整链路：脚本落地 → 解释器 → pip 带最快索引 → 自检 → 命令回填", async () => {
-    host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 30);
+    host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 250);
     const phases: string[] = [];
     const out = await installSidecarEnv({
       onProgress: (p: SidecarEnvProgress) => {
@@ -764,7 +768,7 @@ describe("discardSidecarEnv", () => {
   it("清理后重新安装：命令回填恢复", async () => {
     await installSidecarEnv({});
     await discardSidecarEnv();
-    host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 30);
+    host.latencyFor = (url) => (url.includes(TUNA_BASE) ? 1 : 250);
     const out = await installSidecarEnv({});
     expect(out.sidecarPath).toBe(getSidecarScriptPath());
     expect((globalThis as any).Zotero.Prefs.get(PREF_KEY, true)).toContain(SIDECAR_PY);

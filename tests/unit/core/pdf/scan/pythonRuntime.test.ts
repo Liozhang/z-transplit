@@ -514,8 +514,10 @@ describe("resolvePython", () => {
 
 describe("installPythonRuntime", () => {
   it("完整链路：校验清单 → 探测镜像 → 下载 → 指纹 → 解包 → 探活 → 落地", async () => {
-    // 镜像明确更快：同延迟要靠计时决胜，那样的断言是 flaky 的
-    host.latencyFor = (url) => (url.includes("cernet") ? 1 : 30);
+    // 镜像明确更快：同延迟要靠计时决胜，那样的断言是 flaky 的。差量取 250 毫秒
+    // 而不是 30：30 毫秒的差距在机器繁忙、事件循环被堵过 30 毫秒时会翻（实测全量
+    // 跑三遍翻过一遍）。真实网络上镜像探测的差量在几十到几百毫秒，250 更接近实际。
+    host.latencyFor = (url) => (url.includes("cernet") ? 1 : 250);
     const exe = await installPythonRuntime({});
     expect(exe).toBe(`${RUNTIME_DIR}\\python\\python.exe`);
     // 落地后的文件在（探活 mock 成功）
@@ -550,6 +552,9 @@ describe("installPythonRuntime", () => {
 
   it("最快镜像字节不符：自动降级到规范源", async () => {
     host.bytesFor = (url) => (url.includes("cernet") ? BAD_BYTES : GOOD_BYTES);
+    // cernet 明确更快，才谈得上"最快的那个字节不符、于是降级"。mock 默认所有源同延迟，
+    // 谁排前面全靠 Date.now() 的毫秒抖动——那样这条断言是 flaky 的（实测翻过）。
+    host.latencyFor = (url) => (url.includes("cernet") ? 1 : 250);
     const exe = await installPythonRuntime({});
     expect(exe).toBe(`${RUNTIME_DIR}\\python\\python.exe`);
     const downloads = host.httpCalls.filter((c) => c.kind === "download");

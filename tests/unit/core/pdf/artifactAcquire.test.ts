@@ -65,7 +65,15 @@ function installHost(): void {
       request: async (_m: string, url: string, opts: any) => {
         const kind = opts?.responseType === "arraybuffer" ? "download" : "probe";
         calls.push({ url, kind });
-        if (kind === "probe") return { status: 206, response: "" };
+        if (kind === "probe") {
+          // 让镜像的探测明显快于上游。rankSources 按探测耗时升序排，而这个 mock 的
+          // 探测原本是立即返回的——两个来源的耗时都是 0 或 1 毫秒，谁排前面取决于
+          // Date.now() 落在哪一毫秒上。机器一忙，事件循环被堵过 1 毫秒，次序就翻，
+          // "换下一个来源"那条于是偶发失败（实测干净树上三遍里翻过一遍）。
+          // 40 毫秒的差量到来回抖动翻不动为止。
+          await new Promise((r) => setTimeout(r, url.includes("mirror") ? 1 : 40));
+          return { status: 206, response: "" };
+        }
         const bytes = bytesFor(url);
         if (!bytes) throw new Error("unreachable");
         return { status: 200, response: bytes.buffer };
