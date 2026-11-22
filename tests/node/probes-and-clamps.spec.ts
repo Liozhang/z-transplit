@@ -26,7 +26,7 @@ import { PDFDocument, degrees } from "pdf-lib";
 import { probeReaderCapabilities } from "../../src/core/capabilities";
 import { joinWorkPath } from "../../src/core/pdf/scan/workDir";
 import { isFormulaVisionAvailable } from "../../src/core/pdf/translation/formulaExtractor";
-import { collectPageRotations } from "../../src/core/pdf/translation/backgroundFill";
+import { collectPageRotations, collectPageSizes } from "../../src/core/pdf/translation/backgroundFill";
 import { clampParagraph } from "../../src/core/pdf/translation/LayoutPreservingRenderer";
 import type { Paragraph } from "../../src/core/pdf/translation/translationIR";
 import * as prefs from "../../src/utils/prefs";
@@ -248,6 +248,61 @@ describe("collectPageRotations", () => {
     // 调用方按"没有旋转"处理——那是绝大多数文档的常态，不该让一个可选信息让
     // 整次翻译失败。
     await expect(collectPageRotations(new Uint8Array([1, 2, 3]))).resolves.toEqual([]);
+  });
+});
+
+describe("collectPageSizes", () => {
+  it("未旋转文档给逐页 MediaBox 尺寸", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([200, 300]);
+    doc.addPage([500, 400]);
+    expect(await collectPageSizes(await doc.save())).toEqual([
+      { width: 200, height: 300 },
+      { width: 500, height: 400 },
+    ]);
+  });
+
+  it("报的是未旋转尺寸，旋转页上也不交换宽高", async () => {
+    // 这一条是它存在的理由。pdf-lib 的 getSize() 给 MediaBox 原始尺寸，不套
+    // /Rotate：rot90 的 200×300 页报的还是 200×300，不是 300×200。
+    // 删除器解析内容流、画在原始空间，buildRemovalRects 也是先把显示空间的框
+    // 变换回原始空间再裁剪——两边必须用同一套宽高，交换了就会切错方向。
+    const doc = await PDFDocument.create();
+    const a = doc.addPage([200, 300]);
+    const b = doc.addPage([200, 300]);
+    a.setRotation(degrees(90));
+    b.setRotation(degrees(180));
+    expect(await collectPageSizes(await doc.save())).toEqual([
+      { width: 200, height: 300 },
+      { width: 200, height: 300 },
+    ]);
+  });
+
+  it("横版页面报横版尺寸，不往标准纸号上靠", async () => {
+    // landscape-slides.pdf 是 841.92 × 594.96。装配层从内容范围估出的页面尺寸
+    // 是 739.56 × 792（适配器的 JSON 不带 MediaBox，只能反推再往标准纸号靠），
+    // 拿它裁剪删除区域会把每段右边约 30 磅的原文剩下——真机实测留下 24 个英文
+    // 字母。所以删除区域必须用这里读到的真实 MediaBox，不能用估值。
+    const doc = await PDFDocument.create();
+    doc.addPage([841.92, 594.96]);
+    expect(await collectPageSizes(await doc.save())).toEqual([
+      { width: 841.92, height: 594.96 },
+    ]);
+  });
+
+  it("零页文档经保存加载往返后多出一页，尺寸为 595×842 的默认页", async () => {
+    // 又是那个 pdf-lib 往返怪状（见上面 collectPageRotations 的同一条）。
+    const doc = await PDFDocument.create();
+    expect(doc.getPageCount()).toBe(0);
+    const sizes = await collectPageSizes(await doc.save());
+    expect(sizes).toHaveLength(1);
+    expect(sizes[0].width).toBeGreaterThan(0);
+    expect(sizes[0].height).toBeGreaterThan(0);
+  });
+
+  it("读不出 PDF 时返回空数组，不抛错（与 collectPageRotations 同一契约）", async () => {
+    // 调用方按"没有尺寸"处理，即跳过裁剪——那是绝大多数文档的常态。
+    await expect(collectPageSizes(new Uint8Array([1, 2, 3]))).resolves.toEqual([]);
   });
 });
 

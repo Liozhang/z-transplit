@@ -102,6 +102,32 @@ describe("buildRemovalRects", () => {
     expect(rects).toEqual([{ page: 1, x0: 49, y0: 699, x1: 613, y1: 716 }]);
   });
 
+  it("裁剪用的宽高必须是真实 MediaBox，不是装配层估的页面尺寸", () => {
+    // 真机审核抓出来的缺陷。装配层的 pageSizes 是**从内容范围估出来的**
+    // （OpenDataLoader 的 JSON 不带 MediaBox，适配器只能反推再往标准纸号靠），
+    // 它自己的注释写明只服务白页兜底渲染。可删除区域也拿它裁剪，横版文档上就会
+    // 估窄：landscape-slides.pdf 真实 841.92 × 594.96，实测估成 739.56 × 792。
+    //
+    // 后果是每段的删除区域右边被切掉约 30 磅，那一段原文永远删不掉——译文 PDF
+    // 里留下一串英文残片（真机实测 24 个字母：training 只剩 aining、
+    // following 只剩 llow）。同样的矩形换成真实 MediaBox，删除器残留归零。
+    //
+    // 这条测试把两个数都钉住：估窄的尺寸会把框切短，真实的尺寸不会。
+    const assemblies = [
+      assemblyWith(["正文"], [paragraph({ x0: 54.75, x1: 767.1, y0: 414.1, y1: 442.2 })]),
+    ];
+    const estimated = [{ width: 739.558, height: 792 }];
+    const real = [{ width: 841.92, height: 594.96 }];
+    // 注意这里是 740.558 而不是 740.56：矩形对象里保留原值，两位小数是
+    // serializeRemovalRects 写文件时才做的舍入。
+    expect(buildRemovalRects(assemblies, [["正文"]], estimated)).toEqual([
+      { page: 1, x0: 53.75, y0: 413.1, x1: 740.558, y1: 443.2 },
+    ]);
+    expect(buildRemovalRects(assemblies, [["正文"]], real)).toEqual([
+      { page: 1, x0: 53.75, y0: 413.1, x1: 768.1, y1: 443.2 },
+    ]);
+  });
+
   it("skips degenerate bboxes (zero or negative width/height)", () => {
     const assemblies = [
       assemblyWith(["退化", "正常"], [
