@@ -145,4 +145,14 @@ export interface AssemblyResult {
    * cropped image on top, preserving the math visually.
    */
   placedFormulas?: PlacedImage[];
+  /**
+   * 逐段标注"保留原文、不送翻译"，与 `paragraphs` / `texts` 同位。判据见
+   * `translationScope`（窄框放不下汉字的、纯数字串的）。装配层算好挂在这里，
+   * 翻译步照它把送引擎的文本清空，渲染端与删除区域照旧按空译文跳过——于是这些
+   * 段不译、不遮罩、不删原文、不叠译文，与批 3 定下的"只翻放得下的"一致。
+   *
+   * 缺省（老装配、扫描页合并前的占位）当全部 false，即全都送翻译，与加上这个
+   * 字段之前的行为一致。
+   */
+  keepOriginal?: boolean[];
 }

@@ -76,6 +76,7 @@ import {
 } from "./formulaExtractor";
 import { rasterizeRegionToDataURL } from "./ZoteroPdfRasterizer";
 import {
+  isPureFormulaParagraph,
   translateParagraphs,
   translateAllPagesBatched,
 } from "./translateParagraphs";
@@ -453,7 +454,18 @@ export async function translateAndSplitWithOpenDataLoader(
   } catch (e) {
     safeDebug("[Z-Transplit] opendataloaderSplitAdapter: background-fill sampling skipped: " + e);
   }
-  const base = odlAnalysisToAssembly(analysis, { backgroundFills });
+  // 目标语言先读出来：装配层要按它决定哪些段落不送翻译（窄框放不下汉字的、
+  // 纯数字串的，见 translationScope）。原本这段在很后面，为了喂给装配层提前。
+  const targetLanguage =
+    (getPrefDynamic("translate.targetLanguage") as string | undefined) ||
+    // "" = follow Zotero's UI locale (addon/prefs.js declares exactly that);
+    // the final "zh-CN" only guards hosts with no Zotero global at all.
+    zoteroUILocale() ||
+    "zh-CN";
+  const base = odlAnalysisToAssembly(analysis, {
+    backgroundFills,
+    targetLanguage,
+  });
   const baseAssemblies = base.assemblies;
   const basePageSizes = base.pageSizes;
   const baseFormulaBlocks = base.formulaBlocks;
@@ -593,15 +605,10 @@ export async function translateAndSplitWithOpenDataLoader(
     }
   }
 
-  //    Resolve the CJK font for the target script (zh/ja/ko) + a Latin font for
-  //    English runs, plus optional Bold/Italic variants. Warn loudly if the CJK
-  //    font is missing for a CJK target — without it every glyph becomes '?'.
-  const targetLanguage =
-    (getPrefDynamic("translate.targetLanguage") as string | undefined) ||
-    // "" = follow Zotero's UI locale (addon/prefs.js declares exactly that);
-    // the final "zh-CN" only guards hosts with no Zotero global at all.
-    zoteroUILocale() ||
-    "zh-CN";
+  // 解析目标文字用的字体：中日韩目标取 CJK 字体加一套粗体/斜体变体，另加一
+  // 份拉丁字体供混合段落里的英文 run 用。CJK 目标却取不到 CJK 字体时要响亮点
+  // 出来——那样每个汉字都会变成 '?'。
+  //
   // One title, three consumers: the overlay PDF's metadata, the white-page
   // merged PDF's metadata, and the Zotero attachment title. splitViewCleanup's
   // recognition regex must keep matching this convention — the Translated (<lang>)
@@ -661,6 +668,18 @@ export async function translateAndSplitWithOpenDataLoader(
   // 范围外的页面因此在输出 PDF 里逐字保留原文。
   const emptySet = (assembly: { paragraphs: unknown[] }): string[] =>
     assembly.paragraphs.map(() => "");
+  // 送翻译的文本：装配层标了"保留原文"的段清空。下标必须与 paragraphs 对齐，
+  // 所以是清空而不是删项——渲染端与删除区域都按空译文跳过，于是这些段不译、
+  // 不遮罩、不删原文、不叠译文。判据在 translationScope（窄框放不下汉字的、
+  // 纯数字串的），这里只负责套用。
+  //
+  // 纯公式段不清：它的 LaTeX 要经 latexToPlain 变成读者看得懂的符号画出去，
+  // 而 translateParagraphs 对纯公式段本来就是直通。清空会让公式从译文里消失。
+  const textsForTranslation = (assembly: import("./translationIR").AssemblyResult): string[] => {
+    const keep = assembly.keepOriginal;
+    if (!keep) return assembly.texts;
+    return assembly.texts.map((t, j) => (keep[j] && !isPureFormulaParagraph(t) ? "" : t));
+  };
   const selectedIndices = assemblies
     .map((_, i) => i)
     .filter((i) => isPageSelected(i + 1));
@@ -675,7 +694,7 @@ export async function translateAndSplitWithOpenDataLoader(
     // 只送选中页：translateAllPagesBatched 按位置散回，选中的页按顺序映射
     // 回原位，其余页放空集。
     const batchResult = await translateAllPagesBatched(
-      selectedIndices.map((i) => assemblies[i].texts),
+      selectedIndices.map((i) => textsForTranslation(assemblies[i])),
       batchHandle.translate,
       {
         targetLanguage,
@@ -722,7 +741,7 @@ export async function translateAndSplitWithOpenDataLoader(
         { done: i, total: totalPages },
       );
       const { results, status } = await translateParagraphs(
-        assembly.texts,
+        textsForTranslation(assembly),
         translator,
         targetLanguage,
         undefined,

@@ -43,6 +43,7 @@ import type {
 } from "./translationIR";
 import { parseFontStyle, parseTextColor } from "./fontStyleParser";
 import { pickBackgroundColor, type FillRect } from "./backgroundFill";
+import { computeKeepOriginal, isCjkTargetLanguage } from "./translationScope";
 import {
   allocateText,
   detectColumnEdges,
@@ -120,6 +121,12 @@ export interface AssemblyOptions {
    * 行为。数组长度与页数不一致时按页号取，取不到就当没有。
    */
   backgroundFills?: FillRect[][];
+  /**
+   * 目标语言。给了它，装配层会按 translationScope 的判据标出"保留原文、不送
+   * 翻译"的段（窄框放不下汉字的、纯数字串的）。不传按中文目标算——这个插件的
+   * 目标语默认就是中文。传拉丁语种则一条都不标，行为与加上这个字段之前一致。
+   */
+  targetLanguage?: string;
 }
 
 export function odlAnalysisToAssembly(
@@ -129,9 +136,15 @@ export function odlAnalysisToAssembly(
   const assemblies: AssemblyResult[] = [];
   const pageSizes: PageSize[] = [];
   const formulaBlocks: FormulaBlock[] = [];
+  const cjkTarget = isCjkTargetLanguage(options.targetLanguage ?? "zh-CN");
 
   analysis.pages.forEach((page, idx) => {
-    const built = pageAnalysisToAssembly(page, idx + 1, options.backgroundFills?.[idx]);
+    const built = pageAnalysisToAssembly(
+      page,
+      idx + 1,
+      options.backgroundFills?.[idx],
+      cjkTarget,
+    );
     assemblies.push(built.assembly);
     pageSizes.push(built.pageSize);
     formulaBlocks.push(...built.formulaBlocks);
@@ -148,6 +161,7 @@ export function pageAnalysisToAssembly(
   page: PdfPageAnalysis,
   pageNumber: number,
   backgroundFills?: FillRect[],
+  cjkTarget = true,
 ): {
   assembly: AssemblyResult;
   pageSize: PageSize;
@@ -368,13 +382,17 @@ export function pageAnalysisToAssembly(
       globalLines: [],
       // Empty by default — the orchestrator fills this with formula region
       // screenshots (rasterized from the reader) for the renderer to paste
-      // back at the original bboxes. Initialized here so the renderer can
+      // back at their original bboxes. Initialized here so the renderer can
       // always read `assembly.placedFormulas` without a null-check.
       placedFormulas: [],
       // Only attach `images` when non-empty, so the legacy path (which
       // never sets it) and the common ODL path (no raster images) both
       // produce the same shape the renderer already understands.
       ...(images.length > 0 ? { images } : {}),
+      // 逐段标注"保留原文、不送翻译"，与 paragraphs / texts 同位。判据在
+      // translationScope，这里只负责算出来挂上去——下游（主管线的翻译步、无头
+      // 驱动、度量）都读这一份，不各自重算，免得三处规则漂移。
+      keepOriginal: computeKeepOriginal(paragraphs, texts, cjkTarget),
     },
     pageSize: {
       width: page.width > 0 ? page.width : 612,
