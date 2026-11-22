@@ -1,0 +1,350 @@
+{
+ "commit": "7f73d59",
+ "generatedAt": "2026-11-22 13:27:23",
+ "results": [
+  {
+   "fixture": "reading-brain",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\ALHQ9PT3\\Translated_qa-sample.pdf",
+   "layout": {
+    "biou": 0.7174624513193619,
+    "biouSamples": 18,
+    "boxRecall": 0.7318888929034567,
+    "boxPrecision": 0.9703772332473033,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 0,
+     "bottom": 0,
+     "top": 0,
+     "silentRight": 0
+    },
+    "maxOverflow": {
+     "right": 0.0,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.818099125562445,
+     "p10": 0.5,
+     "below06Ratio": 0.18181818181818182
+    },
+    "mask": {
+     "total": 0,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 15,
+      "translated": 15,
+      "untranslated": 0,
+      "meanIou": 0.7139335371961002,
+      "masks": 0
+     },
+     {
+      "page": 2,
+      "paragraphs": 3,
+      "translated": 3,
+      "untranslated": 0,
+      "meanIou": 0.7351070219356707,
+      "masks": 0
+     }
+    ]
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 2052687,
+    "insideChangedRatio": 0.415136377546415,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 1716,
+    "residualLetters": 0,
+    "residueRatio": 0.0,
+    "sourceScript": "latin"
+   },
+   "provenance": {
+    "commit": "7f73d59",
+    "generatedAt": "2026-11-22 13:26:25"
+   }
+  },
+  {
+   "fixture": "attention-reading",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\UVLNUYDU\\Translated_qa-sample.pdf",
+   "layout": {
+    "biou": 0.7209907105761968,
+    "biouSamples": 37,
+    "boxRecall": 0.7512974976743703,
+    "boxPrecision": 0.9473077328200713,
+    "utb": 1,
+    "utbReasons": {
+     "noText": 1,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 2,
+     "bottom": 0,
+     "top": 0,
+     "silentRight": 2
+    },
+    "maxOverflow": {
+     "right": 6.00001147460938,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.8294873174190575,
+     "p10": 0.6247654641099539,
+     "below06Ratio": 0.08411214953271028
+    },
+    "mask": {
+     "total": 2,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 1,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 26,
+      "translated": 25,
+      "untranslated": 1,
+      "meanIou": 0.7167914920915824,
+      "masks": 1
+     },
+     {
+      "page": 2,
+      "paragraphs": 12,
+      "translated": 12,
+      "untranslated": 0,
+      "meanIou": 0.7297390824191431,
+      "masks": 1
+     }
+    ]
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 1748321,
+    "insideChangedRatio": 0.4287172507655665,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 3900,
+    "residualLetters": 125,
+    "residueRatio": 0.03205128205128205,
+    "sourceScript": "latin"
+   },
+   "provenance": {
+    "commit": "7f73d59",
+    "generatedAt": "2026-11-22 13:26:42"
+   }
+  },
+  {
+   "fixture": "three-column",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\WD2BQYQM\\Translated_qa-sample.pdf",
+   "layout": {
+    "biou": 0.7101275838576738,
+    "biouSamples": 26,
+    "boxRecall": 0.747783311154493,
+    "boxPrecision": 0.9370662961247864,
+    "utb": 1,
+    "utbReasons": {
+     "noText": 1,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 2,
+     "bottom": 0,
+     "top": 0,
+     "silentRight": 2
+    },
+    "maxOverflow": {
+     "right": 6.0,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.8234671316273678,
+     "p10": 0.6498949902408466,
+     "below06Ratio": 0.05063291139240506
+    },
+    "mask": {
+     "total": 1,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 1,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 27,
+      "translated": 26,
+      "untranslated": 1,
+      "meanIou": 0.7101275838576738,
+      "masks": 1
+     }
+    ]
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 861791,
+    "insideChangedRatio": 0.45096558056126196,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 2329,
+    "residualLetters": 0,
+    "residueRatio": 0.0,
+    "sourceScript": "latin"
+   },
+   "provenance": {
+    "commit": "7f73d59",
+    "generatedAt": "2026-11-22 13:26:54"
+   }
+  },
+  {
+   "fixture": "landscape-slides",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\BZBT5EJ5\\Translated_qa-sample.pdf",
+   "layout": {
+    "biou": 0.7111099359934059,
+    "biouSamples": 19,
+    "boxRecall": 0.8331801360190667,
+    "boxPrecision": 0.8664385323071396,
+    "utb": 0,
+    "utbReasons": {
+     "noText": 0,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 5,
+     "bottom": 0,
+     "top": 1,
+     "silentRight": 5
+    },
+    "maxOverflow": {
+     "right": 7.496006591796885,
+     "bottom": 0.0,
+     "top": 1.190860778808542
+    },
+    "fontSize": {
+     "median": 0.7307070662922663,
+     "p10": 0.5555555555555556,
+     "below06Ratio": 0.32142857142857145
+    },
+    "mask": {
+     "total": 1,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 17,
+      "translated": 17,
+      "untranslated": 0,
+      "meanIou": 0.7035187331633143,
+      "masks": 1
+     },
+     {
+      "page": 2,
+      "paragraphs": 2,
+      "translated": 2,
+      "untranslated": 0,
+      "meanIou": 0.775635160049185,
+      "masks": 0
+     }
+    ]
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 2225809,
+    "insideChangedRatio": 0.45644382854685334,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 1061,
+    "residualLetters": 0,
+    "residueRatio": 0.0,
+    "sourceScript": "latin"
+   },
+   "provenance": {
+    "commit": "7f73d59",
+    "generatedAt": "2026-11-22 13:27:05"
+   }
+  },
+  {
+   "fixture": "formula-dense",
+   "translatedPdf": "D:\\zt-qa\\data\\storage\\RRK6HNTE\\Translated_qa-sample.pdf",
+   "layout": {
+    "biou": 0.7294304038137949,
+    "biouSamples": 22,
+    "boxRecall": 0.7404490576908818,
+    "boxPrecision": 0.9771252218326496,
+    "utb": 4,
+    "utbReasons": {
+     "noText": 4,
+     "empty": 0
+    },
+    "overflow": {
+     "right": 0,
+     "bottom": 0,
+     "top": 0,
+     "silentRight": 0
+    },
+    "maxOverflow": {
+     "right": 0.0,
+     "bottom": 0.0,
+     "top": 0.0
+    },
+    "fontSize": {
+     "median": 0.7893628104854221,
+     "p10": 0.6469342376647927,
+     "below06Ratio": 0.058823529411764705
+    },
+    "mask": {
+     "total": 0,
+     "intrusionIntoParagraph": 0,
+     "intrusionIntoRegion": 0
+    },
+    "unassignedSpans": 0,
+    "perPage": [
+     {
+      "page": 1,
+      "paragraphs": 26,
+      "translated": 22,
+      "untranslated": 4,
+      "meanIou": 0.7294304038137949,
+      "masks": 0
+     }
+    ]
+   },
+   "pixel": {
+    "outsideDiffRatio": 0.0,
+    "outsideDiff": 0,
+    "outsideTotal": 476303,
+    "insideChangedRatio": 0.40481597968727073,
+    "outsideSamples": []
+   },
+   "residue": {
+    "sourceLetters": 3164,
+    "residualLetters": 74,
+    "residueRatio": 0.02338811630847029,
+    "sourceScript": "latin"
+   },
+   "provenance": {
+    "commit": "7f73d59",
+    "generatedAt": "2026-11-22 13:27:23"
+   }
+  }
+ ]
+}

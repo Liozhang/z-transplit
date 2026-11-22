@@ -60,6 +60,10 @@ FIXTURE_DIR = ROOT / "scripts" / "qa" / "fixtures"
 KEY_DIR = BENCH_DIR / "answer-keys"
 OUT_DIR = BENCH_DIR / "out"
 BASELINE_PATH = BENCH_DIR / "baseline.json"
+# 真机基线单独一份文件。它与无头基线回答的不是同一个问题：无头基线防"这次改坏了"，
+# 真机基线防"真机上才出现的退化"——字号压缩就是只有真机看得见的一类（无头五篇全是
+# 0.000，真机最高 0.321）。混在一份文件里会让人以为门禁覆盖了真机，其实没有。
+REAL_MACHINE_BASELINE_PATH = BENCH_DIR / "baseline-real-machine.json"
 JAR_CANDIDATES = [
     ROOT / "src" / "core" / "pdf" / "lib" / "opendataloader-pdf-cli.jar",
     Path(r"D:\zt-qa\data\ztransplit\lib\opendataloader-pdf-cli.jar"),
@@ -387,6 +391,22 @@ def run(
         errors="replace",
         env=env,
     )
+
+
+def git_commit() -> str:
+    """当前仓库的短提交号，取不到时给 "unknown"。
+
+    真机基线必须带上它。真机测量一次要几分钟且要一个跑着的 Zotero，基线很可能会
+    比 HEAD 旧好几个提交；不记下采自哪个提交，门禁报一项回归时分不清是"改坏了"
+    还是"基线本来就旧"。取不到不抛错——脱离 git 工作树跑基准不该因此失败。
+    """
+    try:
+        result = run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT)
+    except OSError:
+        return "unknown"
+    if result.returncode != 0:
+        return "unknown"
+    return result.stdout.strip() or "unknown"
 
 
 def parse_with_jar(fixture_pdf: Path, workdir: Path) -> Path:
@@ -788,10 +808,24 @@ TOLERANCE = {"ratio": 0.01, "count": 0}
 
 # 绝对底线：不管基线是多少都不许越过。0.002 沿用 prototype 下那个跑过 14 个
 # 文档的探针的阈值；BIoU 大于 0 只是要求"确实有译文落在框里"。
+#
+# 字号那条是真机审核补的。无头路径五篇的 below06Ratio 全是 0.000（合成译文长度
+# 受控，渲染端那两条杠杆根本不会启动），真机最高 0.321——近三分之一的译文字号被压
+# 到原文六成以下。基线对照在这里不够用：基线只会把当前这个难看的值冻结成"正常"。
+# 所以加一条绝对上限：一半以上的译文低于六成，无论基线怎么说都是坏的。渲染端的
+# 字号下限是 max(4, 0.4×原文)，理论上这个比例能到 1.0，0.5 留出了余量。
 FLOORS: list[tuple[str, str, float]] = [
     ("pixel.outsideDiffRatio", "<=", 0.002),
     ("layout.biou", ">", 0.0),
+    ("layout.fontSize.below06Ratio", "<=", 0.5),
 ]
+
+# 真机门禁不比对回归的路径。`silentRight` 等于"度量数到的右溢"减去"产品自己报的
+# 右溢"，而真机测量拿不到产品的诊断（无头路径才传 stats），所以它在真机侧恒等于
+# `overflow.right`。拿它比回归，等于把同一个数以两个名字报两遍，而且其中一个名字
+# 会让人以为"产品开始静默溢出了"——那是无头路径上才有意义的判断。绝对底线不涉及
+# 它，所以只从回归比较里摘掉。
+REAL_MACHINE_SKIP_PATHS = {"layout.overflow.silentRight"}
 
 
 def resolve(node, parts: list[str]):
@@ -826,13 +860,22 @@ def collect_watched(result: dict) -> dict[str, float]:
     return out
 
 
-def compare(baseline: dict, current: dict) -> tuple[list[dict], list[dict]]:
-    """逐指标比基线与当前。返回 (回归项, 越过绝对底线的项)。"""
+def compare(
+    baseline: dict, current: dict, skip: set[str] | None = None
+) -> tuple[list[dict], list[dict]]:
+    """逐指标比基线与当前。返回 (回归项, 越过绝对底线的项)。
+
+    skip 里的路径不参与回归比较（绝对底线照旧算）。给真机门禁用：有些指标只在
+    无头路径上有意义，放到真机上比是在报一个没有含义的数。
+    """
+    skip = skip or set()
     baseline_watched = collect_watched(baseline)
     current_watched = collect_watched(current)
     regressions: list[dict] = []
     floor_breaks: list[dict] = []
     for path, kind, direction in WATCHED:
+        if path in skip:
+            continue
         if path not in baseline_watched or path not in current_watched:
             continue
         before = baseline_watched[path]
@@ -1326,14 +1369,19 @@ def ocr_stage() -> dict:
 
 
 def harness_selftest() -> int:
-    """真机挑附件那一小段逻辑的自检。
+    """真机挑附件与真机门禁的自检。
 
-    为什么单为它开一个入口：`fresh_translated_attachment` 判错一次不抛异常、不报错，
-    只是安静地拿一篇旧产出当新结论——three-column 实测就这么报过一次"页数不一致"。
-    这种错在报告上看起来像被测对象的问题，所以挑文件的判据本身必须有守卫。
+    为什么单为它开一个入口：这两处判错都不抛异常、不报错，只是安静地给错结论。
+    挑附件挑错了，是拿一篇旧产出当新结论——three-column 实测就这么报过一次
+    "页数不一致"；门禁判错了，是永远说绿。两种错在报告上都像被测对象的问题，
+    所以判据本身必须有守卫。
 
-    全部用真实临时文件，不 mock 文件系统：这里的判据一半建立在 mtime 上，mock 掉
-     stat 就等于把要测的东西测没了。
+    真机门禁那一组全是纯数据，不点火：它跑一次要几分钟且要一个活着的 Zotero，
+    进不了日常自检，可它坏了就是永远绿。所以把"确实抓得到回归"这一条钉在这儿，
+    包括一条正控——一模一样的两份数据不许报回归，否则"抓得到"可能只是它见什么都报。
+
+    挑附件那一组全部用真实临时文件，不 mock 文件系统：判据一半建立在 mtime 上，
+    mock 掉 stat 就等于把要测的东西测没了。
     """
     failures = 0
 
@@ -1434,6 +1482,97 @@ def harness_selftest() -> int:
             load_real_machine_rows(good) == [{"fixture": "a"}],
             f"got {load_real_machine_rows(good)}",
         )
+
+        # ── 真机门禁那一侧 ──
+        # 为什么必须在这儿测：真机门禁跑一次要几分钟且要一个活着的 Zotero，不可能
+        # 进日常自检。可它要是坏了——比如 collect_watched 在真机行的结构上取不到值、
+        # 或者 compare 对真机行不报回归——表现就是永远绿。一个只会说绿的门禁比没有
+        # 门禁更糟。所以把"它确实抓得到"这一条钉在这里，用纯数据跑，不点火。
+        real_row = {
+            "fixture": "fake",
+            "layout": {
+                "biou": 0.71,
+                "utb": 1,
+                "fontSize": {"below06Ratio": 0.32, "p10": 0.556},
+                "overflow": {"right": 5, "silentRight": 5},
+                "mask": {"intrusionIntoParagraph": 0},
+            },
+            "pixel": {"outsideDiffRatio": 0.0},
+            "residue": {"residueRatio": 0.0},
+        }
+        watched = collect_watched(real_row)
+        check(
+            "真机行上取得到字号与交并比（门禁不是在对空字典比）",
+            watched.get("layout.fontSize.below06Ratio") == 0.32
+            and watched.get("layout.biou") == 0.71
+            and watched.get("layout.overflow.right") == 5,
+            f"got {sorted(watched)}",
+        )
+        check(
+            "真机行没有 parse.*，那些路径取不到（所以真机门禁覆盖的指标更少）",
+            not any(path.startswith("parse.") for path in watched),
+            f"got {sorted(watched)}",
+        )
+        # 正控：一模一样的两份不许报回归。少了这一条，"抓得到回归"可能只是它见什么都报。
+        same_regressions, same_floors = compare(real_row, json.loads(json.dumps(real_row)))
+        check("同一份数据比自己不报回归", not same_regressions and not same_floors)
+        # 正控：字号退化必须报回归。这是真机审核补这条门禁的全部理由。
+        worse = json.loads(json.dumps(real_row))
+        worse["layout"]["fontSize"]["below06Ratio"] = 0.45
+        worse_regressions, _ = compare(real_row, worse)
+        check(
+            "字号低于 0.6 的比例上升会报回归",
+            any(item["path"] == "layout.fontSize.below06Ratio" for item in worse_regressions),
+            f"got {worse_regressions}",
+        )
+        # 绝对底线：越过 0.5 一律报，哪怕基线本身就已经很高。基线对照会把这个值冻结成
+        # "正常"，底线不会。
+        over_floor = json.loads(json.dumps(real_row))
+        over_floor["layout"]["fontSize"]["below06Ratio"] = 0.62
+        _, floor_breaks = compare(real_row, over_floor)
+        check(
+            "字号低于 0.6 的比例越过 0.5 报绝对底线",
+            any(
+                item["path"] == "layout.fontSize.below06Ratio" and item["limit"] == 0.5
+                for item in floor_breaks
+            ),
+            f"got {floor_breaks}",
+        )
+        # 交并比归零必须报——无头门禁那侧早有这条，真机这侧要同样成立。
+        dead = json.loads(json.dumps(real_row))
+        dead["layout"]["biou"] = 0.0
+        _, dead_floors = compare(real_row, dead)
+        check(
+            "交并比归零报绝对底线",
+            any(item["path"] == "layout.biou" for item in dead_floors),
+            f"got {dead_floors}",
+        )
+        # 遮罩侵入段落上升必须报回归（方向是 lower）。
+        intruded = json.loads(json.dumps(real_row))
+        intruded["layout"]["mask"]["intrusionIntoParagraph"] = 3
+        intrude_regressions, _ = compare(real_row, intruded)
+        check(
+            "遮罩侵入段落数上升报回归",
+            any(item["path"] == "layout.mask.intrusionIntoParagraph" for item in intrude_regressions),
+            f"got {intrude_regressions}",
+        )
+        # silentRight 在真机侧没有含义（恒等于 overflow.right），必须被排除，否则同一个
+        # 数会以两个名字报两遍，而其中一个名字会让人误以为"产品开始静默溢出了"。
+        silent = json.loads(json.dumps(real_row))
+        silent["layout"]["overflow"]["silentRight"] = 9
+        silent_regressions, _ = compare(real_row, silent, skip=REAL_MACHINE_SKIP_PATHS)
+        check(
+            "silentRight 被排除在真机回归比较之外",
+            not any(item["path"] == "layout.overflow.silentRight" for item in silent_regressions),
+            f"got {silent_regressions}",
+        )
+        check(
+            "但不排除时它照旧报回归（无头门禁那边仍要用它）",
+            any(
+                item["path"] == "layout.overflow.silentRight"
+                for item in compare(real_row, silent)[0]
+            ),
+        )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -1455,7 +1594,17 @@ def main() -> int:
         help="真机抽查不重点火流水线，直接度量库里已有的译文附件（省掉每次约十分钟的阅读器初始化）",
     )
     parser.add_argument("--ocr", action="store_true", help="扫描件层指标")
-    parser.add_argument("--selftest", action="store_true", help="跑真机挑附件那段逻辑的自检后退出")
+    parser.add_argument("--selftest", action="store_true", help="跑真机挑附件与真机门禁的自检后退出")
+    parser.add_argument(
+        "--write-real-machine-baseline",
+        action="store_true",
+        help="跑真机并把结果写成真机基线（与无头基线分开的一份参照）",
+    )
+    parser.add_argument(
+        "--real-machine-gate",
+        action="store_true",
+        help="跑真机并与真机基线比，判回归。要几分钟且需要一个跑着的 QA 实例，不进日常门禁",
+    )
     parser.add_argument("--keep-workdir", default="", help="保留中间产物到指定目录（排障用）")
     args = parser.parse_args()
 
@@ -1464,6 +1613,15 @@ def main() -> int:
 
     if args.selftest:
         return harness_selftest()
+
+    if args.write_real_machine_baseline or args.real_machine_gate:
+        # 真机门禁自己跑真机，所以这一步与 --real-machine 是分开的两条路，不能叠用。
+        if args.names:
+            return real_machine_gate(args.names, write_baseline=args.write_real_machine_baseline)
+        parser.error(
+            "--real-machine-gate / --write-real-machine-baseline 需要指定夹具名，"
+            "例如 --real-machine-gate reading-brain landscape-slides"
+        )
 
     if args.ocr:
         print(json.dumps(ocr_stage(), ensure_ascii=False, indent=1))
@@ -1516,6 +1674,7 @@ def main() -> int:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         rows = load_real_machine_rows(OUT_DIR / "real-machine.json")
         by_fixture = {row.get("fixture"): row for row in rows}
+        stamp = {"commit": git_commit(), "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S")}
         for real, headless in report_rows:
             by_fixture[real["fixture"]] = {
                 "fixture": real["fixture"],
@@ -1524,6 +1683,9 @@ def main() -> int:
                 "pixel": real["pixel"],
                 "residue": real["residue"],
                 "headless": headless,
+                # 这一行是哪个提交、什么时候量的。真机基线靠它判断新旧，没有它，
+                # 一项回归分不清是"改坏了"还是"基线采得早"。
+                "provenance": stamp,
             }
         # 按夹具在清单里的顺序排，同一批跑多少篇、分多少次跑，读出来的顺序都一样。
         order = [f["name"] for f in FIXTURES]
@@ -1636,6 +1798,127 @@ def main() -> int:
         return 1
     if args.gate and (regressions or floors):
         return 1
+    return 0
+
+
+def real_machine_gate(names: list[str], write_baseline: bool) -> int:
+    """真机门禁：点火真机跑指定夹具，与真机基线逐指标比。
+
+    与无头门禁有两点本质区别，都是被坑出来的：
+
+    1. **它自己跑真机，不读 `out/real-machine.json` 里躺着的旧行。** 真机一次要几分
+       钟且要一个跑着的 Zotero，那些旧行很可能比 HEAD 旧好几个提交。拿旧行比基线，
+       报出来的回归分不清是"这次改坏了"还是"基线本来就旧"。所以宁可每次重跑——
+       这也是它不进 `npm run test:benchmark` 的原因：那条命令要能随手跑。
+    2. **它覆盖的指标比无头少，而且必须说出来。** 真机行里只有 `layout` / `pixel` /
+       `residue` 三块，`parse.*` 一项都没有（解析质量由无头路径量）。`compare` 对缺失
+       的路径是静默跳过的，不点出来就会让人以为门禁全覆盖了。
+
+    跑法：
+        python scripts/qa/benchmark/run.py --write-real-machine-baseline reading-brain …
+        python scripts/qa/benchmark/run.py --real-machine-gate reading-brain …
+    """
+    if write_baseline:
+        print("写真机基线：先跑一遍指定夹具的真机流水线……")
+    else:
+        if not REAL_MACHINE_BASELINE_PATH.exists():
+            print(f"没有真机基线 {REAL_MACHINE_BASELINE_PATH}。先跑 --write-real-machine-baseline。")
+            return 2
+        baseline = json.loads(REAL_MACHINE_BASELINE_PATH.read_text(encoding="utf-8"))
+        baseline_by_name = {r["fixture"]: r for r in baseline.get("results", [])}
+        print(
+            f"真机基线采自提交 {baseline.get('commit', 'unknown')}"
+            f"（{baseline.get('generatedAt', '时间未知')}），共 {len(baseline_by_name)} 篇"
+        )
+
+    rows: list[dict] = []
+    for name in names:
+        print(f"真机抽查 {name}……")
+        try:
+            real = real_machine_check(name)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {name} 失败：{type(exc).__name__}: {exc}")
+            if os.environ.get("BENCH_TRACEBACK"):
+                import traceback
+
+                traceback.print_exc()
+            return 1
+        row = {
+            "fixture": real["fixture"],
+            "translatedPdf": real["translatedPdf"],
+            "layout": real["layout"],
+            "pixel": real["pixel"],
+            "residue": real["residue"],
+            "provenance": {"commit": git_commit(), "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S")},
+        }
+        layout = real["layout"]
+        print(
+            f"  交并比 {layout.get('biou', 0):.3f}  未翻译 {layout.get('utb', 0)}  "
+            f"遮罩侵入 {layout.get('mask', {}).get('intrusionIntoParagraph', 0)}  "
+            f"框外像素差异 {real['pixel'].get('outsideDiffRatio', 0):.5f}  "
+            f"字号低于 0.6 {layout.get('fontSize', {}).get('below06Ratio', 0):.3f}"
+        )
+        rows.append(row)
+
+    if write_baseline:
+        REAL_MACHINE_BASELINE_PATH.write_text(
+            json.dumps(
+                {
+                    "commit": git_commit(),
+                    "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "results": rows,
+                },
+                ensure_ascii=False,
+                indent=1,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        print(f"\n真机基线写到 {REAL_MACHINE_BASELINE_PATH}")
+        print("人工核对一遍数字再提交。它与无头基线是两份参照，回答的不是同一个问题。")
+        return 0
+
+    regressions: list[dict] = []
+    floors: list[dict] = []
+    compared_paths: set[str] = set()
+    for row in rows:
+        base = baseline_by_name.get(row["fixture"])
+        if not base:
+            print(f"\n注意：真机基线里没有 {row['fixture']}，未参与比较")
+            continue
+        item_regressions, item_floors = compare(base, row, skip=REAL_MACHINE_SKIP_PATHS)
+        # 记下这一次真正比到了哪些路径。缺的路径（parse.* 那一大批）是静默跳过的，
+        # 不报出来就等于假装覆盖了。
+        for path, _, _ in WATCHED:
+            if path in REAL_MACHINE_SKIP_PATHS:
+                continue
+            if path in collect_watched(base) and path in collect_watched(row):
+                compared_paths.add(path)
+        for item in item_regressions:
+            regressions.append({"fixture": row["fixture"], **item})
+        for item in item_floors:
+            floors.append({"fixture": row["fixture"], **item})
+
+    print(
+        f"\n本次实际比对 {len(compared_paths)} 项指标：{', '.join(sorted(compared_paths))}"
+    )
+    print("未比到的有两类：真机行里没有的（parse.* 解析质量那一批，由无头门禁覆盖），")
+    print(f"以及在真机上没有含义、有意排除的（{', '.join(sorted(REAL_MACHINE_SKIP_PATHS))}）")
+
+    if regressions or floors:
+        print(f"\n真机门禁失败：{len(regressions)} 项回归，{len(floors)} 项越过绝对底线")
+        for item in regressions:
+            print(
+                f"  {item['fixture']} {item['path']}: "
+                f"{fmt(item['baseline'])} → {fmt(item['current'])}"
+            )
+        for item in floors:
+            print(
+                f"  {item['fixture']} {item['path']}: "
+                f"{fmt(item['value'])} 越过 {item['op']} {fmt(item['limit'])}"
+            )
+        return 1
+    print("\n真机门禁通过")
     return 0
 
 
