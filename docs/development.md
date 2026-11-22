@@ -353,7 +353,7 @@ pip 与自检的 argv、命令回填、已就绪零网络、脚本刷新、只�
 | `npm run test:qa` | QA 资产自测：Zotero/fetch mock 自举 + structure-check 正控（无正控的校验器不能证明自己能抓问题） |
 | `npm run check:jar` | 随包 jar 与 `PROVENANCE.json` 的 sha256 / 字节数对账 |
 | `npm run check:python-runtime` | 随包 `PYTHON-RUNTIME.json` 的结构对账（`--online` 追加联网核对构件与镜像） |
-| `npm run test:benchmark` | 版面保留翻译的评测基准：度量库自检 + 与基线逐指标判回归 |
+| `npm run test:benchmark` | 版面保留翻译的评测基准：度量库自检 + 真机挑附件逻辑自检 + 与基线逐指标判回归 |
 
 ## 测试分层
 
@@ -399,11 +399,17 @@ node scripts/qa/windows-unicode-probe.mjs --mode both       # 顺序执行两种
 `D:\zt-qa\command.json` / `result.json` 交换命令与结果：
 
 ```bash
-node scripts/qa/real-machine.mjs boot                    # 启动真实 Zotero 并等待探针就绪
+QA_EXTRA_PREFS=/path/to/extra-prefs.json \
+     node scripts/qa/real-machine.mjs boot        # 启动真实 Zotero 并等待探针就绪
 node scripts/qa/real-machine.mjs send <action> [arg]     # 调用一个探针 handler
 node scripts/qa/real-machine.mjs log                     # 查看 Zotero 调试输出
 node scripts/qa/real-machine.mjs shoot                   # 结束
 ```
+
+`boot` 建议带上 `QA_EXTRA_PREFS`，指向一份仓库外的引擎配置 JSON（接口地址、密钥、
+模型、目标语言）。启动器会整份重写 profile 的 `prefs.js`，不设这个变量就会把引擎
+配置冲掉；随后偏好迁移按界面语言重设默认引擎，所有翻译请求在发出前就中止。表现是
+交并比 0.000、满页未翻译，看日志容易误判成产品故障。
 
 可用 action：`ping`、`snapshot`、`introspect`、`reader`、`selectText`、`paneFlow`、
 `bilingual`、`readAloud`、`menus`、`itemtree`、`tools`（工具菜单「生词本」入口检查）、
@@ -807,6 +813,12 @@ OCR 路由**（这条第三批批次 6 补上，见该节的度量）。公式�
 路径，是一次独立测量，所以上面的版面指标一项都没动。仍然只有真机覆盖的是：删除结果
 真的被用于渲染（无头渲染的一律是未删的源）、删除失败时管线的回落编排、以及
 `--inspect` 那条图片区域排除路径。
+
+区域文件的**参数**现在两侧也对齐了：旋转与页面尺寸都从源 PDF 读，再照产品
+`buildRemovalRects(assemblies, translatedSets, pageSizes, pageRotations)` 的次序传。
+此前无头驱动页面尺寸传 `undefined`（等于不裁剪），于是它量到的区域比产品实际删的
+宽——产品那侧用装配层估的页面尺寸，横版文档上会估窄（见下面"真机抽查五篇全覆盖"
+里那个 24 个字母的残片）。绕过了调用点，就绕过了缺陷。
 
 第一次真机抽查（2026-11-20，`formula-dense`）给出的答案是无头路径在版面指标上
 可信，在原文删除上完全没覆盖：
@@ -1328,6 +1340,106 @@ node scripts/qa/screenshots.mjs --locale en-US --out docs/screenshots \
 node scripts/qa/screenshots.mjs --locale zh-CN --out docs/screenshots/zh-CN \
      --prefs D:\zt-qa\qa-shot-prefs.json
 ```
+
+### 真机抽查五篇全覆盖（2026-11-22）
+
+前一轮真机抽查只跑了一篇（`formula-dense`，见第三批批次 4 末尾）。这一批清单项做完
+之后，把五篇基准夹具各跑一遍，与同名无头结果并排。命令：
+
+```bash
+python scripts/qa/benchmark/run.py --real-machine reading-brain attention-reading \
+     three-column landscape-slides formula-dense
+```
+
+结果（构建版本为删除区域修复后的那一版）：
+
+| 夹具 | 真机交并比 | 无头交并比 | 真机未翻译 | 遮罩总数 | 遮罩侵入 | 框外像素差异 | 原文残留率 |
+|---|---|---|---|---|---|---|---|
+| reading-brain | 0.717 | 0.813 | 0 | 0 | 0 | 0.00000 | 0.000 |
+| attention-reading | 0.721 | 0.773 | 1 | 2 | 0 | 0.00000 | 0.032 |
+| formula-dense | 0.729 | 0.782 | 4 | 0 | 0 | 0.00000 | 0.023 |
+| three-column | 0.710 | 0.759 | 1 | 1 | 0 | 0.00000 | 0.000 |
+| landscape-slides | 0.711 | 0.705 | 0 | 1 | 0 | 0.00000 | 0.000 |
+
+三条结论：
+
+1. **遮罩从不侵入段落、从不画出纸面**，五篇两项全为 0。这是遮罩路径最要紧的两条
+   边界，真机上确认成立。
+2. **交并比真机一律低于无头**（0.710 至 0.729 对 0.705 至 0.813）。这不是缺陷：
+   真机走模拟引擎的译文，无头走长度受控的合成译文，两者填满框的程度本就不同。
+   唯一接近的一对是 landscape-slides（0.711 对 0.705）。
+3. **原文删除在真机上真的生效**，而且真的会被用错参数（见下）。
+
+残留率不为零的三篇，原因各不相同，必须分开说，否则一个数字会把三种情形混成
+"好像都有问题"：
+
+- **attention-reading 0.032（125 个字母）——有意不译的表格。** 逐页核对后全部
+  来自页 1 那张表格。表格是产品**有意**不译、不删、不遮罩的（见第三批批次 7 的
+  表内/表外拆分）。
+- **formula-dense 0.023（74 个字母）——有意不译的公式。** 残留的是 `exp`、`sin`、
+  `log`、`θ`、`αi` 这类公式碎片。公式段按图像渲染，原文字符留在内容流里是既有
+  设计。
+- **landscape-slides 0.023（24 个字母）——真缺陷，本轮修掉。** 见下。
+
+formula-dense 那 4 个未翻译段也不是缺陷：装配视图里恰好有 4 个整段被 `$…$` 包住
+的纯公式段（`(1)` 至 `(4)` 四条编号公式），它们按图像渲染、不产译文文本，度量于是
+记成"无译文"。
+
+#### 删除区域曾按估算的页面尺寸裁剪
+
+landscape-slides 真机残留 24 个英文字母，逐条定位后是四个行尾残片：`training`
+只剩 `aining`、`following` 只剩 `llow`、`This is a` 只剩 `is a`。四个残片全部从
+x ≈ 738 开始，而同一条行文一直画到 x ≈ 767。
+
+根因不在删除器。用同一份区域文件单独跑一遍 `ztransplit-region-text-remover.jar`，
+残留为零——删除器办得到。差别在区域文件本身：
+
+| 来源 | 页面宽高 | 该段删除区域右界 |
+|---|---|---|
+| 装配层的 `pageSizes` | 739.56 × 792 | 740.56 |
+| 源 PDF 的真实 MediaBox | 841.92 × 594.96 | 768.14 |
+
+装配层的 `pageSizes` 是**从内容范围估出来的**：OpenDataLoader 的 JSON 不带
+MediaBox，适配器只能用内容的左右上下界反推，再往标准纸号上靠。它自己的注释写明
+这只服务白页兜底渲染。可第三批批次 7 把删除区域也接上了这份尺寸——横版 A4 于是
+被估窄了 100 磅，每段右边约 30 磅的原文永远进不了删除区域。
+
+修法：新增 `collectPageSizes(pdfBytes)`（与既有的 `collectPageRotations` 同一契约，
+读不出来返回空数组、调用方按"没有尺寸"跳过裁剪），从源 PDF 的 MediaBox 逐页读真实
+宽高，只喂给 `buildRemovalRects`。取的是**未旋转**尺寸，与删除器的坐标系一致——
+删除器解析内容流、画在原始空间，`buildRemovalRects` 也是先把显示空间的框用
+`applyRotation` 变换回原始空间再裁剪，两边必须用同一套宽高。
+
+**无头路径此前传的是 `undefined`（等于不裁剪），所以这个缺陷在无头侧从未暴露。**
+这本身就是教训：无头驱动绕过了产品的裁剪调用，量到的区域文件比产品实际删的宽。
+现在无头驱动也从源 PDF 读真实尺寸再传进去，两侧才真正同一条路。修复后真机残留
+24 → 0，交并比 0.711 不变，五篇无头指标与门禁一项未动。
+
+#### 真机抽查自身的两个测试台缺陷
+
+都是这一轮真机审核中暴露并修掉的，与产品无关，但会让真机结论不可信：
+
+1. **轮询译文附件时不看新旧。** 早先的判据是"库里有没有译文附件"，于是跑第二篇
+   夹具时，上一篇的产出还躺在库里，轮询第一眼就看见它、立刻收工。three-column
+   就这样报了一次"页数不一致：原文 1，译文 2"——报得对，但问题出在挑文件，不在
+   流水线。现在点火前先给库里的附件拍一份快照（条目 id 加文件修改时间），之后
+   只认快照里没有的条目，或者文件确实被改写过的条目。
+2. **`real-machine.json` 每跑一篇整份重写。** 真机抽查一次只跑一篇，而它的价值
+   在五篇并排看；整份重写等于把对比弄丢。现在按夹具名累积，同一夹具重跑覆盖旧行，
+   并按清单顺序排列。
+
+`run.py --selftest` 新增 14 条断言钉住这两处（用真实临时文件，不 mock 文件系统——
+判据一半建立在 mtime 上，mock 掉 `stat` 就等于把要测的东西测没了）。它已挂进
+`npm run test:benchmark`。
+
+另外记一条操作约束：boot 时必须设 `QA_EXTRA_PREFS`。启动器会整份重写 profile 的
+`prefs.js`，不设就会把引擎配置冲掉，随后偏好迁移按界面语言重设默认引擎，所有翻译
+请求在发出前就中止——表现是交并比 0.000、满页未翻译，看日志会以为产品坏了。
+
+真机路径有一项度量不携带信息：`layout.overflow.silentRight`。它等于
+`overflow.right` 减去产品自己报的 `stats.overflowedRight`，而真机测量拿不到产品
+的诊断（无头路径才传），所以在真机那一侧它恒等于 `right`，为 0 只说明"没有产品
+诊断可减"，不说明"产品没有少报"。
 
 ## 移植来源
 
