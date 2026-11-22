@@ -864,8 +864,12 @@ export async function translateAndSplitWithOpenDataLoader(
         pageTexts,
         {
           targetLanguage,
-          pageWidth: pageSizes[i].width,
-          pageHeight: pageSizes[i].height,
+          // 页面尺寸同样优先用真实 MediaBox。装配层那份是从内容范围估的（适配器的
+          // JSON 不带 MediaBox），横版文档上会估窄估矮——landscape-slides 实测估成
+          // 739.56 × 792，真实 841.92 × 594.96。渲染端拿它做 clampParagraph 的裁剪
+          // 边界，窄了就会把段落框切短。删除区域那一侧已经换成真实尺寸，这里一并换。
+          pageWidth: realPageSizes[i]?.width ?? pageSizes[i].width,
+          pageHeight: realPageSizes[i]?.height ?? pageSizes[i].height,
           ...(cjkFontBytes ? { cjkFontBytes } : {}),
           ...(latinFontBytes ? { latinFontBytes } : {}),
           ...(fontVariants.bold ? { boldFontBytes: fontVariants.bold } : {}),

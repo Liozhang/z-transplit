@@ -1094,7 +1094,9 @@ def real_machine_check(name: str, reuse_translated: bool = False) -> dict:
     fixture_pdf = FIXTURE_DIR / f"{name}.pdf"
 
     if reuse_translated:
-        found = find_translated_attachment(launcher)
+        # 按夹具页数挑，别默认"最新一条就是它"。库里躺着历次抽查的产出，光取最新
+        # 会取错——three-column 实测误取过 attention-reading 的两页附件。
+        found = find_translated_attachment(launcher, expected_pages=pdf_page_count(str(fixture_pdf)))
         if found:
             print(f"  复用已有译文附件（修改于 {found[1]}）：{found[0]}")
             return measure_real_machine(name, fixture_pdf, found[0])
@@ -1203,15 +1205,65 @@ def translated_items(stdout: str) -> list[dict]:
     return items if isinstance(items, list) else []
 
 
-def find_translated_attachment(launcher: Path) -> tuple[str, str] | None:
-    """查库里已有的译文附件，返回 (路径, 修改时间)。没有返回 None。"""
+def pdf_page_count(file_path: str) -> int | None:
+    """读一份 PDF 的页数，读不出给 None。"""
+    try:
+        doc = metrics.fitz_module().open(file_path)
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        return doc.page_count
+    finally:
+        doc.close()
+
+
+def pick_attachment_by_page_count(
+    candidates: list[dict],
+    expected_pages: int,
+    page_counter,
+) -> tuple[dict, bool]:
+    """从新到旧挑第一个页数对得上的译文附件。
+
+    返回 (挑中的条目, 是否真对上了)。挑不到时返回最新的那条但第二个值是 False——
+    调用方必须把这个"没对上"说出口。静默退回最新那条正是误取的成因：three-column
+    实测就是这么拿了两页的旧附件，报了一个看起来像产品问题的"页数不一致"。
+
+    candidates 按条目 id 升序（启动器的回包就是这个次序），所以倒着看就是从新到旧。
+    """
+    for item in reversed(candidates):
+        if page_counter(item["filePath"]) == expected_pages:
+            return item, True
+    return candidates[-1], False
+
+
+def find_translated_attachment(
+    launcher: Path, expected_pages: int | None = None
+) -> tuple[str, str] | None:
+    """查库里已有的译文附件，返回 (路径, 修改时间)。没有返回 None。
+
+    expected_pages 给了就按页数挑。库里躺着历次抽查好几篇夹具的产出，光取"最新一条"
+    很可能取错；页数是附件上唯一能跟夹具对上的信号（附件元数据里没有夹具名）。
+    """
     result = run(["node", str(launcher), "send", "translated"])
     items = translated_items(result.stdout)
     if not items:
         return None
-    file_path = items[-1].get("filePath")
-    if not file_path or not Path(file_path).exists():
+    candidates = [i for i in items if i.get("filePath") and Path(i["filePath"]).exists()]
+    if not candidates:
         return None
+    chosen = candidates[-1]
+    if expected_pages is not None:
+        chosen, matched = pick_attachment_by_page_count(
+            candidates, expected_pages, pdf_page_count
+        )
+        if not matched:
+            newest = candidates[-1]
+            print(
+                f"  警告：库里没有 {expected_pages} 页的译文附件，"
+                f"最新的那份是 {pdf_page_count(newest['filePath'])} 页"
+                f"（{newest['filePath']}）。对不上就别信这个数。"
+            )
+    file_path = chosen["filePath"]
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(Path(file_path).stat().st_mtime))
     return file_path, stamp
 
@@ -1572,6 +1624,36 @@ def harness_selftest() -> int:
                 item["path"] == "layout.overflow.silentRight"
                 for item in compare(real_row, silent)[0]
             ),
+        )
+
+        # ── 复用路径按页数挑附件 ──
+        # 库里同时躺着好几篇夹具的产出，"取最新一条"会取错：three-column 实测就这么
+        # 误取了 attention-reading 的两页附件，报了一个看起来像产品问题的"页数不一致"。
+        pages = {"a.pdf": 2, "b.pdf": 1, "c.pdf": 2}
+        candidates = [
+            {"id": 3, "filePath": "a.pdf"},
+            {"id": 9, "filePath": "b.pdf"},
+            {"id": 12, "filePath": "c.pdf"},
+        ]
+        picked, matched = pick_attachment_by_page_count(candidates, 1, lambda p: pages[p])
+        check(
+            "页数唯一的那篇被挑中，即使它不是最新的",
+            matched and picked["filePath"] == "b.pdf",
+            f"got {picked}",
+        )
+        picked_two, matched_two = pick_attachment_by_page_count(candidates, 2, lambda p: pages[p])
+        check(
+            "页数重复时取较新的那条",
+            matched_two and picked_two["filePath"] == "c.pdf",
+            f"got {picked_two}",
+        )
+        picked_none, matched_none = pick_attachment_by_page_count(
+            candidates, 5, lambda p: pages[p]
+        )
+        check(
+            "一篇都对不上时明确报没对上，而不是假装挑对了",
+            not matched_none and picked_none["filePath"] == "c.pdf",
+            f"got {picked_none}, matched={matched_none}",
         )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
