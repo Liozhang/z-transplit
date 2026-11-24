@@ -51,6 +51,13 @@ const DEFAULT_BATCH_SIZE = 10;
 /** 缺省识别分辨率。 */
 const DEFAULT_DPI = 200;
 
+/** 取一段输出的末尾（错误信息总在最后几行）。 */
+function tailOf(text: string, maxChars: number): string {
+  const trimmed = (text || "").trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return "…" + trimmed.slice(trimmed.length - maxChars);
+}
+
 export interface ScanPipelineOptions {
   pdfPath: string;
   /** 选中页中需要 OCR 的 1 基页码。 */
@@ -224,6 +231,19 @@ export async function runScanPipeline(
     }
     const attemptDpi = dpi;
     const run = await runBatch(batch.pages, attemptDpi);
+    // 侧车的诊断（warnings 与 stderr）是"页面为什么空"的唯一真相渠道，
+    // 而 result.json 只在失败时被翻看。这里无论成败都留一份在调试日志里：
+    // 真机实测 2026-11-23，一批页面 coverage 正常、lines 全零，适配器只能
+    // 看到"2 页已识别、0 段产出"，真正的原因（OCR 阶段的那条例外）躺在
+    // 没人读的 warnings 里。
+    if (run.diagnostics?.warnings?.length || run.stderr) {
+      safeDebug(
+        `[Z-Transplit] ScanPipeline: batch ${batch.index} status=${run.status} ` +
+          `dpi=${attemptDpi} models=${run.diagnostics?.modelTier ?? "?"} ` +
+          `warnings=${JSON.stringify(run.diagnostics?.warnings ?? [])} ` +
+          `stderr=${tailOf(run.stderr ?? "", 400)}`,
+      );
+    }
     await writeManifest(
       runDir,
       `batch-${String(batch.index).padStart(4, "0")}.json`,

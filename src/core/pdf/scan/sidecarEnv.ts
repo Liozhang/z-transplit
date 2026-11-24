@@ -53,9 +53,21 @@ import {
   type PythonInstallProgress,
   type PythonSource,
 } from "./pythonRuntime";
+import { SCAN_MODEL_TIERS } from "./ScanSidecarClient";
 
 /** 侧车命令偏好键（addon/prefs.js 声明）。 */
 const SIDECAR_PATH_PREF = "pdfParser.scan.sidecarPath";
+/** 模型档位偏好键（addon/prefs.js 声明）。 */
+const SIDECAR_MODELS_PREF = "pdfParser.scan.models";
+
+/**
+ * 当前模型档位。安装阶段的自检按它预热模型，运行阶段由 ScanSidecarClient
+ * 拼进侧车 argv——两处读同一个偏好，档位才不会割裂。
+ */
+function scanModelTier(): string {
+  const raw = String(getPref(SIDECAR_MODELS_PREF) || "").trim();
+  return (SCAN_MODEL_TIERS as readonly string[]).includes(raw) ? raw : "accurate";
+}
 
 /** 数据目录下的侧车安装目录（脚本与安装标记都在这）。 */
 const SCAN_SIDECAR_DIR = "scan-sidecar";
@@ -90,8 +102,15 @@ export interface SidecarEnvStatus {
   ready: boolean;
   /** 受管解释器已安装且探活通过。 */
   interpreter: boolean;
-  /** 识别引擎版本（自检时从引擎读到，读不到则缺省）。 */
+  /** 识别引擎版本（paddleocr），不是解释器版本——名字按内容起。 */
   engineVersion?: string;
+  /**
+   * 推理模式（自检时探测）："default" 走 mkldnn 加速；"no-mkldnn" 是兼容
+   * 模式——本机 CPU 的 oneDNN 融合指令有缺陷，关掉加速后识别才跑得动
+   * （见 sidecar.py 的 INFERENCE_*）。侧车按它建引擎，设置面板据此说明
+   * 为什么识别可能略慢。
+   */
+  inferenceMode?: string;
   /** 依赖已装好（安装标记存在且解释器对得上）。 */
   dependencies: boolean;
   /** 侧车命令偏好已回填且指向当前脚本。 */
@@ -112,6 +131,11 @@ interface SidecarEnvMarker {
   pythonSource: PythonSource;
   /** 识别引擎版本（paddleocr），不是解释器版本——名字按内容起。 */
   engineVersion?: string;
+  /**
+   * 自检探到的推理模式。侧车进程启动时读它决定计算路径，不必每批都先
+   * 失败一次再切换；缺失按默认模式（运行时兜底会补上）。
+   */
+  inference?: string;
   pipIndex: string;
   installedAt: number;
 }
@@ -298,6 +322,7 @@ export async function getSidecarEnvStatus(): Promise<SidecarEnvStatus> {
     ready: true,
     interpreter: true,
     engineVersion: marker?.engineVersion,
+    inferenceMode: marker?.inference,
     dependencies: true,
     commandConfigured: true,
     sidecarPath,
@@ -417,10 +442,12 @@ export async function installSidecarEnv(opts: {
 
   // 5) 自检：构建引擎并预热模型。失败说明环境装好了但跑不起来（架构不符、
   //    模型下载被拦），必须在这一步暴露，而不是等翻译到一半。
+  //    按当前模型档位预热：轻量档只该下 53 MB 的模型，让完整档的 1.3 GB
+  //    白下一遍再让用户切档，是最没必要的一笔下载。
   emit(70, "selftest");
   const probe = await runProcess(
     pythonPath,
-    [sidecarPath, "--selftest"],
+    [sidecarPath, "--selftest", "--models", scanModelTier()],
     SELFTEST_TIMEOUT_MS,
     opts.signal,
     { jvmEncodingArgs: false },
@@ -436,12 +463,16 @@ export async function installSidecarEnv(opts: {
     throw new Error(getString("sidecar-error-selftest", { detail }));
   }
 
-  // 6) 命令回填：用户不需要手抄任何命令行。
+  // 6) 命令回填：用户不需要手抄任何命令行。自检报出的推理模式一并写进
+  //    标记：侧车进程启动时读它决定计算路径（默认模式在这台机器上跑不通
+  //    时，自检已经换成兼容模式探通过，见 sidecar.py 的 selftest）。
+  const selftest = parseSelftestOutput(probe.stdout);
   await writeMarker({
     pythonPath,
     sidecarPath,
     pythonSource,
-    engineVersion: parseEngineVersionOf(probe.stdout),
+    engineVersion: selftest.engineVersion,
+    inference: selftest.inference,
     pipIndex: index,
     installedAt: Date.now(),
   });
@@ -485,8 +516,15 @@ export async function discardSidecarEnv(): Promise<void> {
   setPref(SIDECAR_PATH_PREF, "");
 }
 
-/** 从 `--selftest` 的 stdout 里取识别引擎版本（JSON 行，取不到就算了）。 */
-function parseEngineVersionOf(stdout: string): string | undefined {
+/**
+ * 从 `--selftest` 的 stdout 里取识别引擎版本与推理模式（都是同一个 JSON
+ * 行的字段，取不到就算了）。推理模式是侧车自检时探测出来的计算路径：
+ * 默认模式在本机撞 oneDNN 缺陷时，自检会换成兼容模式重新探通，这里读到的
+ * 就是实际生效的那个。
+ */
+function parseSelftestOutput(
+  stdout: string,
+): { engineVersion?: string; inference?: string } {
   const lines = (stdout || "")
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -494,14 +532,20 @@ function parseEngineVersionOf(stdout: string): string | undefined {
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line);
-      if (typeof parsed?.engineVersion === "string" && parsed.engineVersion) {
-        return parsed.engineVersion;
-      }
+      const engineVersion =
+        typeof parsed?.engineVersion === "string" && parsed.engineVersion
+          ? parsed.engineVersion
+          : undefined;
+      const inference =
+        typeof parsed?.inference === "string" && parsed.inference
+          ? parsed.inference
+          : undefined;
+      if (engineVersion || inference) return { engineVersion, inference };
     } catch {
       // 下一行再试：stdout 上出现别的 JSON 行不该让版本信息静默丢失
     }
   }
-  return undefined;
+  return {};
 }
 
 /** 取一段输出的末尾（错误信息总在最后几行）。 */

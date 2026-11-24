@@ -47,6 +47,7 @@ declare namespace _ZoteroTypes {
       "pdfParser.scan.dpi": number;
       "pdfParser.scan.batchSize": number;
       "pdfParser.scan.timeout": number;
+      "pdfParser.scan.models": string;
       "translate.cache.enabled": boolean;
       "translate.cache.maxSizeMB": number;
       "reader.bilingual.defaultMode": string;

@@ -83,6 +83,11 @@ export interface SidecarPageResult {
 export interface SidecarDiagnostics {
   engine?: string;
   engineVersion?: string;
+  /**
+   * 这一批用的模型档位（accurate / light）。result.json 在批次成功后被删掉，
+   * 档位只有在这里留一份，事后才认得出这批字是哪套模型产出的。
+   */
+  modelTier?: string;
   warnings?: string[];
 }
 
@@ -163,15 +168,62 @@ function str(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-/** 归一化像素框：无序输入自动交换，钳到有限值。 */
+/**
+ * 归一化像素框：对象与数组两种形状都认，无序输入自动交换，钳到有限值。
+ *
+ * 侧车（sidecar.py 的 _as_bbox）输出的是扁平数组 [x0, y0, x1, y1]，不是
+ * {x0,y0,x1,y1} 对象。只认对象时，真机上每一行文字都会因为取不到框被静默
+ * 丢弃：result.json 里 lines 有 28 条，插件收到的却是 0 条，页面上什么都
+ * 不显示，也没有任何 warning——2026-11-23 真机端到端联调查明，此前所有
+ * "扫描件认不出内容"的现象都源于此，与识别引擎无关。
+ *
+ * 四边形点列 [[x,y] x4] 一并认：PaddleX 的 dt_polys / rec_boxes 原生就是
+ * 这个形状，Python 侧的 _as_bbox 也认（见那边的docstring），两边形状一致
+ * 才不会再次各改一半。
+ */
 function toPixelBox(raw: unknown): PixelBox | null {
   if (!raw || typeof raw !== "object") return null;
+  let quad: unknown[] | null = null;
+  if (Array.isArray(raw)) {
+    quad = raw;
+  } else {
+    const r = raw as Record<string, unknown>;
+    if (Array.isArray(r.bbox)) quad = r.bbox;
+  }
+  if (quad) {
+    // [[x,y] x4]：四边形点列，取四点的外包框。必须先判点列——它的长度
+    // 也是 4，走扁平分支会把数组当数字，整条被丢。
+    if (quad.length === 4 && quad.every((p) => Array.isArray(p) && p.length >= 2)) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (const point of quad) {
+        const px = (point as unknown[])[0];
+        const py = (point as unknown[])[1];
+        if (typeof px !== "number" || typeof py !== "number") return null;
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+        xs.push(px);
+        ys.push(py);
+      }
+      return boxFrom(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys));
+    }
+    if (quad.length === 4) {
+      const nums = quad.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : NaN));
+      if (!nums.every((v) => Number.isFinite(v))) return null;
+      return boxFrom(nums[0], nums[1], nums[2], nums[3]);
+    }
+    return null;
+  }
   const r = raw as Record<string, unknown>;
   const x0 = num(r.x0, NaN);
   const y0 = num(r.y0, NaN);
   const x1 = num(r.x1, NaN);
   const y1 = num(r.y1, NaN);
   if (![x0, y0, x1, y1].every((v) => Number.isFinite(v))) return null;
+  return boxFrom(x0, y0, x1, y1);
+}
+
+/** 由四个数造归一化框（无序自动交换）。 */
+function boxFrom(x0: number, y0: number, x1: number, y1: number): PixelBox {
   return {
     x0: Math.min(x0, x1),
     y0: Math.min(y0, y1),
@@ -280,6 +332,7 @@ export function parseSidecarBatchOutput(raw: unknown): SidecarBatchOutput | null
   if (d && typeof d === "object") {
     if (typeof d.engine === "string") diagnostics.engine = d.engine;
     if (typeof d.engineVersion === "string") diagnostics.engineVersion = d.engineVersion;
+    if (typeof d.modelTier === "string") diagnostics.modelTier = d.modelTier;
     if (Array.isArray(d.warnings)) {
       diagnostics.warnings = d.warnings.filter((w): w is string => typeof w === "string");
     }

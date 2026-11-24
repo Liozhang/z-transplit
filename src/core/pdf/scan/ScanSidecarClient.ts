@@ -51,7 +51,12 @@ export interface ScanSidecarConfig {
   timeoutMs: number;
   /** 每批页数（管线分批用；侧车协议本身不认识批次）。 */
   batchSize: number;
+  /** 模型档位：accurate（缺省，全功能）或 light（每个模型 100MB 以内）。 */
+  modelTier: string;
 }
+
+/** 侧车认得的模型档位（与 sidecar.py 的 MODEL_TIERS 一致）。 */
+export const SCAN_MODEL_TIERS = ["accurate", "light"] as const;
 
 /** 从偏好读取侧车配置。命令行为空或引号不闭合都按"未配置"处理。 */
 export function loadScanSidecarConfig(): ScanSidecarConfig {
@@ -60,15 +65,19 @@ export function loadScanSidecarConfig(): ScanSidecarConfig {
   const dpi = Number(getPrefDynamic("pdfParser.scan.dpi"));
   const timeout = Number(getPrefDynamic("pdfParser.scan.timeout"));
   const batch = Number(getPrefDynamic("pdfParser.scan.batchSize"));
+  const tier = String(getPrefDynamic("pdfParser.scan.models") || "").trim();
   return {
     argv: argv ?? [],
     dpi: Number.isFinite(dpi) && dpi >= 72 && dpi <= 600 ? Math.trunc(dpi) : 200,
     timeoutMs:
       Number.isFinite(timeout) && timeout >= 30 && timeout <= 3600
         ? Math.trunc(timeout) * 1000
-        : 600_000,
+        : 1_800_000,
     batchSize:
       Number.isFinite(batch) && batch >= 1 && batch <= 200 ? Math.trunc(batch) : 10,
+    modelTier: (SCAN_MODEL_TIERS as readonly string[]).includes(tier)
+      ? tier
+      : "accurate",
   };
 }
 
@@ -81,6 +90,8 @@ export interface RunSidecarBatchParams {
   signal?: AbortSignal;
   /** 测试注入；缺省读偏好。 */
   argv?: string[];
+  /** 测试注入；缺省读偏好。 */
+  modelTier?: string;
 }
 
 /** 识别工作目录：ztransplit-scan-sidecar-<时间戳>（见 workDir 的分族约定）。 */
@@ -102,8 +113,9 @@ export async function runSidecarBatch(
     ? {
         argv: params.argv as string[],
         dpi: params.dpi ?? 200,
-        timeoutMs: params.timeoutMs ?? 600_000,
+        timeoutMs: params.timeoutMs ?? 1_800_000,
         batchSize: 10,
+        modelTier: params.modelTier ?? "accurate",
       }
     : loadScanSidecarConfig();
   const dpi = params.dpi ?? config.dpi;
@@ -135,6 +147,10 @@ export async function runSidecarBatch(
       outDir,
       "--dpi",
       String(dpi),
+      // 模型档位显式传给侧车：侧车没有读偏好这回事，缺省是 accurate。用户
+      // 在设置里换成 light 之后，这一步是唯一让它生效的地方。
+      "--models",
+      config.modelTier,
     ];
     const result = await runProcess(
       config.argv[0],

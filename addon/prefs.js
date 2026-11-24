@@ -131,11 +131,15 @@ pref("extensions.zotero.ztransplit.pdfParser.originalTextRemoval.enabled", true)
 // 本地 OCR 侧车识别。sidecarPath 是完整命令行（带空格的路径要加引号），
 // 留空表示未配置——这些页保持原文，不会静默丢弃。dpi / batchSize / timeout
 // 在读取时钳制到合法范围（72–600 / 1–200 / 30–3600），非法值回退默认值。
+// models 是模型档位：accurate（缺省，全功能，整套约 1.86 GB）或 light（每个
+// 模型 100MB 以内，只下载三个模型、磁盘约 53 MB，快约 7 倍，但没有公式与
+// 表格识别）。
 pref("extensions.zotero.ztransplit.pdfParser.scan.enabled", true);
 pref("extensions.zotero.ztransplit.pdfParser.scan.sidecarPath", "");
 pref("extensions.zotero.ztransplit.pdfParser.scan.dpi", 200);
 pref("extensions.zotero.ztransplit.pdfParser.scan.batchSize", 10);
-pref("extensions.zotero.ztransplit.pdfParser.scan.timeout", 600);
+pref("extensions.zotero.ztransplit.pdfParser.scan.timeout", 1800);
+pref("extensions.zotero.ztransplit.pdfParser.scan.models", "accurate");
 
 // Persistent paragraph translation cache (src/core/translation/translationCache.ts).
 // Content-addressed translation records under

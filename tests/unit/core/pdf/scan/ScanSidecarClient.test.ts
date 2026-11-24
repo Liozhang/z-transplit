@@ -128,9 +128,21 @@ describe("runSidecarBatch", () => {
       expect.any(String),
       "--dpi",
       "300",
+      "--models",
+      "accurate",
     ]);
     expect(timeout).toBe(1234);
     expect(signal).toBe(controller.signal);
+  });
+
+  it("模型档位透传：注入 light 时 argv 带 --models light", async () => {
+    h.runProcess.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
+    h.readFile.mockResolvedValue(VALID_BATCH);
+    await runSidecarBatch({ pdfPath: "x.pdf", pages: [1], argv: ARGV, modelTier: "light" });
+    const [, args] = h.runProcess.mock.calls[0];
+    const at = (args as string[]).indexOf("--models");
+    expect(at).toBeGreaterThan(0);
+    expect((args as string[])[at + 1]).toBe("light");
   });
 
   it("部分成功：退出码 2 仍读回结果", async () => {

@@ -200,9 +200,236 @@ node scripts/qa/real-machine.mjs send translated
    `disable_mkldnn`，说明融合发生在新执行器的 PIR 阶段，绕不开。
    **结论：识别链路在本机跑不通，卡在框架层，不是插件代码问题。** 换一台
    CPU（有 AVX-512）或等 paddle 修这个转换再验。
+   （2026-11-23 更新：已定位到框架层缺陷并有兼容解法，见下一节；本条保留
+   原记录，两个"试过且无效"的原因也在下一节里讲清楚了。）
 
 前三个修复都有单测；第四个的复现步骤就是上面那条最小命令，见
 `addon/scan-sidecar/requirements.txt` 顶部注释里的版本记录。
+
+#### oneDNN 缺陷的定位与兼容模式（2026-11-23）
+
+第四个问题这次查到底了，而且比预想的深：关掉 mkldnn 只是第一层，下面还
+压着三个从来没跑过的代码路径。侧车只把异常消息留在 diagnostics 里、堆栈
+丢掉，手动复跑（同参数直接调 `sidecar.py`）才拿到完整堆栈，指向 PaddleX
+的 `paddle_static` runner：
+
+```
+text_detection/predictor.py: process → runner(x=x)
+paddle_static/runner.py: __call__ → self.predictor.run()
+NotImplementedError: (Unimplemented) ConvertPirAttribute2RuntimeAttribute
+  not support [pir::ArrayAttribute<pir::DoubleAttribute>]
+```
+
+即 oneDNN 融合指令把 PIR 属性转成运行时属性时撞到未实现的类型。翻
+PaddleX 源码（`paddlex/inference/models/runners/paddle_static/runner.py`
+的 CPU 分支）找到两个开关，在本机逐一实测：
+
+| 手段 | 结果 |
+|---|---|
+| 缺省（mkldnn + 新 IR） | 失败（上面这个错） |
+| `engine_config={"enable_new_ir": False}` | **同样失败**——runner 无条件调 `enable_new_executor()`，新执行器仍把程序转成 PIR |
+| `enable_mkldnn=False`（run_mode 落到 paddle） | 识别管线**通过**（同页 28 行文字）；结构管线在全尺寸图上**段错误**，见下 |
+
+关新 IR 无效，解释了 2026-11-19 那轮 `FLAGS_enable_pir_api=0` 为何没用：
+runner 显式 `config.enable_new_ir(默认 True)` 会覆盖全局环境变量，而执行器
+照旧转 PIR。`enable_mkldnn=False` 是两条管线共有的公共参数
+（`paddleocr/_common_args.py` 认它，CPU 上把 `run_mode` 置成 `paddle`）。
+
+**第二层：兼容模式下结构管线跑大图会段错误。** 硬崩，接不住也兜不了。
+faulthandler 的栈显示崩在 `structure.predict()` 里文字检测模型的
+`predictor.run()`——不是模型加载（"Creating model" 只是崩溃前最后的输出，
+为此绕了一圈才确认）。本机实测：200 DPI 的 A4 页（1653x2339）四次全崩；
+半分辨率 826x1169、0.6 档 991x1403、0.75 档 1239x1754 均正常。识别管线
+（产出文字行的那条）不受尺寸影响，全尺寸正常。所以兼容模式下只缩放结构
+阶段的输入：长边收到 1600 以内（`COMPAT_STRUCTURE_MAX_SIDE`，低于已知能跑
+的最高档、离崩溃档有馀量），版面块坐标乘系数映回全尺寸，与文字行框同空间，
+"行归块"与覆盖率计算都不用改。单线程也崩，所以不是线程超订的问题。
+
+**第三层：结果提取整条路都是按错的 schema 写的。** mkldnn 缺陷修好之前，
+predict 先抛异常，提取代码从来没在真机上跑过。兼容模式一通，连曝三处：
+
+1. `_result_payload` 优先取结果对象的 `.json` 属性，而 PaddleX 3.x 的
+   `.json` 多包一层（`{"res": {...}}`）——字段全在读不到的那一层。结果
+   对象本身就是字典（OCRResult、结构结果都是），字段在顶层。
+2. 版面块在 3.x 是 `LayoutBlock` 对象，字段是属性 `label`/`bbox`/`content`；
+   代码找的是字典键 `block_label`/`block_bbox`/`block_content`（2.x 形状）。
+3. `rec_boxes` 是 numpy 数组（四边形点列），`_as_bbox` 只认 list/tuple——
+   28 个文字行全部因取不到框被丢弃，输出只剩版面块的内容。
+
+外加第四个：PIL 经 `np.asarray` 得到的数组可能只读，而
+`ascontiguousarray` 对已连续的数组原样返回；结构管线某些分支要就地写输入图
+（给区域涂白），只读数组会让它在 predict 里报 "assignment destination is
+read-only"——只有带这类区域的页面会走到那条分支（用 formula-dense 渲染页
+才发现）。
+
+修复分四层：
+
+1. **自检真跑推理。** 原来的 `--selftest` 只建引擎——缺陷在 predict 时才炸
+   （实测：两条管线都构造成功，第一次 predict 就抛
+   NotImplementedError），所以"引擎建起来了"证明不了计算路径可用。现在自检用
+   一张合成小图（PIL 画三行字）穿过 ocr 与 structure 两条 `predict`，撞上签名
+   就换兼容模式重建再探，输出里报实际生效的模式
+   （`{"selftest": "ok", ..., "inference": "no-mkldnn"}`）。
+2. **安装记录模式，运行时直接可用。** sidecarEnv 把自检报出的模式写进
+   `env.json`；侧车进程启动时读同目录的这个文件，按可用模式建引擎。兼容
+   模式首次会多下一套模型文件（mkldnn 与普通 inference 格式各一套），这笔
+   下载发生在安装阶段，由自检阶段的进度文案覆盖。
+3. **运行时兜底用自重启，不用进程内重建。** 进程内重建其实能活（实测：
+   两条管线都跑过失败的 predict 之后再建，单独失败、双双失败四种组合都正
+   常——一度误判成"重建必崩"，白绕一圈）——但一个侧车进程就是一个批次，
+   标记缺失或过期时每批都要重新发现一次：首页先失败一轮，几百兆模型白加载
+   一遍。所以兜底改成：把模式写回 env.json，以兼容模式重启本进程重跑整批
+   （子进程方式，父进程守着出口码；`execv` 在 Windows 上换进程映像的语义
+   与插件"按 PID 等待、按同一根管道收输出"的约定不好论证）。后续批次直接
+   读标记走兼容模式，发现成本只付一次。设置面板的状态行在兼容模式下会说
+   明"识别速度略慢"——降级要说出来。
+4. **批次超时默认值 600 秒调到 1800 秒。** 实测本机兼容模式一个两页批次要
+   682 秒：每批都是新进程，先建两套引擎（约三分钟），再逐页识别（每页约四
+   分钟，没有 mkldnn 加速）。600 秒连两页都装不下，真机上就是这样超时被杀、
+   最后报出"识别环境未就绪"的误导错误。偏好上限本就是 3600，默认给到半小时；
+   超时的批仍按失败记账，不影响已完成的批次。
+
+真机复验（QA 实例，2026-11-23）：一键安装完成、自检报
+`inference: no-mkldnn`、`inferenceMode` 透出到状态查询；本地另验直连兼容
+模式（28+5 行、公式块 LaTeX 正确取出）、无标记自重启路径（首页触发 → 重启 →
+子进程跑完）、兼容模式结构阶段缩放后版面块正常。**但整条流水线在真机上仍然
+产出 0 行**——原因不在这四层里，见下一节。
+
+#### 真根因：插件把侧车的线段全丢了（2026-11-23 深夜）
+
+上面四层修完之后，真机上跑扫描件：批次 `status=ok`、退出码 0、`result.json`
+有效、`warnings` 为空，可持久化下来的每页都是 `lines=0`、`coverage=0.3003`
+（覆盖率不为 0，因为版面区域照常算进去）。侧车明明在 stderr 打了
+`{"level": "done", "message": "recognized 2 page(s)"}`。
+
+用一层包装脚本把侧车的完整输出与环境变量落盘（临时目录，不进仓库）才看清：
+侧车自己的 `result.json` 里第 1 页有 **28 条** lines、第 2 页 5 条，
+`rec_texts` 正常、图像统计正常（min 17 / max 255 / mean 247.9）、推理模式
+确实是 `no-mkldnn`。**侧车从头到尾都是对的。**
+
+问题在插件侧：`sidecarProtocol.ts` 的 `toPixelBox` 只认
+`{x0, y0, x1, y1}` 对象，而侧车的 `_as_bbox` 产出的是扁平数组
+`[x0, y0, x1, y1]`。于是每条线都过不了"有框"这一关被静默丢弃——公式、表格、
+图区共用一个归一化函数，一并全丢。覆盖率仍由版面区域算出，所以页面看起来
+"认到了一些东西但没有文字"，没有任何 warning。
+
+单测从来没抓住它：`sidecarProtocol.test.ts` 的夹具一律用对象形状，而真实
+侧车从来只发数组形状。**契约两头各写一半，测试只覆盖了自己那一半**——这类
+缺陷只有拿真实产出喂进来才会暴露（同一类错误 Python 侧也犯过一次：`_as_bbox`
+不认 ndarray，28 行全丢，见上一节第 3 条）。
+
+修法：`toPixelBox` 同时认数组与对象，并认四边形点列（PaddleX 的
+`dt_polys` / `rec_boxes` 原生形状，与 Python 侧对齐）；回归测试改用侧车的
+真实形状（数组、点列、数组与对象混用、长度不对的数组整条丢弃）。拿真机那份
+`result.json` 走完整条转换链验证：第 1 页 28 行 → 15 个文本块 → 15 段，
+第 2 页 5 行 → 3 段（此前是 0/0）。
+
+真机复验（QA 实例，修复后重跑）：`envStatus` 就绪、自检报
+`modelDir: <数据目录>/ztransplit/scan-sidecar/models`、模型确实从该目录加载
+（侧车 stderr 里的模型路径就是新目录）；扫描件跑整条流水线，两个批次
+（200 DPI 首批 + 300 DPI 可疑页重试）都 `status=ok`，断点落盘第 1 页
+**28 行**、第 2 页 **5 行**（修复前两次运行都是 0 行），最终产出译文附件
+`Translated (zh-CN) · qa-sample`，PDF 里的文字就是认出并译好的内容
+（如「《阅读与大脑》」「我们得出结论，结构化阅读练习能够提高阅读理解得分……」）。
+中间还排除过一次误判：一度以为重试批的 `runBatch` 不返回是插件卡住，实际是
+QA 实例自身消失了（进程命令行里没有 `-profile`），重跑后重试批正常返回。
+
+教训（已写进代码注释）：**跨进程契约的测试夹具必须来自真实产出**。手写夹具
+会把自己猜的形状钉成契约，而猜错的那一半永远测不到。
+
+### 模型权重的归属目录
+
+PaddleX 默认把模型缓放在用户主目录 `~/.paddlex/official_models`（约 1.86 GB）：
+插件既不拥有也清不掉——移除识别环境后它留在机器上，搬 Zotero 数据目录不带它，
+同一台机器上别的 PaddleX 用户还共享这一份。侧车现在在 import paddlex 之前把
+`PADDLE_PDX_CACHE_HOME` 指到脚本同级的 `models/`（即数据目录下
+`ztransplit/scan-sidecar/models/`）：整个识别栈（脚本、环境标记、权重）跟着
+数据目录走，"移除识别环境"一次清干净。`--selftest` 的输出里带 `modelDir`，
+装完就能看到落在哪。
+
+模型档位（2026-11-23 实测，体积取自模型托管站的真实下载大小）：
+
+| 组件 | 缺省 | 体积 | 更小替代 | 结论 |
+|---|---|---|---|---|
+| 公式识别 | PP-FormulaNet_plus-L | 697 MB | plus-S 247 MB | **不可用**：6 条公式 A/B，S 档 LaTeX 损坏（`\int` 认成 `int`、`\log` 变 `\mathrm{l o g}`、下标丢失） |
+| 版面检测 | PP-DocLayout_plus-L | 124 MB | PP-DocLayout-M 22 MB | 可行：文字行数一致（28/5），块粒度 15→10 |
+| 结构内 OCR 检测 | PP-OCRv5_server_det | 84 MB | PP-OCRv5_mobile_det 4 MB | 可行：块内容仍正确 |
+| 行级 OCR（产出正文） | PP-OCRv6_medium | 132 MB | PP-OCRv5_mobile 11 MB | 英文文档实测零损失（28 行同文）；mobile 的识别模型只有英文，中文/日文会坏 |
+| 表格（结构 + 单元格） | SLANet_plus + RT-DETR-L×2 | 253 MB | 无更小档，只能整个关 | `use_table_recognition=False` 时该子管线不构建 |
+| 区域检测 | PP-DocBlockLayout | 123 MB | 无更小档 | 锁死 |
+
+结论：**没有"更强又更小"的档位**——小档一律更弱，公式档位的差距已到不可用。
+默认保持准确档；真正的体积杠杆是公式（697 MB）与表格（253 MB）两个整功能
+开关，以及行级 OCR 换 mobile（仅英文文档，省 121 MB）。精简栈实测快约 26%
+（502 秒对 682 秒）。
+
+### 模型档位 light（2026-11-24 实现并实测）
+
+上面的结论落地成设置页的「模型档位」下拉：`accurate`（缺省，全功能，约 1.86 GB）
+与 `light`（每个模型 100 MB 以内）。侧车 `--models` 接档位，插件从
+`pdfParser.scan.models` 读出来透传；档位写进 `--selftest` 输出的 `modelTier`，
+也写进每批 result.json 的 `diagnostics.modelTier`（批次成功后 result.json 会被
+删掉，插件侧只有 diagnostics 这一条路留得下档位）。
+
+`light` 只下载三个模型，磁盘实测 52.7 MB。accurate 档的 12 个模型与对应关系
+（体积同为 `models/` 实测）：
+
+| 组件 | accurate | light | light 磁盘实测 |
+|---|---|---|---|
+| 版面检测 | PP-DocLayout_plus-L 125 MB | PP-DocLayout-M | 22.7 MB |
+| 结构内文字检测 | PP-OCRv5_server_det 85 MB | PP-OCRv6_small_det | 9.6 MB |
+| 结构内文字识别 | PP-OCRv5_server_rec 82 MB | PP-OCRv6_small_rec | 20.5 MB |
+| 表格结构 | SLANeXt_wired 349 MB + SLANet_plus 8 MB | 整条关掉 | — |
+| 表格单元格检测 | RT-DETR-L_wired / wireless 各 124 MB | 整条关掉 | — |
+| 公式 | PP-FormulaNet_plus-L 702 MB | 整条关掉 | — |
+| 区域检测 | PP-DocBlockLayout 124 MB | 整条关掉 | — |
+| 表格分类 | PP-LCNet_x1_0_table_cls 7 MB | 整条关掉 | — |
+| 行级文字（产出正文） | PP-OCRv6_medium_det 60 MB + rec 74 MB | 换上表两个 small | 30.1 MB |
+
+accurate 合计 1859 MB，light 合计 52.7 MB。
+
+同一张扫描页实测：文字行数与文字内容和 accurate **完全一致**（28 行同文），
+结构 + OCR 从 353 秒降到 51 秒（快约 7 倍）。代价是公式、表格、区域检测三个
+子管线整个关掉（100 MB 以内无可用模型，见上表），版面块粒度 15 块变 10 块。
+
+两个实现上的坑，都已在代码注释与测试里钉住：
+
+1. **两条管线的构造参数不能合成一套**。`use_formula_recognition` /
+   `use_table_recognition` / `use_region_detection` 与 `layout_detection_model_name`
+   只有 `PPStructureV3` 认，行级 `PaddleOCR` 见到未知参数直接以
+   "Unknown argument" 失败——合成一套同时喂两条管线，自检第一步就挂（真机实测）。
+   因此 `sidecar.py` 提供 `_structure_model_kwargs` / `_ocr_model_kwargs` 两个函数。
+2. **`PP-OCRv6` 的 small 档优于同尺寸的 v5 mobile 档**：识别模型按语言分型号，
+   mobile 的识别模型只有英文，中文会坏；v6 small 的识别模型覆盖中文与拉丁语系。
+
+#### 真机验证（2026-11-24，QA 实例 + 56 页扫描样本）
+
+- `--selftest --models light` 退出码 0，输出 `modelTier: light`；
+- 整条流水线（`pipelineStart`）跑通：侧车进程命令行为
+  `sidecar.py --pdf … --pages 7,11,16,31,41,56 --dpi 200 --models light`，
+  首批 `status=ok`，stderr 里出现 `PP-OCRv6_small_det`（即轻量档模型真的在加载）；
+- 6 个扫描页共认出 54 行、2 个图区、0 公式、0 表格——与档位的取舍一致；
+- 隔一轮重跑，逐页行数与覆盖率逐一相同（2/2/18/1/18/13 行，覆盖率
+  0.03/0.072/0.794/0.071/0.402/0.33），结果可复现；
+- 覆盖率偏低的页照旧触发 300 dpi 重试批（`batch-0000-retry.json`，`status=ok`）。
+- **端到端产出译文**：整条流水线跑完，数据目录下生成
+  `Translated_qa-sample.pdf`（56 页，全文 7423 个汉字，52 页中文超过 20 字）。
+  6 个扫描页认出的文字全部以中文出现在译文里，例如第 16 页的
+  「单页幻灯片中的深度学习 / 全连接前馈神经网络 / 多种卷积神经网络（CNN）/
+  循环神经网络（RNN）」、第 11 页的「人工智能技术的发展与进化」。
+  翻译缓存落 463 条，整篇运行成功后检查点按设计清空。
+- accurate 档回归：同一份侧车跑 `--selftest --models accurate` 同样退出码 0，
+  日志里 12 个 accurate 模型逐一构造（含表格子管线的 SLANeXt_wired / SLANet_plus /
+  RT-DETR-L 两个与公式的 PP-FormulaNet_plus-L），随后照旧撞 oneDNN 缺陷并自动
+  换兼容模式探通——参数拆成两套没有影响完整档。
+
+这一轮还记下一个与档位无关的既有问题：批量翻译在这篇文档上全部失败——
+stepfun 模型对批量请求回的 JSON 被截断（`parseJsonFromMarkdown` 报
+`unterminated string`，断在 3.5 千到 1.1 万字符处），每个批次块走完 4 次重试
+都不合规，最后靠逐段兜底把 463 段全部译出（整篇因此花了一小时）。
+另有一处模型行为问题：默认提示词把 `{{text}}` 放在指令行之前，模型有时把
+`Output ONLY the translated text — no explanations, no notes.` 这些指令行
+也当正文译进了译文（第 16、41 页可见）。两者都不在本次改动范围内，记录备查。
 
 ### 识别断点与自动续跑（scanRunState）
 

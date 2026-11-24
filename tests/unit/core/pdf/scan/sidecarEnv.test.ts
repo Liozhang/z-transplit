@@ -143,6 +143,11 @@ let host: {
   pipExit: number;
   /** 自检的退出码。 */
   selftestExit: number;
+  /**
+   * 自检的 stdout 是否带推理模式字段。false 模拟旧版侧车（只会报引擎
+   * 版本）——标记不该记一个不存在的字段，状态查询也不该显示。
+   */
+  selftestReportsInference: boolean;
   /** pip / 自检是否超时（进程仍在跑，被 runner 掐掉）。 */
   timedOut: boolean;
   /** 偏好写入是否失败（Zotero.Prefs.set 抛错）。 */
@@ -164,6 +169,7 @@ function installHost(): void {
     mirrorReachable: () => true,
     pipExit: 0,
     selftestExit: 0,
+    selftestReportsInference: true,
     timedOut: false,
     prefWriteFails: false,
     bundlePresent: true,
@@ -347,11 +353,14 @@ function installHost(): void {
         aborted: false,
       };
     }
-    // 自检：stdout 里带引擎版本（安装标记会记下它）
+    // 自检：stdout 里带引擎版本与推理模式（安装标记会记下它们）
     const ok = host.selftestExit === 0 && !host.timedOut;
+    const selftestJson = host.selftestReportsInference
+      ? '{"selftest": "ok", "engineVersion": "3.4.0", "inference": "no-mkldnn"}'
+      : '{"selftest": "ok", "engineVersion": "3.4.0"}';
     return {
       exitCode: ok ? 0 : -1,
-      stdout: ok ? '{"selftest": "ok", "engineVersion": "3.4.0"}' : "",
+      stdout: ok ? selftestJson : "",
       stderr: ok ? "" : `${control}OSError: [WinError 126] 找不到指定的模块`,
       timedOut: host.timedOut,
       aborted: false,
@@ -459,6 +468,12 @@ describe("installSidecarEnv", () => {
     expect(marker.pipIndex).toBe(`${TUNA_BASE}/simple`);
     // 引擎版本来自自检的 stdout（不是解释器版本）
     expect(marker.engineVersion).toBe("3.4.0");
+    // 推理模式同样来自自检：侧车进程按它决定计算路径，不必每批先失败一次
+    expect(marker.inference).toBe("no-mkldnn");
+
+    // 状态查询把推理模式透出来（设置面板据此说明识别为何略慢）
+    const statusAfter = await getSidecarEnvStatus();
+    expect(statusAfter.inferenceMode).toBe("no-mkldnn");
 
     // 进程调用：解释器探活（安装内 + 收尾各一次）、pip、自检
     const argvSets = runProcess.mock.calls.map((c) => c[1] as string[]);
@@ -490,6 +505,19 @@ describe("installSidecarEnv", () => {
     const out = await installSidecarEnv({});
     expect(out.sidecarPath).toBe(SIDECAR_PY);
     expect(new TextDecoder().decode(await fs.read(SIDECAR_PY))).toBe("# sidecar.py\n");
+  });
+
+  it("自检没报推理模式（旧版侧车）：标记不记，状态查询也不显示", async () => {
+    host.selftestReportsInference = false;
+    await installSidecarEnv({});
+    const marker = JSON.parse(
+      new TextDecoder().decode(await fs.read(`${SIDECAR_DIR}\\env.json`)),
+    );
+    // 字段缺失就是缺失：不写默认值占位，侧车读不到时按默认模式走
+    expect(marker.inference).toBeUndefined();
+    const status = await getSidecarEnvStatus();
+    expect(status.ready).toBe(true);
+    expect(status.inferenceMode).toBeUndefined();
   });
 
   it("机器上已有合格的 Python：直接用它，一个字节的运行时都不下载", async () => {

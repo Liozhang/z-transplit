@@ -749,20 +749,21 @@ describe("B17 设置 pane：FTL 消息形式与 xhtml 控件匹配（prefs-F1/F2
 
   it("带静态 value 的 XUL label 两语言都写 .value（纯文本只写 textContent，替换不了 value）", () => {
     const labels = l10nBindings().filter((r) => r.tag === "label" && r.hasValue);
-    // 40 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
-    // 的六项（侧车命令 / dpi / 每批页数 / 单批超时 / 识别运行时 / 识别环境）。
-    expect(labels.length).toBe(40);
+    // 41 = 34 原有（28 + 输出预算 + 术语表 + 有道四项）+ 扫描页识别小节
+    // 的七项（侧车命令 / dpi / 每批页数 / 单批超时 / 模型档位 / 识别运行时 /
+    // 识别环境）。
+    expect(labels.length).toBe(41);
     for (const row of labels) {
       expect(enFtl.get(row.id)!.has("value"), `en-US ${row.id} 应写 .value`).toBe(true);
       expect(zhFtl.get(row.id)!.has("value"), `zh-CN ${row.id} 应写 .value`).toBe(true);
     }
   });
 
-  it("22 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
+  it("31 个 menuitem 两语言都写 .label（XUL menuitem 只渲染 label 属性）", () => {
     const items = l10nBindings().filter((r) => r.tag === "menuitem");
-    // 29 = 9 引擎项（含有道与有道免密钥）+ 10 个 AI 服务商预设项 + 5 个
-    // Bing 区域项 + 5 个有道翻译领域项。
-    expect(items.length).toBe(29);
+    // 31 = 9 引擎项（含有道与有道免密钥）+ 10 个 AI 服务商预设项 + 5 个
+    // Bing 区域项 + 5 个有道翻译领域项 + 模型档位的两项（完整 / 轻量）。
+    expect(items.length).toBe(31);
     for (const row of items) {
       expect(enFtl.get(row.id)!.has("label"), `en-US ${row.id} 应写 .label`).toBe(true);
       expect(zhFtl.get(row.id)!.has("label"), `zh-CN ${row.id} 应写 .label`).toBe(true);

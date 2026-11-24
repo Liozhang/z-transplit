@@ -1575,12 +1575,20 @@ PROBE_CMDS.verifyPdf = async function (attachmentID) {
  * NOTE: Zotero.Prefs.get/set(pref, global) — the second arg is a PATH MODE flag
  * (true = pref is already a full path), NOT "if missing". With a full path you
  * MUST pass true, or the API prefixes "extensions.zotero." onto it.
+ *
+ * 键可以写短名（pdfParser.scan.models）也可以写全名
+ * （extensions.zotero.ztransplit.pdfParser.scan.models）：写全名时不再加前缀。
+ * 不加这个判断的后果是静默写错键——全名被再加一次前缀，写和回读的都是那个双
+ * 前缀的假键，探针回报 after 与 stuck 全绿，而真正的偏好一个字节都没动
+ * （2026-11-24 实测：档位验证因此白跑了一整轮 accurate 推理）。
  */
 PROBE_CMDS.setPref = async function (pair) {
   if (!pair || !pair.includes("=")) return { error: "pass key=value" };
   const [k, ...rest] = pair.split("=");
   const v = rest.join("=");
-  const full = "extensions.zotero.ztransplit." + k;
+  const full = k.startsWith("extensions.zotero.ztransplit.")
+    ? k
+    : "extensions.zotero.ztransplit." + k;
   const before = Zotero.Prefs.get(full, true);
   if (v === "true" || v === "false") Zotero.Prefs.set(full, v === "true", true);
   else if (/^-?\d+$/.test(v)) Zotero.Prefs.set(full, Number(v), true);
