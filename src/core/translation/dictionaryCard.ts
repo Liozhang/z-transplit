@@ -29,6 +29,7 @@
 import { z } from "zod";
 import { getString } from "../../utils/locale";
 import { toErrorMessage } from "../../utils/error";
+import { friendlyTranslateMessage } from "./translateError";
 import { createOpenAICompatClient } from "../ai/openaiCompat";
 import { getLanguageName } from "../tool/language";
 import { getEngineConfig, createTranslator } from "./translationEngines";
@@ -155,7 +156,10 @@ export async function lookupWord(
   }
 
   throw new Error(
-    getString("dictionary-error-all-failed", { error: toErrorMessage(lastError) }),
+    getString("dictionary-error-all-failed", {
+      // 原文可能是 "HTTP 401: …" 这类原始报错——分类后再作为细节上墙。
+      error: friendlyTranslateMessage(toErrorMessage(lastError)),
+    }),
   );
 }
 

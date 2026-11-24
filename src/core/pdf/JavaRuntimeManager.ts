@@ -55,6 +55,8 @@ export interface JavaStatus {
   /** True when the resolved java is the plugin-managed JRE. */
   managed?: boolean;
   error?: string;
+  /** java 能运行但主版本低于 11——解析跑不了，设置行据此引导升级。 */
+  tooOld?: boolean;
 }
 
 export interface DownloadProgress {
@@ -1117,9 +1119,21 @@ export async function getJavaStatus(): Promise<JavaStatus> {
     const probe = await execCommand(managed, ["-version"], { timeout: 15000 });
     if (probe.exitCode === 0) {
       const vMatch = probe.stderr.match(/version "([^"]+)"/);
+      const version = vMatch ? vMatch[1] : undefined;
+      // 能跑但太旧（如 Java 8）不能读成「可用」：解析会以
+      // UnsupportedClassVersionError 失败，状态行必须引导升级。
+      if (majorJavaVersion(version) !== undefined && majorJavaVersion(version)! < 11) {
+        return {
+          ready: false,
+          tooOld: true,
+          version,
+          path: managed,
+          managed: true,
+        };
+      }
       return {
         ready: true,
-        version: vMatch ? vMatch[1] : undefined,
+        version,
         path: managed,
         managed: true,
       };
@@ -1137,9 +1151,19 @@ export async function getJavaStatus(): Promise<JavaStatus> {
       const vMatch =
         probe.stderr.match(/version "([^"]+)"/) ||
         probe.stderr.match(/Java\(TM\) SE Runtime Environment.*"([^"]+)"/);
+      const version = vMatch ? vMatch[1] : undefined;
+      if (majorJavaVersion(version) !== undefined && majorJavaVersion(version)! < 11) {
+        return {
+          ready: false,
+          tooOld: true,
+          version,
+          path: systemJava,
+          managed: false,
+        };
+      }
       return {
         ready: true,
-        version: vMatch ? vMatch[1] : undefined,
+        version,
         path: systemJava,
         managed: false,
       };
@@ -1147,6 +1171,19 @@ export async function getJavaStatus(): Promise<JavaStatus> {
   }
 
   return { ready: false, error: getString("err-java-not-found") };
+}
+
+/**
+ * "17.0.1" → 17，"1.8.0_392" → 8（checkHealth 同一套解析逻辑：Java 8 的
+ * 版本串以 1. 开头）。解析不出主版本号时返回 undefined，调用方按「未知，
+ * 不拦截」处理——拦错一个能用的 Java 比放过一个旧的代价高。
+ */
+function majorJavaVersion(version?: string): number | undefined {
+  if (!version) return undefined;
+  const parts = version.split(".");
+  const first = parseInt(parts[0], 10);
+  if (Number.isNaN(first)) return undefined;
+  return first === 1 && parts.length > 1 ? parseInt(parts[1], 10) : first;
 }
 
 const JavaRuntimeManager = {

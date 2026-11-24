@@ -59,6 +59,7 @@ import {
   isJavaMissingCause,
   handleMissingJava,
 } from "../core/pdf/splitview/splitViewFactory";
+import { friendlyTranslateError } from "../core/translation/translateError";
 import {
   findExistingTranslation,
   findTranslationByRelation,
@@ -581,7 +582,7 @@ function injectIntoWindow(win: any): boolean {
         progress.settle(getString("itemtree-launch-done"), 3000);
       } catch (e) {
         safeDebug(`[Z-Transplit] itemTreeMenu bilingual (${mode}) failed: ${e}`);
-        progress.fail("✗ " + toErrorMessage(e), 8000);
+        progress.fail("✗ " + friendlyTranslateError(e), 8000);
       }
     };
     const interleaveItem = mkItem(

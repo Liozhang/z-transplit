@@ -67,6 +67,7 @@ import {
   putCachedTranslation,
 } from "../core/translation/translationCache";
 import { checkTranslationReadiness } from "../core/translation/featureReadiness";
+import { friendlyTranslateError } from "../core/translation/translateError";
 import {
   flattenCardText,
   isSingleWord,
@@ -1225,7 +1226,7 @@ export function mountTranslatePane(
       if (controller.signal.aborted || destroyed) return;
       setState({
         status: "error",
-        error: getString("pane-translate-error", { error: toErrorMessage(e) }),
+        error: getString("pane-translate-error", { error: friendlyTranslateError(e) }),
         result: null,
       });
     }
@@ -1315,7 +1316,7 @@ export function mountTranslatePane(
       if (controller.signal.aborted || destroyed) return;
       setState({
         status: "error",
-        error: getString("pane-translate-error", { error: toErrorMessage(e) }),
+        error: getString("pane-translate-error", { error: friendlyTranslateError(e) }),
         result: null,
         card: null,
       });

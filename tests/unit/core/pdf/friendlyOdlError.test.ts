@@ -110,12 +110,49 @@ describe("friendlyOdlError — 组件 jar 错误的两类文案", () => {
     ).toBe(KEY("odl-error-jar-missing"));
   });
 
-  it("jar 存在但 Java 无法访问时提示检查杀毒软件，而非重新安装", () => {
+  it("jar 存在但 Java 无法访问时给出带路径的不可读文案", () => {
+    // JVM 启动器的原文带路径：文案据此引导排查路径字符（系统代码页外的
+    // 表情符号等），而不只是一句「检查权限」。
     expect(
       friendlyOdlError(
         "Error: Unable to access jarfile C:\\ext\\core\\pdf\\lib\\opendataloader-pdf-cli.jar",
       ),
-    ).toBe(KEY("odl-error-jar-unreadable"));
+    ).toBe(KEY("odl-error-jar-unreadable-path"));
+  });
+
+  it("不带路径的不可读文案（err-jar-load 外壳被截断时）仍归类为不可读", () => {
+    expect(friendlyOdlError("无法读取解析组件 jar 文件")).toBe(
+      KEY("odl-error-jar-unreadable"),
+    );
+  });
+
+  it("损坏的组件文件指向重新下载，而不是透出 JVM 原文", () => {
+    expect(
+      friendlyOdlError(
+        "java exited with code 1\nstderr: Error: Invalid or corrupt jarfile C:\\x\\opendataloader-pdf-cli.jar",
+      ),
+    ).toBe(KEY("odl-error-jar-corrupt"));
+  });
+
+  it("解析被关闭时指向设置入口，而不是透出英文提示", () => {
+    expect(
+      friendlyOdlError(
+        "OpenDataLoader parsing failed: OpenDataLoader PDF is not enabled. Enable it in Z-Transplit preferences.",
+      ),
+    ).toBe(KEY("odl-error-parse-disabled"));
+  });
+
+  it("解析超时与翻译端点超时分开：解析超时给调大设置的指引", () => {
+    expect(friendlyOdlError("OpenDataLoader parsing timed out (300s).")).toBe(
+      KEY("odl-error-parse-timeout"),
+    );
+    expect(friendlyOdlError("Parse timed out (300s)")).toBe(
+      KEY("odl-error-parse-timeout"),
+    );
+    // 翻译端点的超时措辞不同，仍归网络类。
+    expect(friendlyOdlError("Request timed out after 30000ms")).toBe(
+      KEY("odl-error-network"),
+    );
   });
 
   it("仅提到 jar 字样的运行时错误不再误报组件缺失", () => {

@@ -1196,6 +1196,13 @@
               { version: (status && status.version) || "?" },
             ),
           );
+        } else if (status && status.tooOld) {
+          // java 能运行但低于 11：解析必失败，不能读成「可用」。
+          setJavaStatusText(
+            fillJavaTemplate(javaStrings.tooOld, {
+              version: (status && status.version) || "?",
+            }),
+          );
         } else {
           // 探测失败的原因串多为英文 JVM 输出，不上墙；通用文案引导下一步。
           setJavaStatusText(javaStrings.missing);
@@ -1270,6 +1277,9 @@
     );
     javaStrings.readySystem = javaString(
       "ztransplit-pref-string-java-status-ready-system",
+    );
+    javaStrings.tooOld = javaString(
+      "ztransplit-pref-string-java-status-too-old",
     );
     javaStrings.missing = javaString(
       "ztransplit-pref-string-java-status-missing",
@@ -1648,11 +1658,16 @@
       .then(function (status) {
         if (status && status.ready) {
           // 用机器上已有的 Python 时说明白：依赖装在用户自己的环境里
-          setScanEnvStatusText(
+          var text =
             status.pythonSource === "system"
               ? scanEnvStrings.readySystem
-              : scanEnvStrings.ready,
-          );
+              : scanEnvStrings.ready;
+          // 兼容模式（自检时发现本机 oneDNN 加速跑不通，已关掉）要说出来：
+          // 识别照常，只是不走加速。藏在状态里不说，用户只会觉得"变慢了"。
+          if (status.inferenceMode === "no-mkldnn") {
+            text += scanEnvStrings.readyCompat;
+          }
+          setScanEnvStatusText(text);
         } else if (status && status.error) {
           setScanEnvStatusText(String(status.error));
         } else {
@@ -1722,6 +1737,7 @@
     scanEnvStrings.btnInstalling = javaString("ztransplit-pref-string-scan-env-installing");
     scanEnvStrings.ready = javaString("ztransplit-pref-string-scan-env-ready");
     scanEnvStrings.readySystem = javaString("ztransplit-pref-string-scan-env-ready-system");
+    scanEnvStrings.readyCompat = javaString("ztransplit-pref-string-scan-env-ready-compat");
     scanEnvStrings.notReady = javaString(
       "ztransplit-pref-string-scan-python-status-not-installed",
     );

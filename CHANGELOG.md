@@ -100,9 +100,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rewritten by the translator.
 - Cancellation now takes effect between pages on the per-page translation path
   (previously a cancel waited for the whole document to finish translating).
+- The recognition model weights now come in two sizes, selectable from the
+  settings pane. The default ("Full") is unchanged and keeps every sub-model
+  at its largest tier — text, formulas, tables and region detection, about
+  1.86 GB of weights, the slow option. The new "Light" tier keeps every model
+  under 100 MB and downloads only three of them (PP-DocLayout-M,
+  PP-OCRv6_small_det, PP-OCRv6_small_rec — 52.7 MB on disk measured). A
+  direct A/B on one scanned page — same image, same machine, only the model
+  names and the three sub-pipeline switches differing — came back with the
+  same number of text lines and the same text as the full tier (28 lines,
+  identical), with the structure and OCR stages dropping from 353 to 51
+  seconds, about seven times faster. The cost is real and is why the full
+  tier stays the default: there is no usable formula or table model under
+  100 MB, so the light tier turns those two sub-pipelines off entirely
+  (formulas come back as ordinary text lines — the content survives, the
+  LaTeX does not; tables are recorded as regions only) and its layout blocks
+  are coarser (10 against 15 on the same page), which makes reading order
+  and font-size estimates one notch rougher. Region detection is off too,
+  which costs nothing because the sidecar never consumed its output. The
+  tier is a new preference (`pdfParser.scan.models`), is passed to the
+  sidecar as `--models`, is recorded in `--selftest`'s output as `modelTier`
+  and in each batch's diagnostics, and applies to recognition runs started
+  after the change — a batch in flight keeps the tier it launched with.
+  Verified end to end on a real machine with a 56-page scanned document: the
+  light tier recognized 54 text lines across the six scanned pages, and the
+  finished translated attachment carries that content in the target language
+  (the whole document came out at 7423 target-language characters). A second
+  run reproduced the per-page line counts and coverage figures exactly, and
+  the full tier still builds all twelve models and passes its self-test.
+- A first cut of the light tier passed its unit test and failed on the real
+  machine at the first step of the self-test: the two engines were built
+  from one merged parameter dict, and `use_formula_recognition` /
+  `use_table_recognition` / `use_region_detection` (plus the layout model
+  name) are `PPStructureV3` arguments that the line-level `PaddleOCR`
+  rejects outright with "Unknown argument". The sidecar now builds the two
+  parameter sets separately — `_structure_model_kwargs` for the structure
+  pipeline, `_ocr_model_kwargs` for the OCR pipeline — and only the names
+  the second one accepts are handed to it.
 
 ### Changed
 
+- The recognition model weights now live inside the plugin's own directory
+  instead of the user's home. PaddleX caches models under
+  `~/.paddlex/official_models` by default, which the plugin neither owns nor
+  cleans: uninstalling the recognition environment left hundreds of
+  megabytes behind, moving the Zotero data directory did not move the
+  weights, and another PaddleX user on the same machine shared the cache.
+  The sidecar now redirects PaddleX's cache root
+  (`PADDLE_PDX_CACHE_HOME`) to a `models/` directory next to itself, i.e.
+  `ztransplit/scan-sidecar/models` under the data directory, so the whole
+  recognition stack — script, environment marker, weights — travels with the
+  data directory, is backed up with it, and is removed in one step by
+  "Remove recognition environment". `--selftest` reports the directory it
+  used, so the location is visible at install time.
 - Scanned-page recognition now uses a Python that is already on the machine when
   there is a usable one, instead of always downloading the plugin's own runtime.
   The first cut of this looked done and passed every unit test, and was still
@@ -129,6 +179,116 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **User-facing failure copy now follows one shape — what happened, the
+  likely cause, and what to do next.** Roughly forty messages across the
+  translation engines, the PDF pipeline, the Java and recognition-environment
+  installers, the reader pane, bilingual reading and the dictionary chain
+  gained a cause and an actionable next step pointing at an entry that
+  actually exists (a setting row, a button, a menu item). Several guidance
+  texts had tested wrong against their real causes: the "unreadable parsing
+  component" dialog suggested reinstalling the plugin, which cannot fix a
+  file Java cannot open; the "missing component" dialog on a slim install
+  suggested reinstalling instead of "Download / repair…"; a recognized-but-
+  failed scan batch told users to install a recognition environment that was
+  already installed (the configured/uninstalled cases are now told apart via
+  the sidecar command pref, and a fully rotated page set gets its own
+  message); parse timeouts and translation-endpoint timeouts shared one
+  bucket, so the advice to "raise the parse timeout" fired for network
+  failures too.
+- **Six messages lost their `$` in the Fluent placeholder and rendered the
+  raw braces to users** — "Install failed: {ztransplit-detail}", "Detected
+  Java {ztransplit-version}, but…", the batch-translation progress lines and
+  their cache suffix, in both locales. A duplicate `err-jar-load` id, defined
+  twice with different texts across two files (the losing copy was also
+  broken), is now defined once. A new unit gate
+  (`tests/unit/locale/ftlMessages.test.ts`) fails on `$`-less placeholders,
+  on duplicate ids across locale files, and on zh-CN/en-US key drift per
+  file, so none of these three shapes can ship silently again.
+- **Raw error text is now classified before it reaches the screen** at the
+  reader translate pane, the bilingual progress line, the bilingual and
+  item-tree failure lines, and dictionary lookups: "HTTP 401: {response
+  body}" becomes the key/rate-limit/server-error/network/not-configured/
+  model-returned-garbage copy with the raw text kept in a truncated detail.
+  The classifier is the settings pane's "Test connection" taxonomy promoted
+  into a shared module (`core/translation/translateError`) that
+  `friendlyOdlError` also builds on, so the two can no longer drift. The
+  split-translation readiness error no longer leaks internal pref keys
+  (`translate.deepl.apiKey`) — it names the gap in words. The unreadable-
+  component message now carries the jar path from the JVM launcher output,
+  the one signal that separates a path-character problem (emoji beyond the
+  system code page) from a permissions problem.
+- **The Java status row no longer reads an outdated runtime as "available".**
+  A Java that runs but is older than 11 fails every parse with an
+  `UnsupportedClassVersionError`; the row now reports the detected version
+  and points at "Install / repair…". Java terminology in user copy is
+  unified to "Java runtime" (运行库) and the portable runtime download size
+  to ~40MB (the pane said 45MB in one place and 40MB in two others).
+
+- **Scanned pages are recognized again — the empty result was the plugin's
+  protocol reader, not the recognition engine.** The sidecar reports every
+  text line's box as a flat array `[x0, y0, x1, y1]`, while the plugin's box
+  normalizer only accepted the object form `{x0, y0, x1, y1}`. Every line
+  therefore failed the "has a box" check and was dropped silently: the
+  sidecar's `result.json` held 28 lines on page one, the plugin received
+  zero, the page looked empty and no warning was recorded anywhere — the
+  coverage figure still came from the layout regions, so nothing looked
+  broken either. The same defect dropped formulas, tables and figure
+  regions, since they share the normalizer. The unit tests had never caught
+  it because their fixtures use the object shape, which no real sidecar has
+  ever emitted. The normalizer now accepts the array form (and four-point
+  polygons, the shape PaddleX's `dt_polys` / `rec_boxes` natively use, which
+  the Python side already handled), and the regression tests use the
+  sidecar's real shape. Verified on the affected machine: with the plugin's
+  own conversion chain fed the sidecar's real output, page one yields 15
+  text paragraphs and page two 3 (previously 0); a real-machine run through
+  the QA harness persists 28 recognized lines on page one and 5 on page two
+  where it previously persisted none, and the full pipeline then produces a
+  translated attachment whose text is that recognized content in the target
+  language.
+- Recognition no longer fails outright on processors whose oneDNN build
+  cannot convert a fused instruction's PIR attributes. PaddleX accelerates
+  CPU inference with mkldnn by default; on such a processor the fusion pass
+  emits an instruction whose attribute conversion is unimplemented
+  (`ConvertPirAttribute2RuntimeAttribute not support
+  [pir::ArrayAttribute<pir::DoubleAttribute>]`), so both inference paths
+  raised inside `predictor.run()` while the engines still built without a
+  sound — the install's `--selftest` passed and the failure only surfaced
+  per page. Disabling mkldnn fixes it (verified on the affected machine: a
+  page that recognized nothing came back with 28 text lines); turning off
+  the new IR does not, because the new executor converts the program to PIR
+  either way. With mkldnn off, the layout stage also segfaults on
+  full-size pages, so in compatibility mode it runs on a copy scaled to
+  1600 px on the long side (block boxes are mapped back to full
+  resolution). The sidecar now probes one small image through both engines
+  during `--selftest`, falls back to the compatibility mode when that
+  signature appears, and reports the mode that works, which the install
+  records in `env.json`; the sidecar reads it at startup, and if a page
+  still hits the signature at runtime it records the mode and restarts
+  itself in compatibility mode, so later batches start in it directly. The
+  settings pane's status line says when compatibility mode is active,
+  because recognition is somewhat slower without the acceleration.
+- The recognition sidecar now reads PaddleX 3.x results correctly. The
+  extraction path had never run against a real engine (every predict raised
+  first), and once it did, three schema mismatches surfaced: the code read
+  the result objects' `.json` property, which wraps the fields in an extra
+  `{"res": ...}` layer, while the objects themselves are the dicts that
+  carry the fields; layout blocks are `LayoutBlock` objects with `label` /
+  `bbox` / `content` attributes, not dicts with `block_label` /
+  `block_bbox` / `block_content` keys; and `rec_boxes` arrives as a numpy
+  array of four-point polygons, which the box normalizer did not accept, so
+  every text line was dropped for want of a box and only the layout blocks'
+  text survived. A fourth latent defect sat next to them: the array handed
+  to the engines could be read-only, which the layout stage's in-place
+  region masking rejects. Together these turned a successful predict into a
+  page with no lines.
+- The per-batch recognition timeout default is raised from 10 to 30
+  minutes. Every batch is a fresh sidecar process that loads both engines
+  before the first page (about three minutes on the affected machine), and
+  compatibility mode has no acceleration, so a two-page batch measured 682
+  seconds there — the old default killed it mid-batch and the failure then
+  surfaced as "the recognition environment is not ready", which pointed at
+  the wrong thing. The preference still accepts 30–3600 seconds, and a
+  timed-out batch is recorded as failed as before.
 - Two defects that made the recognition paths unrunnable on Windows, both found
   by review after the runtime distribution and one-click install landed. First,
   the shared process runner prepended the JVM's `-Dfile.encoding=UTF-8` options

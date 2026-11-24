@@ -1381,7 +1381,39 @@
         <description
           class="ztransplit-desc"
           data-l10n-id="preferences-ztransplit-pdf-scan-timeout-desc"
-        >一批页面的最长识别时间，可填 30–3600，默认 600。超时的批按失败记账（该批页面保持原文），不影响已完成的批次。</description>
+        >一批页面的最长识别时间，可填 30–3600，默认 1800。超时的批按失败记账（该批页面保持原文），不影响已完成的批次。</description>
+      </vbox>
+
+      <hbox class="ztransplit-row" align="center">
+        <label
+          value="模型档位"
+          control="ztransplit-pref-scan-models"
+          data-l10n-id="preferences-ztransplit-pdf-scan-models"
+        />
+        <menulist
+          id="ztransplit-pref-scan-models"
+          native="true"
+          preference="extensions.zotero.ztransplit.pdfParser.scan.models"
+        >
+          <menupopup>
+            <menuitem
+              value="accurate"
+              label="完整（公式与表格）"
+              data-l10n-id="preferences-ztransplit-pdf-scan-models-accurate"
+            />
+            <menuitem
+              value="light"
+              label="轻量（100MB 以内）"
+              data-l10n-id="preferences-ztransplit-pdf-scan-models-light"
+            />
+          </menupopup>
+        </menulist>
+      </hbox>
+      <vbox>
+        <description
+          class="ztransplit-desc"
+          data-l10n-id="preferences-ztransplit-pdf-scan-models-desc"
+        >「完整」用各子模型的最大档：识别文字、公式与表格，整套模型约 1.86 GB，速度较慢。「轻量」把每个模型都控制在 100MB 以内，只下载三个模型、磁盘合计约 53 MB，实测快约 7 倍、文字内容完全一致，但不识别公式与表格（公式按普通文字行认出，表格只登记区域）。切换后对之后新开始的识别生效。</description>
       </vbox>
 
       <!-- 识别运行时（侧车用的 Python）：按平台自动下载，字节过 SHA-256
@@ -1540,13 +1572,17 @@
       data-l10n-id="preferences-ztransplit-pdf-java-status-ready-system"
     >Java 运行库可用：{version}（系统安装）。</label>
     <label
+      id="ztransplit-pref-string-java-status-too-old"
+      data-l10n-id="preferences-ztransplit-pdf-java-status-too-old"
+    >检测到 Java {version}，但解析需要 Java 11 或更高版本。请点「安装 / 修复…」自动安装较新版本。</label>
+    <label
       id="ztransplit-pref-string-java-status-missing"
       data-l10n-id="preferences-ztransplit-pdf-java-status-missing"
-    >未检测到可用的 Java 运行库。点「安装 / 修复…」自动下载便携版（约 45MB，安装到数据目录，无需管理员权限）。</label>
+    >未检测到可用的 Java 运行库。点「安装 / 修复…」自动下载便携版（约 40MB，安装到数据目录，无需管理员权限）。</label>
     <label
       id="ztransplit-pref-string-java-status-error"
       data-l10n-id="preferences-ztransplit-pdf-java-status-error"
-    >检测失败：{detail}</label>
+    >检测失败：{detail}。请稍后再点「检测状态」重试；仍失败请查看调试输出。</label>
     <label
       id="ztransplit-pref-string-java-status-nobundle"
       data-l10n-id="preferences-ztransplit-pdf-java-status-nobundle"
@@ -1631,6 +1667,10 @@
       id="ztransplit-pref-string-scan-env-ready-system"
       data-l10n-id="preferences-ztransplit-pdf-scan-env-ready-system"
     >已就绪（使用机器上已有的 Python），无需再填命令</label>
+    <label
+      id="ztransplit-pref-string-scan-env-ready-compat"
+      data-l10n-id="preferences-ztransplit-pdf-scan-env-ready-compat"
+    >。兼容模式：本机处理器不支持 oneDNN 加速，已自动关掉，识别速度略慢</label>
     <label
       id="ztransplit-pref-string-scan-python-status-ready-system"
       data-l10n-id="preferences-ztransplit-pdf-scan-python-status-ready-system"

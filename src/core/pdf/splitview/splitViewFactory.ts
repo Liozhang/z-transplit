@@ -63,6 +63,12 @@ import {
 // 避免对本地化/被重包装过的错误文本做正则猜测。纯 TS 类，无宿主依赖。
 import { PdfParseError } from "../PdfParseError";
 import { classifyJarError } from "../jarErrorKind";
+import {
+  classifyHttpMessage,
+  classifyNetworkMessage,
+  classifyNotConfiguredMessage,
+  friendlyTranslateError,
+} from "../../translation/translateError";
 import { config } from "../../../../package.json";
 import {
   addTrackedListener,
@@ -762,24 +768,11 @@ export function friendlyOdlError(msg: string): string {
   // HTTP status first: 401/403 (bad key) and 429 (quota/rate) have dedicated
   // copy; other HTTP failures keep the code plus a short response excerpt.
   // Before this, all HTTP errors fell through to the raw `HTTP 401: …` text.
-  const http = /\bHTTP\s+(\d{3})\b/.exec(msg);
-  if (http) {
-    const code = Number(http[1]);
-    if (code === 401 || code === 403) {
-      return getString("odl-error-http-auth", { code });
-    }
-    if (code === 429) {
-      return getString("odl-error-http-rate", { code });
-    }
-    return getString("odl-error-http-other", {
-      code,
-      detail: msg.slice(0, 100),
-    });
-  }
+  const http = classifyHttpMessage(msg);
+  if (http) return http;
   if (JAVA_MISSING_RE.test(msg)) {
     return getString("odl-error-java-missing");
   }
-  const m = msg.toLowerCase();
   // Component errors, by signature — the old blanket `includes("jar")` rule
   // rewrote every java.lang.* stack trace that merely mentioned a jar into
   // 「解析组件缺失，请重新安装插件」, and its reinstall advice could not fix
@@ -792,7 +785,23 @@ export function friendlyOdlError(msg: string): string {
     return getString("odl-error-jar-missing");
   }
   if (jarKind === "unreadable") {
+    // JVM 启动器与 err-jar-load 两种原文都带着路径——把它带出来，路径字符
+    // （系统代码页外的表情符号等）导致的问题就能自查，而不是一句
+    // 「检查权限」的死胡同（2026-11-24 实测：这类路径 Java 一律报
+    // Unable to access jarfile，与权限被拒无法区分，只有路径能区分）。
+    const path =
+      /jarfile\s+(.+?)\s*$/i.exec(msg)?.[1] ??
+      /（路径非法）：(.+)（/.exec(msg)?.[1];
+    if (path) {
+      return getString("odl-error-jar-unreadable-path", {
+        path: path.trim(),
+      });
+    }
     return getString("odl-error-jar-unreadable");
+  }
+  // 损坏的组件文件（下载截断、被安全软件改写）走重新下载，重装插件修不了。
+  if (/invalid or corrupt jarfile/i.test(msg)) {
+    return getString("odl-error-jar-corrupt");
   }
   // XPCOM nsIFile / nsIError file-path failures — replace the raw
   // `Component returned failure code: 0x... [nsIFile.initWithPath]` string
@@ -800,28 +809,22 @@ export function friendlyOdlError(msg: string): string {
   if (/nsifile\.|ns_error_file/i.test(msg)) {
     return getString("odl-error-file-path");
   }
-  if (
-    m.includes("网络") ||
-    m.includes("網路") ||
-    m.includes("network") ||
-    m.includes("timeout") ||
-    // "timed out" — backendSelector already matches both spellings; fetch/XHR
-    // errors usually carry the two-word form.
-    m.includes("timed out") ||
-    m.includes("连接") ||
-    m.includes("連線")
-  )
-    return getString("odl-error-network", { detail: msg.slice(0, 100) });
+  // 解析被设置关闭（PdfParseError 的英文提示原文上墙会劝退人）。
+  if (/pdf parsing is disabled|not enabled\b.*enable it in/i.test(msg)) {
+    return getString("odl-error-parse-disabled");
+  }
+  // 解析超时单独成类（调大设置或分批翻译）；翻译端点的 "timed out" 与它
+  // 措辞不同（"Request timed out"），仍走下面的网络类，不会误入这里。
+  if (/opendataloader parsing timed out|parse timed out/i.test(msg)) {
+    return getString("odl-error-parse-timeout");
+  }
+  const m = msg.toLowerCase();
+  const network = classifyNetworkMessage(msg);
+  if (network) return network;
   // Match the localized engine-guard text too: the engine emits FTL strings,
   // so matching only the older Chinese wording would miss on en/zh-TW.
-  if (
-    m.includes("翻译未配置") ||
-    m.includes("翻譯未設定") ||
-    m.includes("未配置") ||
-    m.includes("not configured") ||
-    m.includes("no ai provider")
-  )
-    return getString("odl-error-not-configured");
+  const notConfigured = classifyNotConfiguredMessage(msg);
+  if (notConfigured) return notConfigured;
   if (m.includes("解析未返回") || m.includes("未提取到任何文本"))
     return getString("odl-error-parse-empty", { detail: msg });
   if (msg.length > 200) return msg.slice(0, 200) + "…";
@@ -1187,7 +1190,7 @@ async function launchBilingualFromReader(reader: any, mode: "interleave" | "tran
       progress.settle(getString("itemtree-launch-done"), 3000);
     } catch (e: any) {
       safeDebug("[Z-Transplit] bilingual reader menu launch failed: " + e);
-      progress?.fail("✗ " + toErrorMessage(e), 8000);
+      progress?.fail("✗ " + friendlyTranslateError(e), 8000);
       await stopBilingualSession();
     }
   } finally {

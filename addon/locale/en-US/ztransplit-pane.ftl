@@ -28,7 +28,7 @@ pane-translate-refresh = Refresh selection
 pane-translate-placeholder = Select text in the PDF reader and it will appear here.
 pane-translate-empty-selection = The current reader has no selected text. Select some, then click "Refresh selection".
 pane-translate-no-reader = No active reader detected: open a PDF first, then use this pane.
-pane-translate-selection-unsupported = This Zotero version does not expose the reader selection API (_selectionRanges), so the selection cannot be read. Please upgrade to Zotero 10.
+pane-translate-selection-unsupported = This Zotero version does not expose the reader selection API, so the selection cannot be read. Please upgrade to Zotero 10 or later.
 
 ## Block 2 — language bar
 pane-translate-lang-auto = Detect automatically
@@ -43,12 +43,12 @@ pane-translate-translating = Translating…
 pane-translate-copy = Copy
 pane-translate-copied = Copied
 pane-translate-retry = Retry
-pane-translate-copy-failed = Copy failed: { $error }
+pane-translate-copy-failed = Copy failed ({ $error }). You can select the translation and copy it manually.
 pane-translate-error = Translation failed: { $error }
-pane-translate-error-empty = Empty translation: the service returned nothing usable. Try again, or pick a different target language.
+pane-translate-error-empty = Empty translation: the service returned nothing usable. Try again or pick a different target language; for the AI engine, raise the single-request output limit in the settings and retry.
 pane-translate-error-service = Translation service unavailable: could not load the engine module ({ $error }). Restart Zotero and try again; if it still fails, check Zotero's debug output.
-pane-translate-error-not-ready = Translation is not ready: { $reason }. Complete it under Edit ▸ Settings ▸ Z-Transplit ▸ Engine and try again.
-pane-translate-error-too-long = The selection is { $count } characters, above the { $max }-character limit per request. Narrow the selection and try again.
+pane-translate-error-not-ready = Translation is not ready: { $reason }. Complete it under Settings → Z-Transplit → Engine and try again.
+pane-translate-error-too-long = The selection is { $count } characters, above the { $max }-character limit per request. Narrow the selection, or raise the per-request character limit in the settings.
 
 ## Single-word lookup (dictionary card) and the recent-words chip strip
 pane-translate-lookup-action = Look up
@@ -102,7 +102,7 @@ bilingual-block-failed = Translation failed
 bilingual-retry = Retry
 bilingual-sdt-loading = Preparing the document structure…
 bilingual-sdt-unavailable = Bilingual reading requires the Zotero 10 reading mode. Still available here: side-by-side split view and full-text translation to attachment.
-bilingual-sdt-missing = The document-structure session could not be established; bilingual reading is unavailable. The split view and full-text translation remain available.
+bilingual-sdt-missing = The document-structure session could not be established; bilingual reading is unavailable. Reopen this PDF and try again; the split view and full-text translation remain available.
 bilingual-sdt-unpack-failed = The document structure is unavailable ({ $error }). The split view and full-text translation remain available.
 bilingual-toolbar-tooltip = Toggle bilingual overlay
 bilingual-section-title = Bilingual reading
@@ -117,15 +117,14 @@ readaloud-next = Next sentence
 readaloud-stop = Stop
 readaloud-unsupported = Read aloud is unavailable in this environment (no speech interface). Install a system voice package and retry.
 readaloud-no-content = There is no readable text.
-readaloud-start-failed = Read aloud failed to start: { $error }
+readaloud-start-failed = Read aloud failed to start: { $error }. Install a system voice for the target language and retry.
 
 # Full-text pipeline progress / errors (batch translate + ODL client).
-pdf-progress-batch-start = Batch translating {count} paragraphs ({chunks} chunk groups){cache}…
-pdf-progress-batch-cache = , {hit} from cache
-pdf-progress-batch-progress = Batch translation: {done}/{total} chunk groups
+pdf-progress-batch-start = Batch translating { $count } paragraphs ({ $chunks } chunk groups){ $cache }…
+pdf-progress-batch-cache = , { $hit } from cache
+pdf-progress-batch-progress = Batch translation: { $done }/{ $total } chunk groups
 pdf-warn-vlm-unconfigured = Formula vision extraction unavailable: no OpenAI-compatible endpoint configured (translate.custom.apiUrl).
 err-vlm-empty = Vision model returned an empty result
-err-java-unavailable = Java unavailable: {detail}
-err-parse-no-pages = Parsing finished but produced no pages
-err-java-too-old = Detected Java {version}, but OpenDataLoader requires Java 11+. Install a newer version from https://adoptium.net.
-err-jar-load = Failed to load JAR file ({path}): {message}
+err-java-unavailable = Java unavailable: { $detail }
+err-parse-no-pages = Parsing finished but produced no pages: the file may be empty, corrupt, or encrypted.
+err-java-too-old = Detected Java { $version }, but parsing requires Java 11 or later. Click "Install / repair…" next to the Java runtime in the settings to install one automatically, or install a newer version from https://adoptium.net.

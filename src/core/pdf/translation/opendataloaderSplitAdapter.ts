@@ -338,14 +338,37 @@ function assertEngineReady(): void {
   if (readiness.ready) return;
   // Localize the gap through the same FTL keys the item pane uses
   // (readiness-reason-*, see src/ui/translatePane.ts#runTranslation) — a bare
-  // message id in a user-facing error is a bug, not extra information.
+  // message id in a user-facing error is a bug, not extra information. 内部
+  // 设置名（translate.deepl.apiKey 之类）不上墙：用户在设置里找不到这个名字，
+  // 文案本身已经说明了缺什么。
   const gaps = readiness.missing
-    .map((m) => `${m.prefKey}（${getString(m.reasonKey)}）`)
+    .map((m) => getString(m.reasonKey))
     .filter(Boolean)
     .join("；");
   throw new Error(getString("odl-error-engine-not-ready", {
     gaps: gaps || getString("readiness-reason-unknown"),
   }));
+}
+
+/**
+ * 识别零产出时的原因文案。
+ *
+ * 侧车命令没填时，管线把整批记为不可用而不是抛错——所以「识别环境尚未
+ * 安装」与「已安装但这次没产出」在账目里是同一个原因（sidecar-unavailable），
+ * 只能用「识别侧车命令」这一设置项是否填写来区分：没填 → 引导一键安装；
+ * 填了 → 侧车跑过却没有产出，引导重试。跳过的页全是旋转页时另有专门文案。
+ */
+function scanZeroOutputReason(rotatedSkipped: number, skipped: number): string {
+  if (skipped > 0 && rotatedSkipped >= skipped) {
+    return getString("scan-error-rotated-skipped");
+  }
+  const sidecarConfigured =
+    String(getPrefDynamic("pdfParser.scan.sidecarPath") || "").trim() !== "";
+  return getString(
+    sidecarConfigured
+      ? "scan-error-sidecar-failed"
+      : "scan-error-sidecar-unconfigured",
+  );
 }
 
 /**
@@ -505,6 +528,8 @@ export async function translateAndSplitWithOpenDataLoader(
   // OCR 页一页都没认出来时的原因归类：最终 0 段的报错文案据此选择——
   // 扫描件走 OCR 却零产出，报"OpenDataLoader 不识别扫描件"会误导用户。
   let scanRecognized = -1; // -1 = 没有 OCR 页（纯数字文档）
+  let scanSkipped = 0;
+  let scanRotatedSkipped = 0;
   // 跨会话续跑状态：整篇运行成功产出后清理；页码范围运行保留（后续范围
   // 还能接着用，不必重新认已译的页）。
   let runState: ScanRunState | null = null;
@@ -524,6 +549,8 @@ export async function translateAndSplitWithOpenDataLoader(
         persistPage: (page) => runState!.save(page),
       });
       scanRecognized = scan.summary.recognized;
+      scanSkipped = scan.summary.skipped;
+      scanRotatedSkipped = scan.summary.skipReasons.rotated;
       const merged = mergeScannedAssemblies({
         assemblies: baseAssemblies,
         pageSizes: basePageSizes,
@@ -545,9 +572,9 @@ export async function translateAndSplitWithOpenDataLoader(
         // 扫描阶段被取消：不等翻译，直接走统一取消闸口。
         throw new TranslationCancelledError();
       }
-      if (scanRecognized === 0 && scan.summary.skipped > 0) {
+      if (scanRecognized === 0 && scanSkipped > 0) {
         // 一页都没认出来：把原因讲明白，而不是让用户对着"0 段"发呆。
-        onProgress(getString("scan-error-sidecar-unconfigured"));
+        onProgress(scanZeroOutputReason(scanRotatedSkipped, scanSkipped));
       }
     } else {
       scanRecognized = 0;
@@ -560,10 +587,12 @@ export async function translateAndSplitWithOpenDataLoader(
     0,
   );
   if (totalParagraphs === 0) {
-    // 有 OCR 页却零产出：报侧车未就绪（带配置指引），而不是"解析未提取到
+    // 有 OCR 页却零产出：按识别账目分情况说清楚，而不是"解析未提取到
     // 文本"——后者在这个场景下等于让用户去检查一个已经尽力了的解析器。
-    if (ocrPageNumbers.length > 0 && scanRecognized === 0) {
-      throw new Error(getString("scan-error-sidecar-unconfigured"));
+    // 只有「跑过且有页被跳过」才报识别环境的问题；识别被关闭（skipped=0）
+    // 时 parse-no-text 的文案自带开启指引，更贴切。
+    if (ocrPageNumbers.length > 0 && scanRecognized === 0 && scanSkipped > 0) {
+      throw new Error(scanZeroOutputReason(scanRotatedSkipped, scanSkipped));
     }
     if (ocrPageNumbers.length > 0 && scanRecognized > 0) {
       // 侧车认出了页、文档级聚合也有文本，装配却是零段：内容丢在装配环节。

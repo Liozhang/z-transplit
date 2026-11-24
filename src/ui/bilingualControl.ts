@@ -20,6 +20,10 @@
 
 import { safeDebug } from "../utils/logger";
 import { toErrorMessage } from "../utils/error";
+import {
+  friendlyTranslateError,
+  friendlyTranslateMessage,
+} from "../core/translation/translateError";
 import { getString } from "../utils/locale";
 import { getPref, getPrefDynamic, setPref } from "../utils/prefs";
 import { createAbortController } from "../utils/abort";
@@ -274,7 +278,8 @@ async function startSession(
           done: stats.done,
           total: stats.total,
           failed: stats.failed,
-          error: reason,
+          // 原文可能是 "HTTP 401: {整段响应体}"——分类成原因加下一步后再上墙。
+          error: friendlyTranslateMessage(reason),
         }));
       } else {
         state.setProgress(getString("bilingual-progress", {
@@ -707,7 +712,7 @@ export function mountBilingualControl(options: {
       safeDebug("[Z-Transplit] bilingualControl toggle: " + e);
       state.setActive(false);
       state.setStatus(getString("bilingual-sdt-unpack-failed", {
-        error: toErrorMessage(e),
+        error: friendlyTranslateError(e),
       }));
     } finally {
       setStarting(false);

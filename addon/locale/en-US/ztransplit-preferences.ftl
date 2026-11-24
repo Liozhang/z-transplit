@@ -387,8 +387,6 @@ preferences-ztransplit-custom-headers-desc =
     per line. A name collision lets your value win over the built-in ones;
     invalid lines are not saved. Editing them makes affected translations
     re-request (old cache entries no longer match).
-    Optional. The model name to call, e.g. gpt-4o-mini. When empty, the server
-    picks its default model, with no guarantee on translation quality.
 
 ## zotero-pdf-translate
 preferences-ztransplit-pdftranslate-installed =
@@ -427,12 +425,16 @@ preferences-ztransplit-pdf-java-status-ready-managed =
     plugin, inside the data directory).
 preferences-ztransplit-pdf-java-status-ready-system =
     Java runtime available: { $version } (system installation).
+preferences-ztransplit-pdf-java-status-too-old =
+    Detected Java { $version }, but parsing requires Java 11 or later. Click
+    "Install / repair…" to install a newer version automatically.
 preferences-ztransplit-pdf-java-status-missing =
     No usable Java runtime was detected. Click "Install / repair…" to download
-    the portable runtime automatically (about 45MB, installed into the data
+    the portable runtime automatically (about 40MB, installed into the data
     directory, no administrator rights needed).
 preferences-ztransplit-pdf-java-status-error =
-    The check failed: { $detail }
+    The check failed: { $detail }. Click "Check status" again in a moment; if
+    it still fails, check the debug output.
 preferences-ztransplit-pdf-java-status-nobundle =
     The plugin main bundle is not loaded, so the runtime cannot be checked or
     installed here. Restart Zotero; if it still does not recover, reinstall
@@ -469,9 +471,11 @@ preferences-ztransplit-pdf-odl-comp-status-missing =
     directory — no plugin reinstall needed); if the download fails, check
     the network and retry.
 preferences-ztransplit-pdf-odl-comp-status-error =
-    The check failed: { $detail }
+    The check failed: { $detail }. Click "Check status" again in a moment; if
+    it still fails, check the debug output.
 preferences-ztransplit-pdf-odl-comp-download-failed =
-    The download failed: { $detail }
+    The download failed: { $detail }. Check your connection and click
+    "Download / repair…" again.
 preferences-ztransplit-pdf-odl-comp-status-nobundle =
     The plugin main bundle is not loaded, so the component cannot be checked
     or downloaded here. Restart Zotero; if it still does not recover,
@@ -589,10 +593,28 @@ preferences-ztransplit-pdf-scan-batch-desc =
     only once every batch is done.
 preferences-ztransplit-pdf-scan-timeout =
     .value = Per-batch timeout (seconds)
+preferences-ztransplit-pdf-scan-models =
+    .value = Model tier
+preferences-ztransplit-pdf-scan-models-accurate =
+    .label = Full (formulas and tables)
+preferences-ztransplit-pdf-scan-models-light =
+    .label = Light (under 100 MB each)
+preferences-ztransplit-pdf-scan-models-desc =
+    "Full" uses the largest tier of every sub-model: it recognizes text,
+    formulas and tables, needs about 1.86 GB of weights and is the slower
+    option. "Light" keeps every model under 100 MB — three models, about
+    53 MB on disk, measured roughly 7× faster with identical text output —
+    but does not recognize formulas or tables (formulas come back as ordinary
+    text lines, tables are recorded as regions only). The change applies to
+    recognition runs started afterwards.
 preferences-ztransplit-pdf-scan-timeout-desc =
-    The longest one batch may take; accepts 30–3600, default 600. A timed-out
-    batch is recorded as failed (its pages keep the original text) without
-    affecting batches that already finished.
+    The longest one batch may take; accepts 30–3600, default 1800. Every batch
+    is a fresh process that loads the models first (a minute or two) and then
+    recognizes page by page; in compatibility mode (used automatically when
+    this processor cannot run the oneDNN acceleration) there is no speed-up, so
+    ten minutes is not enough on slower machines — hence the half-hour default.
+    A timed-out batch is recorded as failed (its pages keep the original text)
+    without affecting batches that already finished.
 preferences-ztransplit-pdf-scan-python =
     .value = Recognition runtime
 preferences-ztransplit-pdf-scan-python-desc =
@@ -620,6 +642,7 @@ preferences-ztransplit-pdf-scan-env-installing =
     .label = Installing…
 preferences-ztransplit-pdf-scan-env-ready = Ready — no command to fill in
 preferences-ztransplit-pdf-scan-env-ready-system = Ready (using the Python already on this machine) — no command to fill in
+preferences-ztransplit-pdf-scan-env-ready-compat = . Compatibility mode: this processor does not support oneDNN acceleration, so it was turned off and recognition runs somewhat slower
 preferences-ztransplit-pdf-scan-env-repair =
     .label = Repair (reinstall)…
 preferences-ztransplit-pdf-scan-python-check =
@@ -634,7 +657,7 @@ preferences-ztransplit-pdf-scan-python-status-ready-system = Installed: Python {
 preferences-ztransplit-pdf-scan-python-status-checking = Checking the recognition runtime…
 preferences-ztransplit-pdf-scan-python-status-installing = Installing the recognition runtime; progress shows in the Zotero main window. This line refreshes when it finishes.
 preferences-ztransplit-pdf-scan-python-status-nobundle = The plugin's main bundle is not loaded, so the recognition runtime cannot be checked or installed. Restart Zotero; if it stays broken, reinstall the plugin.
-preferences-ztransplit-pdf-scan-python-install-failed = Install failed: {detail}
+preferences-ztransplit-pdf-scan-python-install-failed = Install failed: { $detail }
 
 ## ── Word cards ─────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =

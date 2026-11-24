@@ -339,8 +339,6 @@ preferences-ztransplit-custom-headers-desc =
     可留空。随每个请求额外发送的 HTTP 头，每行一条，格式为「名称: 值」。与
     内置头同名时以这里的值为准；非法行不会写入设置。修改后相关翻译会重新
     请求（不再命中旧缓存）。
-    可留空。要调用的模型名，例如 gpt-4o-mini。留空时由服务端使用默认模型，
-    翻译质量不受保证。
 
 ## zotero-pdf-translate
 preferences-ztransplit-pdftranslate-installed =
@@ -373,10 +371,12 @@ preferences-ztransplit-pdf-java-status-ready-managed =
     Java 运行库可用：{ $version }（插件管理的便携版，位于数据目录）。
 preferences-ztransplit-pdf-java-status-ready-system =
     Java 运行库可用：{ $version }（系统安装）。
+preferences-ztransplit-pdf-java-status-too-old =
+    检测到 Java { $version }，但解析需要 Java 11 或更高版本。请点「安装 / 修复…」自动安装较新版本。
 preferences-ztransplit-pdf-java-status-missing =
-    未检测到可用的 Java 运行库。点「安装 / 修复…」自动下载便携版（约 45MB，安装到数据目录，无需管理员权限）。
+    未检测到可用的 Java 运行库。点「安装 / 修复…」自动下载便携版（约 40MB，安装到数据目录，无需管理员权限）。
 preferences-ztransplit-pdf-java-status-error =
-    检测失败：{ $detail }
+    检测失败：{ $detail }。请稍后再点「检测状态」重试；仍失败请查看调试输出。
 preferences-ztransplit-pdf-java-status-nobundle =
     插件主包未加载，无法检测或安装。请重启 Zotero；仍未恢复时请重新安装本插件。
 
@@ -402,9 +402,9 @@ preferences-ztransplit-pdf-odl-comp-status-ready-bundled =
 preferences-ztransplit-pdf-odl-comp-status-missing =
     未找到解析组件。点「下载 / 修复…」自动从镜像下载（约 24MB，保存到数据目录，无需重新安装插件）；下载失败时请检查网络后重试。
 preferences-ztransplit-pdf-odl-comp-status-error =
-    检查失败：{ $detail }
+    检查失败：{ $detail }。请稍后再点「检查状态」重试；仍失败请查看调试输出。
 preferences-ztransplit-pdf-odl-comp-download-failed =
-    下载失败：{ $detail }
+    下载失败：{ $detail }。请检查网络后再点一次「下载 / 修复…」。
 preferences-ztransplit-pdf-odl-comp-status-nobundle =
     插件主包未加载，无法检查或下载解析组件。请重启 Zotero；仍未恢复时请重新安装本插件。
 
@@ -500,9 +500,22 @@ preferences-ztransplit-pdf-scan-batch-desc =
     短、断点越细；每批结束会记录一次进度，全部批完成后才进入翻译。
 preferences-ztransplit-pdf-scan-timeout =
     .value = 单批超时（秒）
+preferences-ztransplit-pdf-scan-models =
+    .value = 模型档位
+preferences-ztransplit-pdf-scan-models-accurate =
+    .label = 完整（公式与表格）
+preferences-ztransplit-pdf-scan-models-light =
+    .label = 轻量（100MB 以内）
+preferences-ztransplit-pdf-scan-models-desc =
+    「完整」用各子模型的最大档：识别文字、公式与表格，整套模型约 1.86 GB，
+    速度较慢。「轻量」把每个模型都控制在 100MB 以内，只下载三个模型、磁盘
+    合计约 53 MB，实测快约 7 倍、文字内容完全一致，但不识别公式与表格
+    （公式按普通文字行认出，表格只登记区域）。切换后对之后新开始的识别生效。
 preferences-ztransplit-pdf-scan-timeout-desc =
-    一批页面的最长识别时间，可填 30–3600，默认 600。超时的批按失败记账
-    （该批页面保持原文），不影响已完成的批次。
+    一批页面的最长识别时间，可填 30–3600，默认 1800。每批都是一个新进程，
+    要先加载模型（约一两分钟）再逐页识别；兼容模式（本机不支持 oneDNN
+    加速时自动启用）没有加速，慢机器上十分钟不够用，所以默认给到半小时。
+    超时的批按失败记账（该批页面保持原文），不影响已完成的批次。
 preferences-ztransplit-pdf-scan-python =
     .value = 识别运行时
 preferences-ztransplit-pdf-scan-python-desc =
@@ -524,6 +537,7 @@ preferences-ztransplit-pdf-scan-env-installing =
     .label = 正在安装…
 preferences-ztransplit-pdf-scan-env-ready = 已就绪，无需再填命令
 preferences-ztransplit-pdf-scan-env-ready-system = 已就绪（使用机器上已有的 Python），无需再填命令
+preferences-ztransplit-pdf-scan-env-ready-compat = 。兼容模式：本机处理器不支持 oneDNN 加速，已自动关掉，识别速度略慢
 preferences-ztransplit-pdf-scan-env-repair =
     .label = 修复（重装）…
 preferences-ztransplit-pdf-scan-python-check =
@@ -538,7 +552,7 @@ preferences-ztransplit-pdf-scan-python-status-ready-system = 已安装：Python 
 preferences-ztransplit-pdf-scan-python-status-checking = 正在检查识别运行时…
 preferences-ztransplit-pdf-scan-python-status-installing = 正在安装识别运行时，进度显示在 Zotero 主窗口。完成后此处会自动刷新状态。
 preferences-ztransplit-pdf-scan-python-status-nobundle = 插件主包未加载，无法检查或安装识别运行时。请重启 Zotero；仍未恢复时请重新安装本插件。
-preferences-ztransplit-pdf-scan-python-install-failed = 安装失败：{detail}
+preferences-ztransplit-pdf-scan-python-install-failed = 安装失败：{ $detail }
 
 ## ── 词卡 ───────────────────────────────────────────────────────────────────
 preferences-ztransplit-wordcards-enabled =
