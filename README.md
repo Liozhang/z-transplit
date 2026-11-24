@@ -32,7 +32,7 @@ All UI is built with Zotero's native XUL/HTML. No React, no iframe bridge.
 3. Open a PDF — the "Translate" section and the context-menu entries appear.
 
 > The slim installer (the default download) does not bundle the ~24 MB layout-parsing
-> component or the ~43 MB Java runtime: on first use they are downloaded automatically
+> component or the ~40 MB Java runtime: on first use they are downloaded automatically
 > by racing several mirrors concurrently, and the bytes must pass the official SHA-256
 > checksum before anything is installed — no administrator rights needed. For offline
 > environments, grab the `*-full.xpi` from the release page instead.
